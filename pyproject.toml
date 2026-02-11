@@ -1,0 +1,80 @@
+[project]
+name = "celia-clips"
+version = "0.1.0"
+description = "AI-powered podcast clip generator — part of the Celia suite by Inminente"
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+authors = [
+    { name = "Inminente Podcast" },
+]
+keywords = ["podcast", "clips", "ai", "video", "short-form", "viral", "reels", "tiktok", "celia"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: End Users/Desktop",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Video",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+
+dependencies = [
+    "groq>=0.4.0",
+    "typer>=0.9.0",
+    "rich>=13.0.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+    "ffmpeg-python>=0.2.0",
+    "python-dotenv>=1.0.0",
+    "supabase>=2.0.0",
+    "anthropic[vertex]>=0.40.0",
+    "google-genai>=1.0.0",
+]
+
+[project.optional-dependencies]
+asr = [
+    "whisperx @ git+https://github.com/m-bain/whisperX.git",
+    "torch>=2.0.0",
+    "torchaudio>=2.0.0",
+]
+asr-mlx = [
+    "mlx-whisper>=0.4.0",
+]
+vision = [
+    "mediapipe>=0.10.0",
+    "opencv-python>=4.8.0",
+    "numpy>=1.24.0",
+    "pyannote.audio>=3.1.0",
+    "deep-sort-realtime>=1.3.0",
+]
+all = [
+    "celia-clips[asr,asr-mlx,vision]",
+]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-asyncio>=0.21.0",
+    "ruff>=0.1.0",
+    "build",
+    "twine",
+]
+
+[project.urls]
+Homepage = "https://celia.inminente.co"
+Documentation = "https://celia.inminente.co/clips"
+Repository = "https://github.com/inminente/celia-clips"
+Issues = "https://github.com/inminente/celia-clips/issues"
+
+[project.scripts]
+celia = "src.cli:app"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

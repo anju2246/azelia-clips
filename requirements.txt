@@ -1,0 +1,66 @@
+# Celia Clips - Complete Requirements for Mac M3
+# ==================================================
+# Use: pip install -r requirements.txt
+
+# Install package in editable mode (base dependencies)
+-e .
+
+# ============================================
+# Core Dependencies
+# ============================================
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+rich>=13.0.0
+
+# ============================================
+# ASR - Apple Silicon Optimized (MLX-Whisper)
+# ============================================
+mlx-whisper>=0.4.0
+openai-whisper>=20231117  # Fallback for non-MLX
+
+# ============================================
+# Audio Processing (PyTorch with MPS support)
+# ============================================
+torch>=2.0.0
+torchaudio>=2.0.0
+demucs>=4.0.0
+
+# ============================================
+# Vision / Tracking
+# ============================================
+opencv-python>=4.8.0
+numpy>=1.24.0
+
+# ============================================
+# Diarization (requires HuggingFace token)
+# ============================================
+pyannote.audio>=3.1.0
+
+# ============================================
+# LLM Providers
+# ============================================
+groq>=0.4.0
+google-genai>=0.3.0    # Vertex AI
+anthropic>=0.18.0      # Claude via Vertex
+
+# ============================================
+# Database
+# ============================================
+supabase>=2.0.0
+
+# ============================================
+# Web UI - Streamlit (Legacy)
+# ============================================
+streamlit>=1.30.0
+
+# ============================================
+# Web API - FastAPI
+# ============================================
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+
+# ============================================
+# Development / Testing
+# ============================================
+pytest>=7.0.0

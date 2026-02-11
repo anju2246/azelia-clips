@@ -1,0 +1,55 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+
+# Environment files
+.env
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Output
+output/
+clips/
+external_drive
+
+# Video/Audio files (never commit)
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.avi
+*.wav
+*.mp3
+*.ass
+*.srt
+
+# Model cache
+models/
+.cache/
+
+# Transcripts (keep .json examples)
+!examples/*.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.egg-info/
+autoeditingsfc.egg-info/
+
+# Debug/runtime logs
+*.log
+data/jobs.db
+
+# Model weights (auto-downloaded)
+*.pt
