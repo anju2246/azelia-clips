@@ -28,7 +28,6 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "ffmpeg-python>=0.2.0",
     "python-dotenv>=1.0.0",
-    "supabase>=2.0.0",
     "anthropic[vertex]>=0.40.0",
     "google-genai>=1.0.0",
 ]
@@ -63,8 +62,8 @@ dev = [
 [project.urls]
 Homepage = "https://celia.inminente.co"
 Documentation = "https://celia.inminente.co/clips"
-Repository = "https://github.com/inminente/celia-clips"
-Issues = "https://github.com/inminente/celia-clips/issues"
+Repository = "https://github.com/anju2246/celia-clips"
+Issues = "https://github.com/anju2246/celia-clips/issues"
 
 [project.scripts]
 celia = "src.cli:app"
