@@ -37,7 +37,7 @@ class BatchProcessor:
     Process episodes in batch, saving clips directly to external drive.
     
     Structure:
-    episodes/EP###/clips/
+    external_drive/Backup Inminente/EP###/clips/
         ├── clip_01.mp4
         ├── clip_01_caption.txt
         ├── clip_02.mp4
@@ -47,26 +47,39 @@ class BatchProcessor:
     
     def __init__(
         self,
-        external_drive_path: str = "episodes",
+        external_drive_path: str = "external_drive/Backup Inminente",
         clips_per_episode: int | None = None,  # DEPRECATED: No longer limits clips. All clips meeting score threshold are processed.
         min_duration: int = 30,
         max_duration: int = 180,  # Up to 3 min with manual review for >90s
         min_score: int = 70,  # Minimum virality score threshold (clips below this are skipped)
-        min_score: int = 70,  # Minimum virality score threshold (clips below this are skipped)
+        use_supabase: bool = True,  # NEW: Use Supabase transcripts instead of WhisperX
         clip_id: int | None = None,  # NEW: Specify a single clip to re-process (1-indexed)
+        transcription_config: dict | None = None, # NEW: Configuration for transcription source
+        auth_token: str | None = None, # NEW: User token for community data sync
     ):
         self.base_path = Path(external_drive_path)
         self.clips_per_episode = clips_per_episode
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.min_score = min_score
+        self.use_supabase = use_supabase
         self.target_clip_id = clip_id
+        self.auth_token = auth_token
+        
+        # Initialize Transcription Driver
+        from src.transcription.driver import TranscriptionDriver
+        self.transcription_config = transcription_config or {}
+        self.transcription_driver = TranscriptionDriver.get_source_from_config(self.transcription_config)
+        
+        # Initialize Analytics Sync
+        from src.services.analytics import AnalyticsSync
+        self.analytics_sync = AnalyticsSync(auth_token=auth_token)
         
         if not self.base_path.exists():
             raise FileNotFoundError(
                 f"⚠️ External drive not accessible: {self.base_path}\n"
                 f"   Please connect the external hard drive and ensure the symlink exists:\n"
-                r"   ln -s /Volumes/[DiskName]/Backup\ Podcast episodes"
+                r"   ln -s /Volumes/[DiskName]/Backup\ Inminente external_drive/Backup\ Inminente"
             )
     
     def discover_episodes(self, start: int = 1, end: int = 999) -> list[EpisodeConfig]:
@@ -86,13 +99,13 @@ class BatchProcessor:
             if not folder.is_dir():
                 continue
             
-            # Parse episode number from folder name (e.g., "EP001 - Title")
+            # Parse episode number from folder name (e.g., "EP108 - Title")
             folder_name = folder.name
             if not folder_name.startswith("EP"):
                 continue
             
             try:
-                # Extract number: "EP001 - Title" -> 108
+                # Extract number: "EP108 - Title" -> 108
                 ep_num_str = folder_name.split(" ")[0].replace("EP", "")
                 ep_num = int(ep_num_str)
             except (ValueError, IndexError):
@@ -185,13 +198,29 @@ class BatchProcessor:
         # DUAL PIPELINE: Use Supabase for curation (with speaker timing)
         #                WhisperX only for final clip transcription (word-level)
         
-        # Load transcript (local or re-transcribe)
+        if self.use_supabase:
+            console.print(f"[dim]   Loading transcript from Supabase...[/dim]")
+            from src.sources.supabase_transcripts import get_transcript_from_supabase
+            transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
+            
+            if transcript is None:
+                # Fallback to local or re-transcribe
+                console.print(f"[yellow]   Supabase transcript not found, falling back to local...[/yellow]")
+                if episode.transcript_path and episode.transcript_path.exists():
+                    transcript = Transcript.load(episode.transcript_path)
+                else:
+                    console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
+                    transcript = self._transcribe_video(episode.video_path, job_id=job_id)
+                    transcript.save(episode.episode_folder / "transcript.json")
+        else:
+            # Traditional mode: local transcript or WhisperX
             if episode.transcript_path and episode.transcript_path.exists():
                 console.print(f"[dim]   Loading existing transcript...[/dim]")
                 transcript = Transcript.load(episode.transcript_path)
             else:
                 console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
-                transcript = self._transcribe_video(episode.video_path, job_id=job_id)
+                ep_id_str = f"EP{episode.episode_number:03d}"
+                transcript = self._transcribe_video(episode.video_path, job_id=job_id, episode_id=ep_id_str)
                 # Save transcript for future use
                 transcript_out = episode.episode_folder / "transcript.json"
                 transcript.save(transcript_out)
@@ -396,6 +425,20 @@ class BatchProcessor:
                     folder_name = "approved" if is_approved else "review"
                     console.print(f"[green]   ✓ {clip_name} saved to {folder_name}/[/green]")
                     
+                    # 3g. Sync to Community Intelligence (if approved & enabled)
+                    if is_approved and self.analytics_sync.Enabled:
+                        try:
+                            clip_data = {
+                                "clip_hash": f"EP{episode.episode_number}_{i}_{int(clip.start_time)}",
+                                "duration": clip.duration,
+                                "hook_type": clip.category,
+                                "style": "split_screen_hybrid",
+                                "score": clip.virality_score.total
+                            }
+                            self.analytics_sync.sync_clip(clip_data)
+                        except Exception as e:
+                            console.print(f"[yellow]   ⚠️ Sync warning: {e}[/yellow]")
+                    
                     # Update job progress (for pause/resume)
                     if store and job_id:
                         store.update_clip_progress(
@@ -456,53 +499,30 @@ class BatchProcessor:
         ]
         run_ffmpeg(cmd, timeout=300)  # 5 min max for subtitle burning
     
-    def _transcribe_video(self, video_path: Path, job_id: str = None) -> "Transcript":
-        """Transcribe a full video using MLX Whisper with progress reporting."""
-        import mlx_whisper
-        from src.asr.transcriber import Transcript, Segment, Word
+    def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
+        """Transcribe using the configured driver (Local, AssemblyAI, or Supabase)."""
+        from src.transcription.supabase import SupabaseSource
         
-        # Stage-based progress updates
+        # Determine resource (Path or ID)
+        resource = str(video_path)
+        if isinstance(self.transcription_driver, SupabaseSource):
+            if episode_id:
+                resource = episode_id
+            else:
+                console.print("[yellow]Warning: SupabaseSource requires episode_id, using filename as fallback[/yellow]")
+                resource = video_path.stem
+        
+        # Progress updates
         if job_id:
             from src.job_store import get_job_store
             store = get_job_store()
-            store.update_progress(job_id, 15, "🎧 Transcribiendo con MLX Whisper...")
-        
-        # Use MLX optimized transcription
-        if job_id:
-            store.update_progress(job_id, 20, "🎤 Transcribiendo audio... (esto puede tomar varios minutos)")
-        
-        result = mlx_whisper.transcribe(
-            str(video_path),
-            path_or_hf_repo="mlx-community/whisper-large-v3-turbo",
-            word_timestamps=True,
-            language="es"
-        )
-        
-        if job_id:
-            store.update_progress(job_id, 70, "✅ Transcripción completa, procesando resultados...")
-        
-        segments = []
-        for seg in result["segments"]:
-            words = [
-                Word(word=w["word"], start=w["start"], end=w["end"], score=w.get("probability", 1.0))
-                for w in seg.get("words", [])
-            ]
-            segments.append(Segment(
-                text=seg["text"].strip(),
-                start=seg["start"],
-                end=seg["end"],
-                words=words,
-            ))
-        
-        if job_id:
-            store.update_progress(job_id, 75, f"✓ {len(segments)} segmentos transcritos")
-        
-        return Transcript(
-            segments=segments,
-            language="es",
-            duration=result["segments"][-1]["end"] if result["segments"] else 0,
-            source_file=str(video_path),
-        )
+            store.update_progress(job_id, 20, "🎤 Obteniendo transcripción...")
+            
+        try:
+            return self.transcription_driver.get_transcript(resource, **self.transcription_config)
+        except Exception as e:
+            console.print(f"[red]Transcription failed: {e}[/red]")
+            raise e
     
     def _transcribe_clip(self, clip_path: Path, job_id: str = None) -> "Transcript":
         """Transcribe a short clip for subtitles."""
@@ -602,7 +622,7 @@ def run_batch(
         Processing results summary
     """
     processor = BatchProcessor(
-        external_drive_path="episodes",
+        external_drive_path="external_drive/Backup Inminente",
         clip_id=clip_id,
         min_score=min_score,
     )
@@ -701,4 +721,3 @@ if __name__ == "__main__":
         sys.exit(0)
 
     run_batch(start=start, end=end, dry_run=dry_run, clip_id=clip_id, min_score=min_score)
-

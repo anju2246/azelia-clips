@@ -55,6 +55,19 @@ export default function UploadWidget() {
         // Default score
         formData.append('min_score', '70');
 
+        // Transcription Configuration (Privacy-First: Loaded from LocalStorage)
+        const transcriptionSource = localStorage.getItem('celia_transcription_source') || 'local_whisper';
+        formData.append('transcription_source', transcriptionSource);
+
+        const assemblyKey = localStorage.getItem('celia_assemblyai_key');
+        if (assemblyKey) formData.append('assemblyai_key', assemblyKey);
+
+        const supabaseUrl = localStorage.getItem('celia_supabase_url');
+        if (supabaseUrl) formData.append('supabase_url', supabaseUrl);
+
+        const supabaseKey = localStorage.getItem('celia_supabase_key');
+        if (supabaseKey) formData.append('supabase_key', supabaseKey);
+
         try {
             // In dev, we point to localhost:8000. In prod, this would be relative or configured.
             const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8001';

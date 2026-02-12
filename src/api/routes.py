@@ -14,7 +14,7 @@ store = get_job_store()
 DATA_DIR = Path("data/jobs")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-def run_processing_task(job_id: str, file_path: Path, settings: ProcessRequest, authorization: str = None):
+def run_processing_task(job_id: str, file_path: Path, settings: ProcessRequest, authorization: str = None, transcription_config: dict = None):
     """Background task to run the processing pipeline."""
     try:
         # Update status to processing
@@ -28,7 +28,8 @@ def run_processing_task(job_id: str, file_path: Path, settings: ProcessRequest, 
             max_duration=settings.max_duration,
             min_score=settings.min_score,
             use_supabase=False,
-            auth_token=authorization
+            auth_token=authorization,
+            transcription_config=transcription_config
         )
         
         # Run processing
@@ -51,6 +52,10 @@ async def process_video(
     max_duration: int = Form(90),
     min_score: int = Form(70),
     subtitle_style: str = Form("highlight"),
+    transcription_source: str = Form("local_whisper"),
+    assemblyai_key: str | None = Form(None),
+    supabase_url: str | None = Form(None),
+    supabase_key: str | None = Form(None),
     authorization: str | None = Header(default=None)
 ):
     """Upload a video and start processing."""
@@ -85,6 +90,14 @@ async def process_video(
         subtitle_style=subtitle_style
     )
     
+    # Create Transcription Config
+    transcription_config = {
+        "source_type": transcription_source,
+        "assemblyai_api_key": assemblyai_key,
+        "supabase_url": supabase_url,
+        "supabase_key": supabase_key
+    }
+    
     # Initialize Job in Store
     store.create_job(
         job_id=job_id,
@@ -93,7 +106,7 @@ async def process_video(
     )
     
     # Start Background Task
-    background_tasks.add_task(run_processing_task, job_id, file_path, settings, authorization)
+    background_tasks.add_task(run_processing_task, job_id, file_path, settings, authorization, transcription_config)
     
     # Return initial status
     job = store.get_job(job_id)

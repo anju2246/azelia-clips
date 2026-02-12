@@ -6,7 +6,7 @@ import {
     FlaskConical, Link2, LogOut
 } from 'lucide-react';
 import { Card, Toggle, Segmented, Slider, InfoBox } from './ui';
-import { supabase, signInWithGoogle, signOut, getUser, getProfile, isSupabaseConfigured } from '../../lib/supabase';
+import { supabase, signInWithGoogle, signOut, getUser, getProfile } from '../../lib/supabase';
 
 /* ═══════════════════════════════════════════════════════
    NAV ITEMS
@@ -69,14 +69,32 @@ export default function SettingsDashboard() {
     const [user, setUser] = useState<any>(null);
     const [profile, setProfile] = useState<any>(null);
 
+    // Transcription Settings State
+    const [transcriptionSource, setTranscriptionSource] = useState('local_whisper');
+    const [assemblyAiKey, setAssemblyAiKey] = useState('');
+    const [supabaseUrl, setSupabaseUrl] = useState('');
+    const [supabaseKey, setSupabaseKey] = useState('');
+
+    // Load settings from LocalStorage
+    useEffect(() => {
+        setTranscriptionSource(localStorage.getItem('celia_transcription_source') || 'local_whisper');
+        setAssemblyAiKey(localStorage.getItem('celia_assemblyai_key') || '');
+        setSupabaseUrl(localStorage.getItem('celia_supabase_url') || '');
+        setSupabaseKey(localStorage.getItem('celia_supabase_key') || '');
+    }, []);
+
+    // Save settings helper
+    const updateSetting = (key: string, value: string, setter: (v: string) => void) => {
+        setter(value);
+        localStorage.setItem(key, value);
+    };
+
     const fetchProfile = async (userId: string) => {
         const data = await getProfile(userId);
         if (data) setProfile(data);
     };
 
     useEffect(() => {
-        if (!isSupabaseConfigured) return;
-
         // Check active session
         supabase.auth.getSession().then(({ data: { session } }) => {
             setUser(session?.user ?? null);
@@ -144,17 +162,7 @@ export default function SettingsDashboard() {
 
                 {/* User badge */}
                 <div className="mt-6 pt-4 border-t border-zinc-800">
-                    {!isSupabaseConfigured ? (
-                        <div className="px-3 text-center">
-                            <p className="text-xs text-zinc-500 mb-2">Community Mode</p>
-                            <div className="p-2 bg-zinc-800/50 rounded-lg border border-zinc-700">
-                                <p className="text-[10px] text-zinc-400">
-                                    Cloud Sync disabled.<br />
-                                    Configure Supabase in .env to enable.
-                                </p>
-                            </div>
-                        </div>
-                    ) : user ? (
+                    {user ? (
                         <div className="px-3">
                             <div className="flex items-center gap-3 mb-3">
                                 {user.user_metadata?.avatar_url ? (
@@ -418,44 +426,131 @@ export default function SettingsDashboard() {
                         <>
                             <SectionHeader title="Transcription" desc="Configure how audio is transcribed to text with word-level timestamps" />
 
-                            <Card title="Engine" description="Choose the transcription engine based on your system">
-                                <div className="space-y-4">
-                                    <Segmented
-                                        options={[
-                                            { value: 'mlx', label: 'MLX Whisper', icon: '⚡' },
-                                            { value: 'whisperx', label: 'WhisperX' },
-                                            { value: 'skip', label: 'Skip (provide JSON)' },
-                                        ]}
-                                        defaultValue="mlx"
-                                    />
-                                    <InfoBox>
-                                        💡 MLX Whisper is 5-10x faster on Apple Silicon (M1/M2/M3/M4). Use WhisperX for Linux/Windows or NVIDIA GPUs.
-                                    </InfoBox>
+                            <Card title="Transcription Source" description="Choose where your transcripts come from">
+                                <div className="space-y-6">
+                                    {/* Source Selection */}
+                                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                        {[
+                                            { id: 'local_whisper', label: 'Local Whisper', icon: '💻', desc: 'Free, runs on device' },
+                                            { id: 'assemblyai', label: 'AssemblyAI', icon: '☁️', desc: 'Cloud, high accuracy' },
+                                            { id: 'supabase_custom', label: 'Custom Database', icon: '🗄️', desc: 'Connect your Supabase' },
+                                        ].map((s) => (
+                                            <button
+                                                key={s.id}
+                                                onClick={() => updateSetting('celia_transcription_source', s.id, setTranscriptionSource)}
+                                                className={`
+                                                    relative p-3 rounded-lg border transition-all duration-200 text-left
+                                                    ${transcriptionSource === s.id
+                                                        ? 'border-brand-500 bg-brand-500/5'
+                                                        : 'border-white/10 hover:border-white/20'}
+                                                `}
+                                            >
+                                                <div className="flex items-center gap-2 mb-1">
+                                                    <span className="text-lg">{s.icon}</span>
+                                                    <span className="text-sm font-medium text-zinc-100">{s.label}</span>
+                                                </div>
+                                                <p className="text-xs text-zinc-500">{s.desc}</p>
+                                                {transcriptionSource === s.id && (
+                                                    <div className="absolute top-2 right-2">
+                                                        <Check size={14} className="text-brand-400" />
+                                                    </div>
+                                                )}
+                                            </button>
+                                        ))}
+                                    </div>
+
+                                    {/* Local Whisper Settings */}
+                                    {transcriptionSource === 'local_whisper' && (
+                                        <div className="pt-4 border-t border-zinc-800 space-y-4">
+                                            <p className="text-sm font-medium text-zinc-300">Local Engine Settings</p>
+                                            <Segmented
+                                                options={[
+                                                    { value: 'mlx', label: 'MLX Whisper', icon: '⚡' },
+                                                    { value: 'whisperx', label: 'WhisperX' },
+                                                ]}
+                                                defaultValue="mlx"
+                                            />
+                                            <InfoBox>
+                                                💡 MLX Whisper is 5-10x faster on Apple Silicon. Use WhisperX for NVIDIA GPUs.
+                                            </InfoBox>
+                                        </div>
+                                    )}
+
+                                    {/* AssemblyAI Settings */}
+                                    {transcriptionSource === 'assemblyai' && (
+                                        <div className="pt-4 border-t border-zinc-800 space-y-4">
+                                            <div className="bg-amber-500/10 border border-amber-500/20 rounded-lg p-3 flex items-start gap-3">
+                                                <Lock size={16} className="text-amber-400 mt-0.5 flex-shrink-0" />
+                                                <div>
+                                                    <p className="text-xs font-medium text-amber-200 mb-1">Privacy Notice</p>
+                                                    <p className="text-[11px] text-amber-300/80 leading-relaxed">
+                                                        Your API Key is stored locally in your browser (LocalStorage).
+                                                        It is never saved to our servers and is only used to authenticate your requests to AssemblyAI.
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div>
+                                                <label className="text-sm font-medium text-zinc-300 mb-2 block">AssemblyAI API Key</label>
+                                                <input
+                                                    type="password"
+                                                    placeholder="Enter your API Key"
+                                                    value={assemblyAiKey}
+                                                    onChange={(e) => updateSetting('celia_assemblyai_key', e.target.value, setAssemblyAiKey)}
+                                                    className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                                />
+                                            </div>
+                                        </div>
+                                    )}
+
+                                    {/* Custom Supabase Settings */}
+                                    {transcriptionSource === 'supabase_custom' && (
+                                        <div className="pt-4 border-t border-zinc-800 space-y-4">
+                                            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3 flex items-start gap-3">
+                                                <Lock size={16} className="text-blue-400 mt-0.5 flex-shrink-0" />
+                                                <div>
+                                                    <p className="text-xs font-medium text-blue-200 mb-1">Secure Connection</p>
+                                                    <p className="text-[11px] text-blue-300/80 leading-relaxed">
+                                                        These credentials allow Celia to read from your private database.
+                                                        They are stored ONLY in your browser.
+                                                        Compatible with standard Celia schema (episodes/utterances tables).
+                                                    </p>
+                                                </div>
+                                            </div>
+                                            <div className="grid grid-cols-1 gap-4">
+                                                <div>
+                                                    <label className="text-sm font-medium text-zinc-300 mb-2 block">Supabase URL</label>
+                                                    <input
+                                                        type="text"
+                                                        placeholder="https://xyz.supabase.co"
+                                                        value={supabaseUrl}
+                                                        onChange={(e) => updateSetting('celia_supabase_url', e.target.value, setSupabaseUrl)}
+                                                        className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                                    />
+                                                </div>
+                                                <div>
+                                                    <label className="text-sm font-medium text-zinc-300 mb-2 block">Supabase Anon Key</label>
+                                                    <input
+                                                        type="password"
+                                                        placeholder="public-anon-key"
+                                                        value={supabaseKey}
+                                                        onChange={(e) => updateSetting('celia_supabase_key', e.target.value, setSupabaseKey)}
+                                                        className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50"
+                                                    />
+                                                </div>
+                                            </div>
+                                        </div>
+                                    )}
                                 </div>
                             </Card>
 
                             <Card title="Model Settings">
                                 <div className="space-y-4">
-                                    <div>
+                                    <div className="opacity-50 pointer-events-none">
                                         <label className="text-sm font-medium text-zinc-100 mb-2 block">Model Size</label>
-                                        <select className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50">
-                                            <option>tiny (fastest, lower accuracy)</option>
-                                            <option>base</option>
-                                            <option>small (recommended)</option>
-                                            <option>medium</option>
-                                            <option>large-v3-turbo (best, recommended for MLX)</option>
+                                        <select className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-sm text-zinc-200">
+                                            <option>large-v3-turbo (Fixed for consistency)</option>
                                         </select>
-                                    </div>
-                                    <div>
-                                        <label className="text-sm font-medium text-zinc-100 mb-2 block">Language</label>
-                                        <select className="w-full px-4 py-2.5 bg-white/5 border border-white/10 rounded-lg text-sm text-zinc-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50">
-                                            <option>Auto-detect</option>
-                                            <option>English</option>
-                                            <option>Spanish</option>
-                                            <option>French</option>
-                                            <option>Portuguese</option>
-                                            <option>German</option>
-                                        </select>
+                                        <p className="text-xs text-zinc-500 mt-1">Model settings are managed automatically by the driver.</p>
                                     </div>
                                 </div>
                             </Card>

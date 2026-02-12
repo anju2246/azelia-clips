@@ -22,6 +22,13 @@ class SingleVideoProcessor(BatchProcessor):
         self.target_clip_id = None
         self.auth_token = kwargs.get('auth_token')
         
+        # New: Pass transcription config to parent logic
+        transcription_config = kwargs.get('transcription_config')
+        super().__init__(
+            external_drive_path=output_dir, # Used as dummy base path
+            transcription_config=transcription_config
+        )
+        
         # Ensure output dir exists
         self.base_path.mkdir(parents=True, exist_ok=True)
         
