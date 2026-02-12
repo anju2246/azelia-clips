@@ -1,0 +1,71 @@
+---
+import Layout from "../layouts/Layout.astro";
+import ClipCard from "../components/library/ClipCard";
+
+// Mock data for now
+const clips = [
+    {
+        id: "1",
+        title: "Why startup founders fail in the first year",
+        duration: "0:45",
+        score: 94,
+        createdAt: "2 hours ago",
+        thumbnailUrl:
+            "https://images.unsplash.com/photo-1556761175-5973dc0f32e7?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+    },
+    {
+        id: "2",
+        title: "The secret to hiring great engineers",
+        duration: "0:58",
+        score: 88,
+        createdAt: "Yesterday",
+        thumbnailUrl:
+            "https://images.unsplash.com/photo-1522071820081-009f0129c71c?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+    },
+    {
+        id: "3",
+        title: "Remote work culture shocks",
+        duration: "1:15",
+        score: 72,
+        createdAt: "3 days ago",
+        thumbnailUrl:
+            "https://images.unsplash.com/photo-1517048676732-d65bc937f952?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+    },
+    {
+        id: "4",
+        title: "AI will replace junior devs?",
+        duration: "0:32",
+        score: 91,
+        createdAt: "1 week ago",
+        thumbnailUrl:
+            "https://images.unsplash.com/photo-1677442136019-21780ecad995?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80",
+    },
+];
+---
+
+<Layout title="Library - Celia Clips">
+    <div class="max-w-6xl mx-auto space-y-8">
+        <div class="flex items-center justify-between">
+            <div class="space-y-1">
+                <h1 class="text-3xl font-bold tracking-tight">Library</h1>
+                <p class="text-zinc-400">
+                    Your generated clips ready for social media.
+                </p>
+            </div>
+            <div class="flex gap-2">
+                <select
+                    class="bg-zinc-900 border border-zinc-800 text-zinc-300 text-sm rounded-lg focus:ring-brand-500 focus:border-brand-500 block p-2.5"
+                >
+                    <option>Sort by Date</option>
+                    <option>Sort by Score</option>
+                </select>
+            </div>
+        </div>
+
+        <div
+            class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6"
+        >
+            {clips.map((clip) => <ClipCard client:idle clip={clip} />)}
+        </div>
+    </div>
+</Layout>

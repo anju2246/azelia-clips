@@ -126,15 +126,56 @@ src/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
-## Cloud Solution
 
-Need a managed, hosted solution? Contact us directly for enterprise/agency pricing.
+## 🏗 Architecture & Editions
 
-📧 **hola@inminente.co**
+Celia Clips follows an **Open Core** model.
 
-## License
+### 🏘️ Community Edition (Default)
+- **Local First**: Runs entirely on your machine.
+- **Privacy Focused**: Your audio and transcripts never leave your computer (except to the LLM provider you choose).
+- **Data Ownership**: All clips, logs, and databases are stored in the local `data/` folder.
+- **Dashboard**: Includes a full-featured local web dashboard for managing clips.
 
-[Apache License 2.0](LICENSE) — Free for commercial use.
+### ⚡ Pro Edition (Cloud Sync)
+- **Cloud Synchronization**: Syncs your clips and analytics to the cloud (requires Supabase keys).
+- **Multi-Device**: Access your curation history from any device.
+- **Note**: These features are enabled automatically if you provide `SUPABASE_URL` and `SUPABASE_KEY` in your `.env`.
+
+---
+
+## 🚀 Web Dashboard
+
+Celia includes a modern web dashboard to review and manage your clips.
+
+### Prerequisites
+- Node.js 18+
+- Python 3.10+
+
+### Setup
+1. **Navigate to the web folder**:
+   ```bash
+   cd web
+   ```
+2. **Install dependencies**:
+   ```bash
+   npm install
+   ```
+3. **Run the development server**:
+   ```bash
+   npm run dev
+   ```
+   Open http://localhost:4321 to see your clips.
+
+---
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+## 📄 License
+
+This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ---
 

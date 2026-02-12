@@ -1,0 +1,88 @@
+@import "tailwindcss";
+
+@theme {
+  --color-brand-50: #f2fbf6;
+  --color-brand-100: #e1f6eb;
+  --color-brand-200: #c4ebd8;
+  --color-brand-300: #9adbc0;
+  --color-brand-400: #5ca87c;
+  /* Landing Primary */
+  --color-brand-500: #3e8e63;
+  --color-brand-600: #288760;
+  /* Landing Secondary/Hover */
+  --color-brand-700: #236c4f;
+  --color-brand-800: #1f5641;
+  --color-brand-900: #1a4737;
+  --color-brand-950: #0e2820;
+
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+/* ===== LANDING PAGE BACKGROUNDS ===== */
+.noise-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.03;
+  z-index: 50;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 400 400' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}
+
+.grid-overlay {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  background-image:
+    linear-gradient(rgba(92, 168, 124, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(92, 168, 124, 0.03) 1px, transparent 1px);
+  background-size: 50px 50px;
+}
+
+/* ===== GLASS PANEL EFFECTS ===== */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.02);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
+  border-radius: 24px;
+}
+
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 16px;
+  transition: all 0.3s ease;
+}
+
+.glass-card:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.15);
+  transform: translateY(-2px);
+  box-shadow: 0 10px 40px -10px rgba(0, 0, 0, 0.5);
+}
+
+.text-gradient {
+  background: linear-gradient(135deg, #ffffff 0%, #a0c4ff 50%, #60a5fa 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    background-color: #020617;
+    /* Slate 950 */
+    color: #f8fafc;
+    /* Slate 50 */
+  }
+
+  body {
+    min-height: 100vh;
+  }
+}

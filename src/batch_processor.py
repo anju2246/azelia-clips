@@ -52,7 +52,7 @@ class BatchProcessor:
         min_duration: int = 30,
         max_duration: int = 180,  # Up to 3 min with manual review for >90s
         min_score: int = 70,  # Minimum virality score threshold (clips below this are skipped)
-        use_supabase: bool = False,  # NEW: Use Supabase transcripts instead of WhisperX
+        min_score: int = 70,  # Minimum virality score threshold (clips below this are skipped)
         clip_id: int | None = None,  # NEW: Specify a single clip to re-process (1-indexed)
     ):
         self.base_path = Path(external_drive_path)
@@ -60,7 +60,6 @@ class BatchProcessor:
         self.min_duration = min_duration
         self.max_duration = max_duration
         self.min_score = min_score
-        self.use_supabase = use_supabase
         self.target_clip_id = clip_id
         
         if not self.base_path.exists():

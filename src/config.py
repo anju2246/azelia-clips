@@ -25,6 +25,23 @@ class Settings(BaseSettings):
     gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID", description="Google Cloud Project ID")
     gcp_location: str = Field(default="us-central1", alias="GCP_LOCATION", description="GCP region")
 
+    # Cloud Services (Pro Features)
+    supabase_url: str = Field(default="", alias="SUPABASE_URL", description="Supabase URL (Pro)")
+    supabase_key: str = Field(default="", alias="SUPABASE_KEY", description="Supabase Anon Key (Pro)")
+    google_client_id: str = Field(default="", alias="GOOGLE_CLIENT_ID", description="Google Auth Client ID (Pro)")
+    google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET", description="Google Auth Client Secret (Pro)")
+    
+    @property
+    def enable_cloud_sync(self) -> bool:
+        """Enable Cloud Sync only if Supabase URL is configured."""
+        return bool(self.supabase_url and self.supabase_key)
+
+    @property
+    def enable_auth(self) -> bool:
+        """Enable Google Auth only if Client ID is configured."""
+        return bool(self.google_client_id and self.google_client_secret)
+
+
 
     # Whisper Configuration
     whisper_model: str = Field(default="small", description="Whisper model size (tiny, base, small, medium, large-v3)")
