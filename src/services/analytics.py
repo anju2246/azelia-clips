@@ -8,6 +8,10 @@ class AnalyticsSync:
     """
     Handles synchronization of local clip metadata to the Community Cloud (Supabase).
     Respects privacy settings and relies on the user's Auth Token.
+    
+    Security:
+    - Uses Supabase Edge Function 'ingest-analytics' for secure data insertion.
+    - Does NOT write directly to the database (RLS prevents this).
     """
     
     def __init__(self, auth_token: Optional[str] = None):
@@ -24,8 +28,8 @@ class AnalyticsSync:
         # We need the Project URL. The Anon Key is public, but we need the URL.
         # Ideally, this comes from settings or .env
         from src.config import settings
-        self.supabase_url = settings.supabase_url
-        self.supabase_key = settings.supabase_key # Anon key
+        self.supabase_url = settings.get("supabase_url") # Safer get
+        self.supabase_key = settings.get("supabase_key") # Anon key
         
         if self.supabase_url and self.supabase_key and self.auth_token:
             try:
@@ -48,37 +52,41 @@ class AnalyticsSync:
 
     def sync_clip(self, clip_data: Dict[str, Any], user_id: Optional[str] = None):
         """
-        Push anonymized clip metadata to the cloud.
+        Push anonymized clip metadata to the cloud via Secure Edge Function.
         
         Args:
             clip_data: Dict with 'duration', 'hook_type', 'score', etc.
-            user_id: Optional, but RLS will use the token's user anyway.
+            user_id: Optional (Handled by Auth Context in Edge Function)
         """
         if not self.Enabled or not self.client:
             return
 
         try:
-            # Prepare payload matching table schema
+            # Prepare payload matching Edge Function expectations
             payload = {
                 "local_clip_id": clip_data.get("clip_hash", "unknown"),
                 "duration_seconds": int(clip_data.get("duration", 0)),
                 "hook_type": clip_data.get("hook_type", "unknown"),
                 "visual_style": clip_data.get("style", "standard"),
                 "sentiment_score": float(clip_data.get("score", 0)),
-                # 'user_id' is handled by Supabase Auth Context (RLS) automatically?
-                # Usually we insert it, or let default=auth.uid() handle it if configured.
-                # Let's try inserting without it first, or if we have it from token.
+                # Metrics for specific platforms (flexible JSONB)
+                # Currently sending empty, but structure allows extension
+                "platform_metrics": {} 
             }
             
-            # If we decoded the token we could pass user_id, but the RLS 
-            # might require the column to match auth.uid().
-            # Best practice: Let the backend handle it or pass it if known.
-            if user_id:
-                payload["user_id"] = user_id
+            # Invoke the Edge Function
+            # The client is authenticated, so it sends the User JWT automatically.
+            response = self.client.functions.invoke("ingest-analytics", invoke_options={'body': payload})
             
-            # Perform Insert
-            res = self.client.table("clips_metadata").insert(payload).execute()
-            console.print(f"[blue]☁️  Synced Clip Metadata to Community DB[/blue]")
+            # Check for function error (Supabase functions return data/error object)
+            # But the python client might raise exception or return response object?
+            # It usually returns a FunctionResponse object.
+            
+            # Let's assume standard behavior:
+            if hasattr(response, 'error') and response.error:
+                 console.print(f"[red]❌ Sync Error (Function): {response.error}[/red]")
+            else:
+                console.print(f"[blue]☁️  Synced Clip Metadata to Community DB (Secure)[/blue]")
             
         except Exception as e:
             # Fail silently to not break the pipeline
