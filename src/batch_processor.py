@@ -47,7 +47,7 @@ class BatchProcessor:
     
     def __init__(
         self,
-        external_drive_path: str = "episodes",
+        external_drive_path: str | Path | None = None,
         clips_per_episode: int | None = None,  # DEPRECATED: No longer limits clips. All clips meeting score threshold are processed.
         min_duration: int = 30,
         max_duration: int = 180,  # Up to 3 min with manual review for >90s
@@ -57,7 +57,8 @@ class BatchProcessor:
         transcription_config: dict | None = None, # NEW: Configuration for transcription source
         auth_token: str | None = None, # NEW: User token for community data sync
     ):
-        self.base_path = Path(external_drive_path)
+        from src.config import settings
+        self.base_path = Path(external_drive_path) if external_drive_path else settings.podcast_dir
         self.clips_per_episode = clips_per_episode
         self.min_duration = min_duration
         self.max_duration = max_duration

@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
 from datetime import datetime
@@ -40,3 +40,26 @@ class ProcessRequest(BaseModel):
     max_duration: int = 90
     min_score: int = 70
     subtitle_style: str = "highlight"
+
+# --- New Models for Local Mode ---
+
+class SettingsResponse(BaseModel):
+    podcast_dir: str
+    groq_api_key: str = Field(default="", description="Masked key")
+    supabase_url: str = Field(default="")
+    supabase_key: str = Field(default="", description="Masked key")
+    
+class UpdateSettingsRequest(BaseModel):
+    podcast_dir: Optional[str] = None
+    groq_api_key: Optional[str] = None
+    supabase_url: Optional[str] = None
+    supabase_key: Optional[str] = None
+
+class EpisodeResponse(BaseModel):
+    id: str
+    number: int
+    title: str
+    has_video: bool
+    has_transcript: bool
+    is_processed: bool
+    path: str

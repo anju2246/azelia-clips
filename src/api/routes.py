@@ -3,9 +3,15 @@ import uuid
 from pathlib import Path
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Header
 from fastapi.responses import FileResponse
-from src.api.models import JobResponse, JobStatus, ProcessRequest, Clip
+from src.api.models import (
+    JobResponse, JobStatus, ProcessRequest, Clip,
+    SettingsResponse, UpdateSettingsRequest, EpisodeResponse
+)
 from src.api.processor import SingleVideoProcessor
 from src.job_store import get_job_store
+from src.config import settings
+from src.batch_processor import BatchProcessor
+from typing import List
 
 router = APIRouter()
 store = get_job_store()
@@ -177,3 +183,139 @@ async def get_clip(job_id: str, filename: str):
         raise HTTPException(status_code=404, detail="Clip not found")
         
     return FileResponse(path)
+
+# --- Local Mode Endpoints ---
+
+@router.get("/settings", response_model=SettingsResponse)
+async def get_settings():
+    """Get current application settings."""
+    return SettingsResponse(
+        podcast_dir=str(settings.podcast_dir),
+        groq_api_key=mask_key(settings.groq_api_key),
+        supabase_url=settings.supabase_url,
+        supabase_key=mask_key(settings.supabase_key)
+    )
+
+@router.post("/settings", response_model=SettingsResponse)
+async def update_settings(req: UpdateSettingsRequest):
+    """Update settings in .env file."""
+    env_path = Path(".env")
+    
+    # Read existing env
+    env_content = {}
+    if env_path.exists():
+        with open(env_path, "r") as f:
+            for line in f:
+                if "=" in line and not line.startswith("#"):
+                    key, val = line.strip().split("=", 1)
+                    env_content[key] = val
+    
+    # Update values
+    if req.podcast_dir:
+        env_content["PODCAST_DIR"] = req.podcast_dir
+        # Update runtime setting
+        settings.podcast_dir = Path(req.podcast_dir)
+        
+    if req.groq_api_key:
+        env_content["GROQ_API_KEY"] = req.groq_api_key
+        settings.groq_api_key = req.groq_api_key
+        
+    if req.supabase_url:
+        env_content["SUPABASE_URL"] = req.supabase_url
+        settings.supabase_url = req.supabase_url
+        
+    if req.supabase_key:
+        env_content["SUPABASE_KEY"] = req.supabase_key
+        settings.supabase_key = req.supabase_key
+    
+    # Write back to .env
+    with open(env_path, "w") as f:
+        for key, val in env_content.items():
+            f.write(f"{key}={val}\n")
+            
+    return await get_settings()
+
+@router.get("/episodes", response_model=List[EpisodeResponse])
+async def list_episodes():
+    """List episodes from configured podcast directory."""
+    try:
+        processor = BatchProcessor(external_drive_path=settings.podcast_dir, dry_run=True)
+        # Note: discover_episodes might fail if dir doesn't exist
+        if not settings.podcast_dir.exists():
+             return []
+             
+        episodes = processor.discover_episodes(start=1, end=9999)
+        
+        return [
+            EpisodeResponse(
+                id=f"EP{ep.episode_number:03d}",
+                number=ep.episode_number,
+                title=ep.episode_folder.name,
+                has_video=ep.video_path.exists(),
+                has_transcript=True if ep.transcript_path else False,
+                is_processed=(ep.clips_folder / "approved").exists(),
+                path=str(ep.episode_folder)
+            ) for ep in episodes
+        ]
+    except Exception as e:
+        print(f"Error listing episodes: {e}")
+        return []
+
+@router.post("/episodes/{episode_number}/process", response_model=JobResponse)
+async def process_episode_endpoint(
+    episode_number: int, 
+    background_tasks: BackgroundTasks,
+    req: ProcessRequest
+):
+    """Trigger processing for a specific episode from the library."""
+    
+    # Create Job ID
+    job_id = str(uuid.uuid4())
+    
+    # Initialize Job
+    store.create_job(
+        job_id=job_id,
+        episode_id=f"EP{episode_number:03d}",
+        config=req.dict()
+    )
+    
+    # Prepare batch processor for single episode
+    def run_batch_task(job_id, ep_num):
+        try:
+            store.update_progress(job_id, 5, "Initializing batch processor...")
+            processor = BatchProcessor(
+                min_duration=req.min_duration,
+                max_duration=req.max_duration,
+                min_score=req.min_score,
+                # We can add auth token here if needed
+            )
+            
+            # Find the episode config
+            episodes = processor.discover_episodes(start=ep_num, end=ep_num)
+            if not episodes:
+                raise Exception(f"Episode {ep_num} not found")
+                
+            ep = episodes[0]
+            
+            # Run processing
+            clips_count = processor.process_episode(ep, job_id=job_id)
+            
+            store.complete_job(job_id, clips_count)
+            
+        except Exception as e:
+            store.fail_job(job_id, str(e))
+
+    background_tasks.add_task(run_batch_task, job_id, episode_number)
+    
+    return JobResponse(
+        id=job_id,
+        status=JobStatus.PENDING,
+        filename=f"EP{episode_number:03d}",
+        created_at=datetime.now(),
+        message="Queued for processing"
+    )
+
+def mask_key(key: str) -> str:
+    if not key or len(key) < 8:
+        return ""
+    return f"{key[:4]}...{key[-4:]}"

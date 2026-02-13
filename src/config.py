@@ -50,6 +50,12 @@ class Settings(BaseSettings):
 
     # Output
     output_dir: Path = Field(default=Path("./output"), description="Output directory")
+    
+    # Local Library
+    podcast_dir: Path = Field(
+        default=Path("external_drive/Backup Inminente"), 
+        description="Path to podcast episodes folder"
+    )
 
     def ensure_output_dir(self) -> Path:
         """Create output directory if it doesn't exist."""
