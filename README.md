@@ -2,7 +2,7 @@
 
 > AI-powered podcast clip generator — part of the **Celia** suite by [Inminente](https://inminente.co).
 
-[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT_Commons_Clause-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 
 ---
@@ -126,56 +126,21 @@ src/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
 
+## Cloud Solution
 
-## 🏗 Architecture & Editions
+Need a managed, hosted solution? Contact us directly for enterprise/agency pricing.
 
-Celia Clips follows an **Open Core** model.
+📧 **hola@inminente.co**
 
-### 🏘️ Community Edition (Default)
-- **Local First**: Runs entirely on your machine.
-- **Privacy Focused**: Your audio and transcripts never leave your computer (except to the LLM provider you choose).
-- **Data Ownership**: All clips, logs, and databases are stored in the local `data/` folder.
-- **Dashboard**: Includes a full-featured local web dashboard for managing clips.
+## License
 
-### ⚡ Pro Edition (Cloud Sync)
-- **Cloud Synchronization**: Syncs your clips and analytics to the cloud (requires Supabase keys).
-- **Multi-Device**: Access your curation history from any device.
-- **Note**: These features are enabled automatically if you provide `SUPABASE_URL` and `SUPABASE_KEY` in your `.env`.
+[MIT License + Commons Clause](LICENSE) — Open Source, but **not for commercial sale**.
 
----
+### Legal
 
-## 🚀 Web Dashboard
+- **[Contributor License Agreement (CLA)](CLA.md)** — Required for contributing.
+- **[Data Usage Terms](DATA_USAGE_TERMS.md)** — How we handle anonymized analytics.
 
-Celia includes a modern web dashboard to review and manage your clips.
-
-### Prerequisites
-- Node.js 18+
-- Python 3.10+
-
-### Setup
-1. **Navigate to the web folder**:
-   ```bash
-   cd web
-   ```
-2. **Install dependencies**:
-   ```bash
-   npm install
-   ```
-3. **Run the development server**:
-   ```bash
-   npm run dev
-   ```
-   Open http://localhost:4321 to see your clips.
-
----
-
-## 🤝 Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
-
-## 📄 License
-
-This project is licensed under the **MIT License**. See the [LICENSE](LICENSE) file for details.
 
 ---
 

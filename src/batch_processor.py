@@ -37,7 +37,7 @@ class BatchProcessor:
     Process episodes in batch, saving clips directly to external drive.
     
     Structure:
-    external_drive/Backup Inminente/EP###/clips/
+    episodes/EP###/clips/
         ├── clip_01.mp4
         ├── clip_01_caption.txt
         ├── clip_02.mp4
@@ -47,12 +47,12 @@ class BatchProcessor:
     
     def __init__(
         self,
-        external_drive_path: str = "external_drive/Backup Inminente",
+        external_drive_path: str = "episodes",
         clips_per_episode: int | None = None,  # DEPRECATED: No longer limits clips. All clips meeting score threshold are processed.
         min_duration: int = 30,
         max_duration: int = 180,  # Up to 3 min with manual review for >90s
         min_score: int = 70,  # Minimum virality score threshold (clips below this are skipped)
-        use_supabase: bool = True,  # NEW: Use Supabase transcripts instead of WhisperX
+        use_supabase: bool = False,  # NEW: Use Supabase transcripts instead of WhisperX
         clip_id: int | None = None,  # NEW: Specify a single clip to re-process (1-indexed)
         transcription_config: dict | None = None, # NEW: Configuration for transcription source
         auth_token: str | None = None, # NEW: User token for community data sync
@@ -79,7 +79,7 @@ class BatchProcessor:
             raise FileNotFoundError(
                 f"⚠️ External drive not accessible: {self.base_path}\n"
                 f"   Please connect the external hard drive and ensure the symlink exists:\n"
-                r"   ln -s /Volumes/[DiskName]/Backup\ Inminente external_drive/Backup\ Inminente"
+                r"   ln -s /Volumes/[DiskName]/Backup\ Podcast episodes"
             )
     
     def discover_episodes(self, start: int = 1, end: int = 999) -> list[EpisodeConfig]:
@@ -99,13 +99,13 @@ class BatchProcessor:
             if not folder.is_dir():
                 continue
             
-            # Parse episode number from folder name (e.g., "EP108 - Title")
+            # Parse episode number from folder name (e.g., "EP001 - Title")
             folder_name = folder.name
             if not folder_name.startswith("EP"):
                 continue
             
             try:
-                # Extract number: "EP108 - Title" -> 108
+                # Extract number: "EP001 - Title" -> 108
                 ep_num_str = folder_name.split(" ")[0].replace("EP", "")
                 ep_num = int(ep_num_str)
             except (ValueError, IndexError):
@@ -198,22 +198,7 @@ class BatchProcessor:
         # DUAL PIPELINE: Use Supabase for curation (with speaker timing)
         #                WhisperX only for final clip transcription (word-level)
         
-        if self.use_supabase:
-            console.print(f"[dim]   Loading transcript from Supabase...[/dim]")
-            from src.sources.supabase_transcripts import get_transcript_from_supabase
-            transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
-            
-            if transcript is None:
-                # Fallback to local or re-transcribe
-                console.print(f"[yellow]   Supabase transcript not found, falling back to local...[/yellow]")
-                if episode.transcript_path and episode.transcript_path.exists():
-                    transcript = Transcript.load(episode.transcript_path)
-                else:
-                    console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
-                    transcript = self._transcribe_video(episode.video_path, job_id=job_id)
-                    transcript.save(episode.episode_folder / "transcript.json")
-        else:
-            # Traditional mode: local transcript or WhisperX
+        # Load transcript (local or re-transcribe)
             if episode.transcript_path and episode.transcript_path.exists():
                 console.print(f"[dim]   Loading existing transcript...[/dim]")
                 transcript = Transcript.load(episode.transcript_path)
@@ -622,7 +607,7 @@ def run_batch(
         Processing results summary
     """
     processor = BatchProcessor(
-        external_drive_path="external_drive/Backup Inminente",
+        external_drive_path="episodes",
         clip_id=clip_id,
         min_score=min_score,
     )
@@ -721,3 +706,4 @@ if __name__ == "__main__":
         sys.exit(0)
 
     run_batch(start=start, end=end, dry_run=dry_run, clip_id=clip_id, min_score=min_score)
+

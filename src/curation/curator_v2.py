@@ -4,7 +4,6 @@ import json
 import math
 import re
 import time
-from pathlib import Path
 from dataclasses import dataclass, field
 
 from rich.console import Console
@@ -22,27 +21,6 @@ from src.curation.prompts import (
 )
 
 console = Console()
-
-class CurationLogger:
-    """Logs curation data for AI self-improvement."""
-    
-    def __init__(self, log_dir: str = "data"):
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(exist_ok=True)
-        self.log_file = self.log_dir / "community_logs.jsonl"
-        
-    def log_event(self, event_type: str, data: dict):
-        """Append a log entry to the JSONL file."""
-        entry = {
-            "timestamp": time.time(),
-            "event": event_type,
-            "data": data
-        }
-        with open(self.log_file, "a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-
-# Global logger
-curation_logger = CurationLogger()
 
 
 @dataclass
@@ -670,14 +648,6 @@ class MultiAgentCurator:
                 transcript=transcript_text,
             )
             finder_response = self._call_agent(FINDER_SYSTEM, finder_prompt, f"FINDER-{i+1}")
-            
-            # LOGGING: Data Collection
-            curation_logger.log_event("finder_agent", {
-                "chunk_index": i,
-                "input_prompt": finder_prompt,  # Contains transcript + signals
-                "output_response": finder_response
-            })
-            
             finder_data = self._parse_json(finder_response)
             candidates = finder_data.get("candidates", [])
             
@@ -692,14 +662,6 @@ class MultiAgentCurator:
                 max_duration=max_duration,
             )
             critic_response = self._call_agent(CRITIC_SYSTEM, critic_prompt, f"CRITIC-{i+1}")
-            
-            # LOGGING
-            curation_logger.log_event("critic_agent", {
-                "chunk_index": i,
-                "input_candidates": candidates,
-                "output_response": critic_response
-            })
-
             critic_data = self._parse_json(critic_response)
             approved = critic_data.get("approved", [])
             
@@ -712,14 +674,6 @@ class MultiAgentCurator:
                     top_n=len(approved),  # Get ALL approved clips from this chunk
                 )
                 ranker_response = self._call_agent(RANKER_SYSTEM, ranker_prompt, f"RANKER-{i+1}")
-                
-                # LOGGING
-                curation_logger.log_event("ranker_agent", {
-                    "chunk_index": i,
-                    "input_prompt": ranker_prompt,
-                    "output_response": ranker_response
-                })
-                
                 ranker_data = self._parse_json(ranker_response)
                 ranked_clips = ranker_data.get("ranked_clips", [])
                 
