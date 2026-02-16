@@ -18,7 +18,7 @@ class SingleVideoProcessor(BatchProcessor):
         self.min_duration = kwargs.get('min_duration', 30)
         self.max_duration = kwargs.get('max_duration', 90)
         self.min_score = kwargs.get('min_score', 70)
-        self.use_supabase = False # Always false for local uploads unless configured
+        self.use_supabase = kwargs.get('use_supabase', False)
         self.target_clip_id = None
         self.auth_token = kwargs.get('auth_token')
         
@@ -26,7 +26,8 @@ class SingleVideoProcessor(BatchProcessor):
         transcription_config = kwargs.get('transcription_config')
         super().__init__(
             external_drive_path=output_dir, # Used as dummy base path
-            transcription_config=transcription_config
+            transcription_config=transcription_config,
+            use_supabase=self.use_supabase
         )
         
         # Ensure output dir exists

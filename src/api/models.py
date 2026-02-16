@@ -40,16 +40,22 @@ class ProcessRequest(BaseModel):
     max_duration: int = 90
     min_score: int = 70
     subtitle_style: str = "highlight"
+    transcription_source: str = "local_whisper"
+    assemblyai_key: Optional[str] = None
+    supabase_url: Optional[str] = None
+    supabase_key: Optional[str] = None
 
 # --- New Models for Local Mode ---
 
 class SettingsResponse(BaseModel):
+    podcast_name: str
     podcast_dir: str
     groq_api_key: str = Field(default="", description="Masked key")
     supabase_url: str = Field(default="")
     supabase_key: str = Field(default="", description="Masked key")
     
 class UpdateSettingsRequest(BaseModel):
+    podcast_name: Optional[str] = None
     podcast_dir: Optional[str] = None
     groq_api_key: Optional[str] = None
     supabase_url: Optional[str] = None

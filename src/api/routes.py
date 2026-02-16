@@ -33,7 +33,7 @@ def run_processing_task(job_id: str, file_path: Path, settings: ProcessRequest, 
             min_duration=settings.min_duration,
             max_duration=settings.max_duration,
             min_score=settings.min_score,
-            use_supabase=False,
+            use_supabase=(transcription_config.get("source_type") == "supabase_custom"),
             auth_token=authorization,
             transcription_config=transcription_config
         )
@@ -190,6 +190,7 @@ async def get_clip(job_id: str, filename: str):
 async def get_settings():
     """Get current application settings."""
     return SettingsResponse(
+        podcast_name=settings.podcast_name,
         podcast_dir=str(settings.podcast_dir),
         groq_api_key=mask_key(settings.groq_api_key),
         supabase_url=settings.supabase_url,
@@ -211,6 +212,10 @@ async def update_settings(req: UpdateSettingsRequest):
                     env_content[key] = val
     
     # Update values
+    if req.podcast_name:
+        env_content["PODCAST_NAME"] = req.podcast_name
+        settings.podcast_name = req.podcast_name
+
     if req.podcast_dir:
         env_content["PODCAST_DIR"] = req.podcast_dir
         # Update runtime setting
@@ -287,6 +292,13 @@ async def process_episode_endpoint(
                 min_duration=req.min_duration,
                 max_duration=req.max_duration,
                 min_score=req.min_score,
+                use_supabase=(req.transcription_source == "supabase_custom"),
+                transcription_config={
+                    "source_type": req.transcription_source,
+                    "assemblyai_api_key": req.assemblyai_key,
+                    "supabase_url": req.supabase_url,
+                    "supabase_key": req.supabase_key
+                }
                 # We can add auth token here if needed
             )
             
@@ -314,6 +326,43 @@ async def process_episode_endpoint(
         created_at=datetime.now(),
         message="Queued for processing"
     )
+
+@router.post("/episodes/{episode_number}/upload-transcript")
+async def upload_transcript_endpoint(episode_number: int):
+    """Upload the transcript for a specific episode to Supabase."""
+    from src.sources.supabase_transcripts import upload_transcript
+    from src.asr.transcriber import Transcript
+    
+    try:
+        # Find episode
+        processor = BatchProcessor(external_drive_path=settings.podcast_dir, dry_run=True)
+        episodes = processor.discover_episodes(start=episode_number, end=episode_number)
+        
+        if not episodes:
+            raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
+            
+        ep = episodes[0]
+        
+        if not ep.transcript_path or not ep.transcript_path.exists():
+            raise HTTPException(status_code=404, detail="Transcript file not found for this episode")
+            
+        # Load and upload
+        transcript = Transcript.load(ep.transcript_path)
+        episode_id = f"EP{episode_number:03d}"
+        
+        success = upload_transcript(
+            transcript=transcript,
+            episode_id=episode_id,
+            episode_title=ep.episode_folder.name
+        )
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to upload to Supabase")
+            
+        return {"status": "success", "message": f"Uploaded {episode_id} to Supabase"}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 def mask_key(key: str) -> str:
     if not key or len(key) < 8:

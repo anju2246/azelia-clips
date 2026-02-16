@@ -28,6 +28,7 @@ dependencies = [
     "pydantic-settings>=2.0.0",
     "ffmpeg-python>=0.2.0",
     "python-dotenv>=1.0.0",
+    "supabase>=2.0.0",
     "anthropic[vertex]>=0.40.0",
     "google-genai>=1.0.0",
 ]

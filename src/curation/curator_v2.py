@@ -19,6 +19,8 @@ from src.curation.prompts import (
     RANKER_SYSTEM, RANKER_USER_TEMPLATE,
     CAPTION_GENERATOR_SYSTEM, CAPTION_GENERATOR_USER,
 )
+from src.curation.signals import TranscriptAnalyzer, ViralityScoreV2
+from src.curation.prompt_manager import PromptManager
 
 console = Console()
 
@@ -461,6 +463,7 @@ class MultiAgentCurator:
         transcript: "Transcript",
         episode_number: int = 0,
         guest_name: str = "",
+        podcast_name: str = "Podcast",
     ) -> list[CuratedClipV2]:
         """
         Generate social media captions for clips SEQUENTIALLY.
@@ -471,30 +474,30 @@ class MultiAgentCurator:
             transcript: Original transcript for text extraction
             episode_number: Episode number for CTA
             guest_name: Name of the guest (or empty if host solo)
+            podcast_name: Name of the podcast for context
             
         Returns:
             Clips with social_caption populated
         """
         if not clips:
-            return clips
-        
-        console.print(f"\n[dim]   Stage 4: Generating captions for {len(clips)} clips...[/dim]")
-        
-        for i, clip in enumerate(clips):
-            # Get clip text from transcript
-            clip_text = ""
-            for seg in transcript.segments:
-                if seg.end > clip.start_time and seg.start < clip.end_time:
-                    clip_text += seg.text + " "
-            clip_text = clip_text.strip()[:500]  # Limit text length
+            return []
             
-            # Format prompt
-            prompt = CAPTION_GENERATOR_USER.format(
+        console.print(f"[blue]📝[/blue] Generating viral captions/hashtags...")
+        
+        caption_template = self.prompt_manager.get_caption_prompt()
+        
+        updated_clips = []
+        for clip in clips:
+            # Extract actual text for context
+            clip_text = self._extract_clip_text(transcript, clip.start_time, clip.end_time)
+            
+            prompt = caption_template.format(
                 episode_number=episode_number,
                 clip_title=clip.title,
                 clip_summary=clip.summary,
                 clip_category=clip.category,
                 clip_text=clip_text,
+                podcast_name=podcast_name,
             )
             
             # Generate caption (SEQUENTIAL - one at a time)
@@ -591,6 +594,7 @@ class MultiAgentCurator:
         max_duration: int = 90,
         episode_number: int = 0,
         guest_name: str = "",
+        podcast_name: str = "Podcast",
         progress_callback: callable = None,
         pause_callback: callable = None,
     ) -> list[CuratedClipV2]:
@@ -776,6 +780,7 @@ class MultiAgentCurator:
         max_duration: int = 90,
         episode_number: int = 0,
         guest_name: str = "",
+        podcast_name: str = "Podcast",
     ) -> list[CuratedClipV2]:
         """
         Run the full multi-agent curation pipeline.
@@ -807,7 +812,8 @@ class MultiAgentCurator:
             # STAGE 1: FINDER
             task = progress.add_task("Stage 1/3: FINDER identifying candidates...", total=None)
             
-            finder_prompt = FINDER_USER_TEMPLATE.format(
+            finder_template = self.prompt_manager.get_finder_prompt()
+            finder_prompt = finder_template.format(
                 min_duration=min_duration,
                 max_duration=max_duration,
                 language=transcript.language,
@@ -827,7 +833,8 @@ class MultiAgentCurator:
             # STAGE 2: CRITIC
             progress.update(task, description="Stage 2/3: CRITIC evaluating...")
             
-            critic_prompt = CRITIC_USER_TEMPLATE.format(
+            critic_template = self.prompt_manager.get_critic_prompt()
+            critic_prompt = critic_template.format(
                 candidates_json=json.dumps(candidates, indent=2),
                 transcript=transcript_text,
                 min_duration=min_duration,
@@ -847,7 +854,8 @@ class MultiAgentCurator:
             # STAGE 3: RANKER
             progress.update(task, description="Stage 3/3: RANKER scoring...")
             
-            ranker_prompt = RANKER_USER_TEMPLATE.format(
+            ranker_template = self.prompt_manager.get_ranker_prompt()
+            ranker_prompt = ranker_template.format(
                 approved_json=json.dumps(approved, indent=2),
                 transcript=transcript_text,
                 signals_summary=signals_summary,

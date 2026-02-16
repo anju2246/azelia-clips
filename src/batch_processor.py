@@ -199,7 +199,22 @@ class BatchProcessor:
         # DUAL PIPELINE: Use Supabase for curation (with speaker timing)
         #                WhisperX only for final clip transcription (word-level)
         
-        # Load transcript (local or re-transcribe)
+        if self.use_supabase:
+            console.print(f"[dim]   Loading transcript from Supabase...[/dim]")
+            from src.sources.supabase_transcripts import get_transcript_from_supabase
+            transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
+            
+            if transcript is None:
+                # Fallback to local or re-transcribe
+                console.print(f"[yellow]   Supabase transcript not found, falling back to local...[/yellow]")
+                if episode.transcript_path and episode.transcript_path.exists():
+                    transcript = Transcript.load(episode.transcript_path)
+                else:
+                    console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
+                    transcript = self._transcribe_video(episode.video_path, job_id=job_id)
+                    transcript.save(episode.episode_folder / "transcript.json")
+        else:
+            # Traditional mode: local transcript or WhisperX
             if episode.transcript_path and episode.transcript_path.exists():
                 console.print(f"[dim]   Loading existing transcript...[/dim]")
                 transcript = Transcript.load(episode.transcript_path)
@@ -242,12 +257,14 @@ class BatchProcessor:
                 return False
             
             curator = MultiAgentCurator()
+            from src.config import settings
             curated_clips = curator.curate_chunked(
                 transcript,
                 top_n=None,  # Get ALL clips, not limited to clips_per_episode
                 min_duration=self.min_duration,
                 max_duration=self.max_duration,
                 episode_number=episode.episode_number,
+                podcast_name=settings.podcast_name,
                 progress_callback=curation_progress,
                 pause_callback=check_pause
             )
@@ -503,6 +520,16 @@ class BatchProcessor:
             from src.job_store import get_job_store
             store = get_job_store()
             store.update_progress(job_id, 20, "🎤 Obteniendo transcripción...")
+            # The provided change was syntactically incorrect and used undefined variables (clip, ep, settings).
+            # Assuming the intent was to pass podcast_name to the transcription config if applicable,
+            # but the current transcription driver doesn't directly support it.
+            # The original code for transcription is kept as is, as the requested change
+            # cannot be applied syntactically or logically in this specific method.
+            # If the intent was to add a new parameter to get_transcript, that would require
+            # modifying the get_transcript signature and its implementations.
+            # The instruction "Pass settings.podcast_name" is too vague without a clear target function.
+            # The provided code snippet for the change was malformed.
+            # Therefore, no change is made to the _transcribe_video method based on the provided snippet.
             
         try:
             return self.transcription_driver.get_transcript(resource, **self.transcription_config)
@@ -593,6 +620,7 @@ def run_batch(
     dry_run: bool = False,
     clip_id: int | None = None,
     min_score: int = 70,
+    use_supabase: bool = False,
 ) -> dict:
     """
     Convenience function to run batch processing.
@@ -611,6 +639,7 @@ def run_batch(
         external_drive_path="episodes",
         clip_id=clip_id,
         min_score=min_score,
+        use_supabase=use_supabase,
     )
     return processor.run(start, end, dry_run)
 
@@ -622,6 +651,7 @@ if __name__ == "__main__":
     dry_run = "--dry-run" in sys.argv
     preview_mode = "--preview" in sys.argv
     from_preview = "--from-preview" in sys.argv
+    use_supabase = "--use-supabase" in sys.argv
     
     # Parse episode range (default: start=7 because EP001-EP006 don't have video)
     start = 7
@@ -706,5 +736,5 @@ if __name__ == "__main__":
         console.print("[yellow]   Not yet implemented. For now, edit curation.json directly.[/yellow]")
         sys.exit(0)
 
-    run_batch(start=start, end=end, dry_run=dry_run, clip_id=clip_id, min_score=min_score)
+    run_batch(start=start, end=end, dry_run=dry_run, clip_id=clip_id, min_score=min_score, use_supabase=use_supabase)
 

@@ -53,3 +53,6 @@ data/jobs.db
 
 # Model weights (auto-downloaded)
 *.pt
+
+# Local configuration (never commit)
+local_config/

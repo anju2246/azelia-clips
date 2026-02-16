@@ -1,0 +1,25 @@
+---
+import Layout from "../layouts/Layout.astro";
+import EpisodeList from "../components/library/EpisodeList";
+---
+
+<Layout title="Library - Celia Clips">
+    <div class="max-w-6xl mx-auto space-y-8">
+        <div class="flex items-center justify-between">
+            <div class="space-y-1">
+                <h1 class="text-3xl font-bold tracking-tight">Library</h1>
+                <p class="text-zinc-400">Manage your local podcast episodes.</p>
+            </div>
+            <div class="flex gap-2">
+                <a
+                    href="/settings"
+                    class="text-sm text-brand-400 hover:text-brand-300 flex items-center gap-1"
+                >
+                    Configure Podcast Directory &rarr;
+                </a>
+            </div>
+        </div>
+
+        <EpisodeList client:load />
+    </div>
+</Layout>

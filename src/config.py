@@ -18,6 +18,7 @@ class Settings(BaseSettings):
 
     # API Keys
     groq_api_key: str = Field(default="", description="Groq API key for LLM inference")
+    groq_api_key_2: str = Field(default="", description="Secondary Groq API key (fallback)")
     hf_token: str = Field(default="", alias="HF_TOKEN", description="HuggingFace token for Pyannote")
     anthropic_api_key: str = Field(default="", description="Anthropic API key for Claude")
 
@@ -25,6 +26,9 @@ class Settings(BaseSettings):
     gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID", description="Google Cloud Project ID")
     gcp_location: str = Field(default="us-central1", alias="GCP_LOCATION", description="GCP region")
 
+    # Supabase
+    supabase_url: str = Field(default="", description="Supabase project URL")
+    supabase_key: str = Field(default="", description="Supabase anon/service key")
 
     # Whisper Configuration
     whisper_model: str = Field(default="small", description="Whisper model size (tiny, base, small, medium, large-v3)")
@@ -53,8 +57,12 @@ class Settings(BaseSettings):
     
     # Local Library
     podcast_dir: Path = Field(
-        default=Path("external_drive/Backup Inminente"), 
+        default=Path("external_drive/MyPodcast"), 
         description="Path to podcast episodes folder"
+    )
+    podcast_name: str = Field(
+        default="My Podcast",
+        description="Name of the podcast for captions and context"
     )
 
     def ensure_output_dir(self) -> Path:
