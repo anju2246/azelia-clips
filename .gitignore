@@ -56,3 +56,10 @@ data/jobs.db
 
 # Local configuration (never commit)
 local_config/
+
+# Private development data (NEVER commit)
+private/
+
+# Server runtime data
+server/data/
+src.bak/
