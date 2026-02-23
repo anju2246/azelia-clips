@@ -666,14 +666,10 @@ export default function SettingsDashboard() {
                                     <Segmented
                                         options={[
                                             { value: 'normalize', label: 'Simple Normalize' },
-                                            { value: 'demucs', label: '🧪 AI Separation (Demucs)' },
                                             { value: 'none', label: 'None' },
                                         ]}
                                         defaultValue="normalize"
                                     />
-                                    <InfoBox variant="experimental">
-                                        🧪 <strong>Demucs AI Separation is experimental.</strong> Isolates vocals from background noise using AI. Requires significant RAM/GPU resources. May not work on all machines.
-                                    </InfoBox>
                                 </div>
                             </Card>
                         </>
