@@ -1,32 +1,30 @@
-from fastapi import Depends
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from packages.core.auth import verify_supabase_jwt
+from packages.core.auth import verify_supabase_jwt, User
 from packages.core.config import settings
 from typing import Optional
 
 security = HTTPBearer(auto_error=False)
 
-def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> dict:
+def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
     """
     FastAPI dependency to extract and validate the Supabase JWT.
-    Returns the decoded token payload on success.
+    Returns the decoded token as a User object on success.
     Raises HTTPException 401 on failure.
     """
     if credentials is None:
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
     token = credentials.credentials
-    user_payload = verify_supabase_jwt(token)
-    return user_payload
+    user = verify_supabase_jwt(token)
+    return user
 
-def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[dict]:
+def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
     """
     Auth dependency that skips validation in local dev (when SUPABASE_JWT_SECRET is not set).
     In production, validates the JWT normally.
     """
     if not settings.supabase_jwt_secret:
-        return {"sub": "dev-user", "role": "authenticated", "dev_mode": True}
+        return User(id="dev-user", email="dev@local", role="authenticated")
     if credentials is None:
-        from fastapi import HTTPException, status
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
     return verify_supabase_jwt(credentials.credentials)

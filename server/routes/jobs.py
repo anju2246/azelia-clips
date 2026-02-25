@@ -1,18 +1,27 @@
 import shutil
 import uuid
 from pathlib import Path
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Header, Body, Depends
+from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Header, Body, Depends, WebSocket, WebSocketDisconnect
+import asyncio
 from fastapi.responses import FileResponse
 from server.models import (
     JobResponse, JobStatus, ProcessRequest, Clip,
     SettingsResponse, UpdateSettingsRequest, EpisodeResponse
 )
-from server.processor import SingleVideoProcessor
+from server.models import (
+    JobResponse, JobStatus, ProcessRequest, Clip,
+    SettingsResponse, UpdateSettingsRequest, EpisodeResponse
+)
+from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
-from packages.clips.pipeline import BatchProcessor
 from server.middleware.auth import require_auth
+from sqlmodel import Session
+from packages.core.db.engine import engine
+from packages.core.db.models import Episode
 from typing import List
+import json
+from packages.clips.vision.face_tracker import FaceTracker
 
 router = APIRouter()
 store = get_job_store()
@@ -21,35 +30,9 @@ store = get_job_store()
 DATA_DIR = Path("data/jobs")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-def run_processing_task(job_id: str, file_path: Path, settings: ProcessRequest, authorization: str = None, transcription_config: dict = None):
-    """Background task to run the processing pipeline."""
-    try:
-        # Update status to processing
-        store.update_progress(job_id, 0, "Starting processing...", status="processing")
-        
-        # Initialize processor
-        # Output will be in data/jobs/{job_id}/clips
-        processor = SingleVideoProcessor(
-            output_dir=file_path.parent,
-            min_duration=settings.min_duration,
-            max_duration=settings.max_duration,
-            min_score=settings.min_score,
-            use_supabase=(transcription_config.get("source_type") == "supabase_custom"),
-            auth_token=authorization,
-            transcription_config=transcription_config
-        )
-        
-        # Run processing
-        # This blocks until finished (which is fine for a background thread)
-        clips_count = processor.process_single(file_path, job_id=job_id)
-        
-        # Mark complete
-        store.complete_job(job_id, clips_count)
-        
-    except Exception as e:
-        import traceback
-        traceback.print_exc()
-        store.fail_job(job_id, str(e))
+# Removing legacy run_processing_task function. 
+# The processing logic is now registered in the Queue worker inside server/dependencies.py
+
 
 @router.post("/process", response_model=JobResponse)
 async def process_video(
@@ -103,15 +86,39 @@ async def process_video(
         "supabase_key": supabase_key
     }
     
-    # Initialize Job in Store
+    # Initialize Job in Store (Legacy for UI compatibility)
     store.create_job(
         job_id=job_id,
-        episode_id=f"UPLOAD-{job_id[:8]}", # Dummy episode ID
+        episode_id=file.filename,
         config=settings.dict()
     )
     
-    # Start Background Task
-    background_tasks.add_task(run_processing_task, job_id, file_path, settings, None, transcription_config)
+    # NEW: Create Episode in SQLite
+    with Session(engine) as session:
+        episode = Episode(
+            user_id=user["sub"] if user else "anonymous",
+            title=file.filename,
+            video_path=str(file_path),
+            status="queued"
+        )
+        session.add(episode)
+        session.commit()
+        session.refresh(episode)
+    
+    # Enqueue locally using the Hybrid Queue interface
+    # Resolvendo "RuntimeWarning: coroutine was never awaited" enrutándolo a call via create_task 
+    # ya que enqueue de SQLiteJobQueue no asume asyncio dentro de este endpoint sincrónico/mezclado
+    payload = {
+        "episode_id": episode.id,
+        "video_path": str(file_path),
+        "settings": settings.dict(),
+        "transcription_config": transcription_config,
+        "auth_token": auth_token
+    }
+    
+    # Usamos enqueue como un background task si el router es async, pero router es async
+    import asyncio
+    asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
     
     # Return initial status
     job = store.get_job(job_id)
@@ -192,6 +199,94 @@ async def get_clip(job_id: str, filename: str):
         return FileResponse(path_review)
         
     raise HTTPException(status_code=404, detail="Clip not found")
+
+@router.post("/jobs/{job_id}/extract-faces")
+async def extract_faces(job_id: str):
+    """Scan video to extract unique biometric face identities (MTCNN + FaceNet)."""
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+        
+    def run_extractor():
+        tracker = FaceTracker()
+        video_path = DATA_DIR / job_id / "source.mp4"
+        output_dir = DATA_DIR / job_id / "faces"
+        if not video_path.exists():
+            return {}
+        return tracker.extract_unique_faces(str(video_path), str(output_dir))
+        
+    faces = await asyncio.to_thread(run_extractor)
+    
+    # Save a JSON manifest for the GET endpoint
+    with open(DATA_DIR / job_id / "faces.json", "w") as f:
+        json.dump(faces, f)
+        
+    return {"status": "success", "faces": faces}
+
+@router.get("/jobs/{job_id}/faces")
+async def get_faces(job_id: str):
+    """Returns the biometric face map {FACE_XX: filename} and role assignments if available."""
+    json_path = DATA_DIR / job_id / "faces.json"
+    if not json_path.exists():
+        return {"status": "pending", "faces": {}}
+    
+    with open(json_path, "r") as f:
+        faces = json.load(f)
+    
+    # Include role assignments if they exist
+    roles_path = DATA_DIR / job_id / "roles.json"
+    roles = {}
+    if roles_path.exists():
+        with open(roles_path, "r") as f:
+            roles = json.load(f)
+    
+    return {"status": "success", "faces": faces, "roles": roles}
+
+@router.get("/jobs/{job_id}/faces/{filename}")
+async def get_face_image(job_id: str, filename: str):
+    """Serves the actual thumbnail image of a face."""
+    safe_dir = (DATA_DIR / job_id / "faces").resolve()
+    path = (safe_dir / filename).resolve()
+    
+    # Path traversal protection
+    if not path.is_relative_to(safe_dir) or not path.exists():
+        raise HTTPException(status_code=404, detail="Face not found")
+        
+    return FileResponse(path)
+
+@router.post("/jobs/{job_id}/assign-roles")
+async def assign_roles(job_id: str, role_map: dict):
+    """
+    Assign semantic roles to biometric face IDs.
+    
+    Body: {"FACE_00": "Host", "FACE_01": "Guest"}
+    
+    These roles are used by the reframer to determine which face to 
+    follow based on speaker diarization (e.g., follow the Host).
+    """
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    # Validate that referenced face IDs exist
+    faces_path = DATA_DIR / job_id / "faces.json"
+    if faces_path.exists():
+        with open(faces_path, "r") as f:
+            known_faces = json.load(f)
+        
+        unknown = [fid for fid in role_map if fid not in known_faces]
+        if unknown:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unknown face IDs: {unknown}. Known: {list(known_faces.keys())}"
+            )
+    
+    # Save role assignments
+    roles_path = DATA_DIR / job_id / "roles.json"
+    with open(roles_path, "w") as f:
+        json.dump(role_map, f)
+    
+    return {"status": "success", "roles": role_map}
 
 # --- Local Mode Endpoints ---
 
@@ -638,3 +733,44 @@ async def callback_youtube(
     except Exception as e:
         print(f"OAuth Callback Error: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.websocket("/ws/jobs/{job_id}")
+async def websocket_job_status(websocket: WebSocket, job_id: str):
+    """
+    Tethers a WebSocket connection to stream real-time progress.
+    Avoids heavy polling from the UI.
+    """
+    await websocket.accept()
+    
+    try:
+        while True:
+            job = store.get_job(job_id)
+            if not job:
+                await websocket.send_json({"error": "Job not found"})
+                await asyncio.sleep(2)
+                continue
+                
+            await websocket.send_json({
+                "job_id": job.job_id,
+                "status": job.status,
+                "progress": job.progress,
+                "message": job.message
+            })
+            
+            # Close connection automatically if terminal state is reached
+            if job.status in ["completed", "failed", "error", "cancelled"]:
+                break
+                
+            # Stream every 1.5s
+            await asyncio.sleep(1.5)
+            
+    except WebSocketDisconnect:
+        # Client gracefully closed or lost connection
+        pass
+    except Exception as e:
+        print(f"WebSocket Error on {job_id}: {e}")
+        
+    try:
+        await websocket.close()
+    except Exception:
+        pass

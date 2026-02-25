@@ -1,6 +1,7 @@
 """Split screen layout with dynamic face tracking - predefined layout approach."""
 
 from pathlib import Path
+import shutil
 import subprocess
 
 from rich.console import Console
@@ -12,16 +13,209 @@ from packages.core.video_utils import VideoCaptureContext
 console = Console()
 
 
+class VideoReframer:
+    """
+    Applies dynamic crop trajectories to video using FFmpeg.
+    
+    Takes a trajectory of (timestamp, center_x, center_y) keyframes and produces
+    a cropped video that follows the trajectory smoothly via time-based expressions.
+    """
+    
+    TRANSITION_SECS = 0  # Instant cut between speaker positions
+    
+    def __init__(self, output_width: int = 1080, output_height: int = 1920):
+        self.output_width = output_width
+        self.output_height = output_height
+    
+    @staticmethod
+    def _simplify_trajectory(
+        trajectory: list[tuple[float, int, int]],
+        min_move_px: int = 40,
+    ) -> list[tuple[float, int, int]]:
+        """Reduce trajectory to key transition points.
+        
+        Collapses consecutive keyframes with similar positions into single
+        points, keeping only moments where the crop actually needs to move.
+        """
+        if not trajectory:
+            return []
+        
+        simplified = [trajectory[0]]
+        for pt in trajectory[1:]:
+            last = simplified[-1]
+            dx = abs(pt[1] - last[1])
+            dy = abs(pt[2] - last[2])
+            if dx > min_move_px or dy > min_move_px:
+                simplified.append(pt)
+        
+        # Always include the last point for proper duration coverage
+        if len(trajectory) > 1 and simplified[-1] != trajectory[-1]:
+            simplified.append(trajectory[-1])
+        
+        return simplified
+    
+    @staticmethod
+    def _build_crop_expr(
+        keypoints: list[tuple[float, int]],
+        half_crop: int,
+        src_dim: int,
+        transition_secs: float = 0,
+    ) -> str:
+        """Build an FFmpeg time-based expression for crop X or Y.
+        
+        Generates nested if(lt(t,...), ...) expressions that instantly
+        cut between keypoint positions, clamped to valid bounds.
+        
+        Args:
+            keypoints: List of (timestamp, pixel_position) for one axis.
+            half_crop: Half of crop width/height (for centering offset).
+            src_dim: Source dimension (width or height) for clamping.
+            transition_secs: Unused (kept for API compat). Always instant.
+        """
+        max_pos = src_dim - 2 * half_crop  # Maximum valid crop origin
+        
+        def clamp_pos(center: int) -> int:
+            origin = center - half_crop
+            return max(0, min(origin, max_pos))
+        
+        if len(keypoints) <= 1:
+            pos = clamp_pos(keypoints[0][1]) if keypoints else 0
+            return str(pos)
+        
+        # Build piecewise expression from right to left (innermost = last segment)
+        # Instant cuts: if time < t_next, use pos_curr, else next segment
+        
+        expr = str(clamp_pos(keypoints[-1][1]))  # Fallback = last position
+        
+        for i in range(len(keypoints) - 2, -1, -1):
+            t_next = keypoints[i + 1][0]
+            pos_curr = clamp_pos(keypoints[i][1])
+            expr = f"if(lt(t\\,{t_next:.2f})\\,{pos_curr}\\,{expr})"
+        
+        return expr
+    
+    def reframe_dynamic(
+        self,
+        video_path: Path | str,
+        output_path: Path | str,
+        trajectory: list[tuple[float, int]] | list[tuple[float, int, int]],
+        start_time: float = 0,
+        duration: float | None = None,
+        zoom_factor: float = 1.0,
+    ):
+        """
+        Crop video dynamically following face positions over time.
+        
+        Uses FFmpeg crop filter with TIME-BASED EXPRESSIONS that interpolate
+        the crop position between trajectory keyframes, creating a smooth
+        pan that follows the active speaker.
+        """
+        import cv2
+        
+        video_path = Path(video_path)
+        output_path = Path(output_path)
+        
+        # Get source dimensions
+        with VideoCaptureContext(str(video_path)) as cap:
+            src_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            src_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        
+        # Normalize trajectory to 3-tuples (timestamp, x, y)
+        norm_traj: list[tuple[float, int, int]] = []
+        for pt in trajectory:
+            if len(pt) >= 3:
+                norm_traj.append((pt[0], pt[1], pt[2]))
+            else:
+                norm_traj.append((pt[0], pt[1], src_height // 2))
+        
+        # Calculate crop dimensions preserving output aspect ratio
+        target_aspect = self.output_width / self.output_height
+        crop_height = src_height
+        crop_width = int(crop_height * target_aspect)
+        
+        if crop_width > src_width:
+            crop_width = src_width
+            crop_height = int(crop_width / target_aspect)
+        
+        # Apply zoom factor (e.g. 0.85 = 85% of max = zooming IN)
+        crop_width = int(crop_width * zoom_factor)
+        crop_height = int(crop_height * zoom_factor)
+        crop_width = min(crop_width, src_width)
+        crop_height = min(crop_height, src_height)
+        
+        # Ensure even dimensions for libx264
+        crop_width -= crop_width % 2
+        crop_height -= crop_height % 2
+        
+        half_w = crop_width // 2
+        half_h = crop_height // 2
+        
+        # Simplify trajectory to key transitions
+        simplified = self._simplify_trajectory(norm_traj)
+        
+        console.print(
+            f"[dim]   Dynamic crop: {crop_width}x{crop_height} from {src_width}x{src_height} "
+            f"({len(simplified)} transition points from {len(trajectory)} keyframes)[/dim]"
+        )
+        
+        # Debug: show crop positions per transition
+        max_x_origin = src_width - crop_width
+        max_y_origin = src_height - crop_height
+        for pt in simplified:
+            cx, cy = pt[1], pt[2]
+            ox = max(0, min(cx - half_w, max_x_origin))
+            oy = max(0, min(cy - half_h, max_y_origin))
+            console.print(
+                f"[dim]     t={pt[0]:.1f}s → face@({cx},{cy}) → crop_origin({ox},{oy})[/dim]"
+            )
+        
+        # Build time-based FFmpeg expressions for X and Y
+        x_keypoints = [(t, x) for t, x, y in simplified]
+        y_keypoints = [(t, y) for t, x, y in simplified]
+        
+        x_expr = self._build_crop_expr(x_keypoints, half_w, src_width, self.TRANSITION_SECS)
+        y_expr = self._build_crop_expr(y_keypoints, half_h, src_height, self.TRANSITION_SECS)
+        
+        vf = f"crop={crop_width}:{crop_height}:{x_expr}:{y_expr},scale={self.output_width}:{self.output_height}"
+        
+        cmd = [
+            shutil.which("ffmpeg") or "ffmpeg", "-y",
+            "-ss", str(start_time),
+            "-i", str(video_path),
+            "-t", str(duration) if duration else "",
+            "-vf", vf,
+            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+            "-an",
+            str(output_path),
+        ]
+        # Remove empty args
+        cmd = [c for c in cmd if c]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            raise RuntimeError(f"FFmpeg crop failed: {result.stderr[-500:]}")
+    
+    def reframe_center(
+        self,
+        video_path: Path | str,
+        output_path: Path | str,
+        start_time: float = 0,
+        duration: float | None = None,
+    ):
+        """Simple center crop to output dimensions."""
+        # Use center trajectory
+        trajectory = [(0, 0)]  # Will use source center by default
+        self.reframe_dynamic(video_path, output_path, trajectory, start_time, duration)
+
+
 def reframe_video(
     video_path: Path | str,
     output_path: Path | str,
     wide_height_ratio: float = 0.32,  # Wide shot takes ~32% of bottom (608/1920)
     start_time: float = 0,
     duration: float | None = None,
-    use_lip_sync: bool = False,  # Use lip movement detection (more accurate, slower)
-    use_hybrid: bool = True,  # Use hybrid: diarization timing + lip sync calibration (recommended)
-    use_talknet: bool = False,  # Use TalkNet audio-visual active speaker detection
-    pre_cut: bool = False,  # NEW: If True, video is already a cut clip - skip -ss/-t
+    pre_cut: bool = False,  # If True, video is already a cut clip - skip -ss/-t
+    speaker_segments: list[dict] | None = None,
 ) -> Path:
     """
     Create split screen with:
@@ -30,24 +224,14 @@ def reframe_video(
     
     The close-up fills the space above the wide shot exactly.
     
-    Speaker Detection Modes (priority order):
-    - use_talknet: TalkNet audio-visual detection (best accuracy, slowest)
-    - use_hybrid: Diarization + lip sync calibration (good accuracy, faster)
-    - face-only: Basic face tracking (fallback)
-    
     Args:
         video_path: Path to source video (or pre-cut clip if pre_cut=True)
         output_path: Path for output video
         wide_height_ratio: Ratio of screen for wide shot
         start_time: Start time in seconds (ignored if pre_cut=True)
         duration: Duration in seconds (ignored if pre_cut=True)
-        use_lip_sync: If True, use pure lip movement detection (jittery)
-        use_hybrid: If True, use hybrid diarization + lip sync (recommended)
-        use_talknet: If True, use TalkNet audio-visual detection (most accurate)
         pre_cut: If True, video is already a cut clip - process from start without seeking
     """
-    from packages.clips.vision.reframer import VideoReframer
-    from packages.clips.vision.face_tracker import FaceTracker
     import cv2
     
     video_path = Path(video_path)
@@ -85,61 +269,61 @@ def reframe_video(
     console.print(f"[dim]   Wide: 1080x{wide_actual_height} (16:9 at bottom)[/dim]")
     
     # -----------------------------------------------------------
-    # STEP 1: Create close-up with speaker tracking
+    # STEP 1: Create close-up following the active speaker
+    # Uses diarization (who speaks when) + face tracking (where they are)
     # -----------------------------------------------------------
-    console.print(f"\n[blue]Step 1:[/blue] Creating speaker-aware close-up...")
+    console.print(f"\n[blue]Step 1:[/blue] Creating close-up with speaker tracking...")
     
-    end_time = start_time + duration if duration else None
-    trajectory = None
+    from packages.clips.vision.face_tracker import FaceTracker
     
-    # Priority: TalkNet > Hybrid > Face-only
-    if use_talknet:
-        # TalkNet: Audio-visual active speaker detection (best accuracy)
-        console.print(f"[cyan]   Using TALKNET detection (audio-visual sync)[/cyan]")
-        try:
-            from packages.clips.vision.talknet_detector import detect_with_talknet
-            
-            trajectory = detect_with_talknet(
-                str(video_path), start_time, duration,
-                target_aspect=target_width / closeup_height
-            )
-            console.print(f"[dim]   {len(trajectory)} keyframes (talknet)[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]   TalkNet failed: {e}, falling back to hybrid[/yellow]")
-            trajectory = None
+    trajectory = []
+    detections = []
     
-    if trajectory is None and use_hybrid:
-        # HYBRID: Diarization timing + lip sync calibration (good accuracy)
-        console.print(f"[cyan]   Using HYBRID detection (diarization + lip sync calibration)[/cyan]")
-        from packages.clips.vision.hybrid_speaker_detector import detect_and_track_hybrid
+    try:
+        tracker = FaceTracker(sample_fps=2.0)
+        scan_start = 0 if pre_cut else start_time
+        scan_end = duration if pre_cut else (start_time + duration)
+        detections = tracker.detect_faces(video_path, scan_start, scan_end)
         
-        trajectory = detect_and_track_hybrid(
-            video_path, start_time, duration,
-            target_aspect=target_width / closeup_height
+        # Fully automated active speaker trajectory via mouth motion mapping
+        trajectory = tracker.get_speaker_trajectory(
+            video_path=video_path,
+            detections=detections,
+            start_time=scan_start,
+            end_time=scan_end,
+            video_width=src_width,
+            video_height=src_height,
+            speaker_segments=speaker_segments,
         )
-        console.print(f"[dim]   {len(trajectory)} keyframes (hybrid)[/dim]")
-    
-    if trajectory is None or len(trajectory) == 0:
-        # Fallback: face detection only (no speaker awareness)
-        console.print(f"[dim]   Using face-only tracking (no speaker detection)[/dim]")
-        tracker = FaceTracker(sample_fps=3.0)
-        detections = tracker.detect_faces(video_path, start_time=start_time, end_time=end_time)
+        console.print(f"[dim]   {len(trajectory)} keyframes (speaker tracking)[/dim]")
         
-        trajectory = tracker.get_smooth_crop_trajectory(
-            detections, src_width, src_height, 
-            target_aspect=target_width / closeup_height
-        )
-        console.print(f"[dim]   {len(trajectory)} keyframes (face tracking)[/dim]")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Face tracking failed: {e}. Using center crop.[/yellow]")
+    
+    # Fallback: center crop if no trajectory generated
+    if not trajectory:
+        num_keyframes = max(1, int(duration))
+        center_x = src_width // 2
+        trajectory = [(i, center_x) for i in range(num_keyframes)]
+        console.print(f"[dim]   {len(trajectory)} keyframes (center crop fallback)[/dim]")
     
     # Use TempFileManager for guaranteed cleanup (fixes orphaned temp files bug)
     with TempFileManager(prefix="split_") as tmp:
         # Create temporary close-up video with exact dimensions
         closeup_path = tmp.create('.mp4')
         
+        # Compute dynamic zoom from detected face sizes (safe zone)
+        zoom_factor = 0.7  # default fallback
+        try:
+            zoom_factor = FaceTracker.compute_safe_zoom(
+                detections, src_height,
+            )
+        except Exception:
+            pass  # use default
+        
         # Close-up sized to fit exactly above wide shot
-        # zoom_factor=0.85 gives medium shot framing (head + shoulders)
         reframer = VideoReframer(output_width=target_width, output_height=closeup_height)
-        reframer.reframe_dynamic(video_path, closeup_path, trajectory, start_time, duration, zoom_factor=0.85)
+        reframer.reframe_dynamic(video_path, closeup_path, trajectory, start_time, duration, zoom_factor=zoom_factor)
         
         # -----------------------------------------------------------
         # STEP 2: Create wide shot (16:9)
@@ -149,7 +333,7 @@ def reframe_video(
         wide_path = tmp.create('.mp4')
         
         cmd_wide = [
-            "/usr/local/bin/ffmpeg", "-y",
+            shutil.which("ffmpeg") or "ffmpeg", "-y",
             "-ss", str(start_time),
             "-i", str(video_path),
             "-t", str(duration),
@@ -174,7 +358,7 @@ def reframe_video(
         console.print(f"\n[blue]Step 3:[/blue] Stacking videos...")
         
         cmd_stack = [
-            "/usr/local/bin/ffmpeg", "-y",
+            shutil.which("ffmpeg") or "ffmpeg", "-y",
             "-i", str(closeup_path),
             "-i", str(wide_path),
         ]

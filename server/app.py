@@ -1,10 +1,28 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from server.routes.jobs import router
 from packages.core.config import settings
 
-app = FastAPI(title="Celia Clips API", version="0.1.0")
+from packages.core.db.engine import init_db
+from server.dependencies import job_queue
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Setup Database (creates missing tables)
+    init_db()
+    
+    # Start Job Queue Background Workers
+    # Here we would register the main processing logic and then start:
+    await job_queue.start_workers(num_workers=1)
+    
+    yield
+    
+    # Graceful Shutdown
+    await job_queue.stop_workers()
+
+app = FastAPI(title="Celia Clips API", version="0.1.0", lifespan=lifespan)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):

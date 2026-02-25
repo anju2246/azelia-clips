@@ -1,15 +1,22 @@
 import jwt
-from typing import Dict, Any
-from fastapi import HTTPException, status
+from typing import Dict, Any, Optional
+from fastapi import HTTPException, status, Security
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel
 from packages.core.config import settings
 
-def verify_supabase_jwt(token: str) -> Dict[str, Any]:
+security = HTTPBearer()
+
+class User(BaseModel):
+    id: str
+    email: Optional[str] = None
+    role: Optional[str] = None
+
+def verify_supabase_jwt(token: str) -> User:
     """
-    Verifies a Supabase-issued JWT and returns the parsed payload.
-    Extracts the user ID, role, and standard claims.
+    Verifies a Supabase-issued JWT and returns the parsed User model.
     """
     if not settings.supabase_jwt_secret:
-        # If running locally without a secret configured, fail secure
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Server misconfigured: SUPABASE_JWT_SECRET is missing."
@@ -23,7 +30,20 @@ def verify_supabase_jwt(token: str) -> Dict[str, Any]:
             algorithms=["HS256"],
             options={"verify_aud": False} # Sometimes aud is custom or missing
         )
-        return payload
+        
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token payload missing required 'sub' claim"
+            )
+            
+        return User(
+            id=user_id,
+            email=payload.get("email"),
+            role=payload.get("role")
+        )
+        
     except jwt.ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -34,3 +54,11 @@ def verify_supabase_jwt(token: str) -> Dict[str, Any]:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token"
         )
+
+async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(security)) -> User:
+    """
+    FastAPI Dependency to get the current authenticated user from the Authorization header.
+    Usage in route: async def my_route(user: User = Depends(get_current_user)):
+    """
+    token = credentials.credentials
+    return verify_supabase_jwt(token)

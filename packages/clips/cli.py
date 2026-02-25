@@ -207,27 +207,16 @@ def reframe(
         output = video.with_stem(f"{video.stem}_vertical")
 
     if mode == "face":
-        from packages.clips.vision import FaceTracker, VideoReframer
+        from packages.clips.vision import FaceTracker
         import cv2
 
         console.print("[bold blue]🎬 Celia Clips[/bold blue] - Face Tracking Reframe\n")
+        # TODO (Paso 5): Wire up biometric face tracking
+        console.print("[yellow]⚠ Face tracking is being migrated to biometric system.[/yellow]")
+        console.print("[dim]   Using center crop as temporary fallback.[/dim]")
+        mode = "center"  # Fall through to center mode below
 
-        # Get video dimensions
-        cap = cv2.VideoCapture(str(video))
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        cap.release()
-
-        # Track faces with smooth trajectory
-        tracker = FaceTracker()
-        detections = tracker.detect_faces(video, start_time=start, end_time=start + duration if duration else None)
-        trajectory = tracker.get_smooth_crop_trajectory(detections, width, height)
-
-        # Reframe with face tracking
-        reframer = VideoReframer()
-        reframer.reframe_dynamic(video, output, trajectory, start, duration)
-
-    else:
+    if mode == "center":
         from packages.clips.vision import VideoReframer
         console.print("[bold blue]🎬 Celia Clips[/bold blue] - Center Reframe\n")
         reframer = VideoReframer()

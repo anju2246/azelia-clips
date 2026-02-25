@@ -18,7 +18,7 @@ ENV/
 
 # Output
 output/
-clips/
+/clips/
 external_drive
 
 # Video/Audio files (never commit)

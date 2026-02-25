@@ -1,22 +1,18 @@
 """
-Vision module for speaker tracking and intelligent video reframing.
+Vision module for biometric face tracking and intelligent video reframing.
 
 Components:
-- face_tracker: Face detection with MediaPipe + DeepSORT persistent tracking
-- hybrid_speaker_detector: Diarization + lip sync for speaker-aware tracking
-- reframer: Convert 16:9 video to 9:16 with smart cropping
+- face_tracker: Face detection (MTCNN) + identity (FaceNet/InceptionResnetV1)
 - reframer: Dynamic video reframing and layout construction
 """
 
-from packages.clips.vision.face_tracker import FaceTracker, FaceDetection, track_face
+from packages.clips.vision.face_tracker import (
+    FaceTracker, FaceDetection, FaceIdentity, IdentityStore, track_face,
+)
 from packages.clips.vision.reframer import VideoReframer, reframe_video
-from packages.clips.vision.hybrid_speaker_detector import HybridSpeakerDetector, detect_and_track_hybrid
-from packages.clips.vision.reframer import reframe_video
 
 __all__ = [
-    "FaceTracker", "FaceDetection", "track_face",
-    "HybridSpeakerDetector", "detect_and_track_hybrid",
+    "FaceTracker", "FaceDetection", "FaceIdentity", "IdentityStore",
+    "track_face",
     "VideoReframer", "reframe_video",
-    "reframe_video",
 ]
-

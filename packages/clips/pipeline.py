@@ -381,29 +381,19 @@ class BatchProcessor:
                         clip.end_time,
                     )
                     
-                    # 3b. Create split-screen with tracking
-                    # Always use hybrid mode (diarization + lip sync calibration)
-                    # FIX: pre_cut=True because raw_clip is already extracted (avoids double-cut sync bug)
+                    # 3b. High-precision transcription and diarization strictly for this clip
+                    # (As per user request, we process each clip independently to guarantee high quality word-level timestamps and diarization)
+                    clip_transcript = self._transcribe_clip(raw_clip)
+                    
+                    # 3c. Create split-screen with tracking
+                    # Passes the clip-specific diarization into the FaceTracker
                     split_clip = tmp_path / "split.mp4"
                     reframe_video(
                         video_path=str(raw_clip),
                         output_path=str(split_clip),
-                        use_hybrid=True,
                         pre_cut=True,  # Clip already extracted, don't seek again
+                        speaker_segments=clip_transcript.segments,
                     )
-                    
-                    # 3c. Get transcript for subtitles
-                    # OPTIMIZATION: Reuse full transcript if it has word-level timestamps
-                    # This avoids redundant transcription (~40 min saved per episode)
-                    has_word_timestamps = any(len(seg.words) > 0 for seg in transcript.segments)
-                    
-                    if has_word_timestamps:
-                        # Slice the full transcript instead of re-transcribing
-                        clip_transcript = transcript.slice(clip.start_time, clip.end_time)
-                        console.print(f"[dim]     Using transcript slice ({len(clip_transcript.segments)} segments)[/dim]")
-                    else:
-                        # Supabase transcripts don't have word-level → need WhisperX
-                        clip_transcript = self._transcribe_clip(raw_clip)
                     
                     # 3d. Generate subtitles
                     subs_path = tmp_path / "subs.ass"

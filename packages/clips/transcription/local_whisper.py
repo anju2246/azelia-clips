@@ -40,7 +40,12 @@ class LocalWhisperSource(TranscriptionSource):
             word_timestamps=True,
             language="es"
         )
-        return self._format_result(result, str(video_path))
+        transcript = self._format_result(result, str(video_path))
+        
+        # Optional: Run speaker diarization if HF token is available
+        transcript = self._try_diarize(video_path, transcript)
+        
+        return transcript
 
     def _transcribe_openai(self, video_path: Path) -> Transcript:
         import whisper
@@ -52,7 +57,12 @@ class LocalWhisperSource(TranscriptionSource):
             language="es",
             word_timestamps=True
         )
-        return self._format_result(result, str(video_path))
+        transcript = self._format_result(result, str(video_path))
+        
+        # Optional: Run speaker diarization if HF token is available
+        transcript = self._try_diarize(video_path, transcript)
+        
+        return transcript
 
     def _format_result(self, result: dict, source_file: str) -> Transcript:
         segments = []
@@ -74,3 +84,34 @@ class LocalWhisperSource(TranscriptionSource):
             duration=result["segments"][-1]["end"] if result["segments"] else 0,
             source_file=source_file,
         )
+
+    def _try_diarize(self, video_path: Path, transcript: Transcript) -> Transcript:
+        """
+        Attempt speaker diarization. Gracefully skips if:
+        - No HF_TOKEN configured
+        - pyannote.audio not installed
+        - Any runtime error
+        
+        The transcript is returned with or without speaker labels.
+        """
+        try:
+            from packages.clips.transcription.diarizer import (
+                SpeakerDiarizer,
+                assign_speakers_to_transcript,
+            )
+            
+            diarizer = SpeakerDiarizer()
+            if not diarizer.is_available:
+                console.print(
+                    "[dim]Speaker diarization skipped (no HF_TOKEN set). "
+                    "Set HF_TOKEN in .env for speaker identification.[/dim]"
+                )
+                return transcript
+            
+            diarization_segments = diarizer.diarize(video_path)
+            assign_speakers_to_transcript(transcript.segments, diarization_segments)
+            
+        except Exception as e:
+            console.print(f"[yellow]⚠ Diarization failed: {e}. Continuing without speaker labels.[/yellow]")
+        
+        return transcript
