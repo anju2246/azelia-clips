@@ -46,10 +46,13 @@ Thumbs.db
 # Build artifacts
 *.egg-info/
 autoeditingsfc.egg-info/
+web/package-lock.json
 
 # Debug/runtime logs
 *.log
 data/jobs.db
+celia.db
+supabase_schema.sql
 
 # Model weights (auto-downloaded)
 *.pt
