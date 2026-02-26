@@ -49,14 +49,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include routes
+# Serve Astro Frontend build
+import os
+from fastapi.staticfiles import StaticFiles
+
+# Setup directory for static files if it doesn't exist (e.g. before first build)
+static_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "web", "dist")
+os.makedirs(static_dir, exist_ok=True)
+
+# Important: API routes must be included BEFORE the static files mount
 app.include_router(clips_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 
-@app.get("/")
+@app.get("/api/health")
 def health_check():
     return {"status": "ok", "service": "Celia Clips API"}
+
+# Mount the Astro built static directory at the root
+# html=True serves index.html automatically for directory roots
+app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
 if __name__ == "__main__":
     import uvicorn

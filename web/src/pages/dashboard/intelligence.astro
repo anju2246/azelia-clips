@@ -1,0 +1,21 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { IntelligenceDashboard } from "../../components/analytics/IntelligenceDashboard";
+import { YouTubeConnect } from "../../components/analytics/YouTubeConnect";
+---
+
+<DashboardLayout title="Local Intelligence">
+    <div class="mb-8">
+        <h1 class="text-3xl font-bold tracking-tight text-white mb-2">
+            Local Intelligence
+        </h1>
+        <p class="text-zinc-400">
+            Insights derived from your generated clips and connected platforms.
+        </p>
+    </div>
+
+    <IntelligenceDashboard client:load />
+
+    <h2 class="text-xl font-bold text-white mt-12 mb-6">Integrations</h2>
+    <YouTubeConnect client:load />
+</DashboardLayout>

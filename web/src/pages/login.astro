@@ -1,0 +1,33 @@
+---
+import { LoginForm } from "../components/auth/LoginForm";
+import "../styles/global.css";
+---
+
+<!doctype html>
+<html lang="en" class="dark">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width" />
+        <title>Login | Celia</title>
+        <meta name="theme-color" content="#020617" />
+        <link
+            href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+            rel="stylesheet"
+        />
+    </head>
+    <body
+        class="bg-zinc-950 font-sans min-h-screen relative overflow-hidden flex items-center justify-center p-4"
+    >
+        <div class="noise-overlay"></div>
+        <div class="grid-overlay"></div>
+
+        <div
+            class="absolute inset-x-0 top-0 h-96 bg-gradient-to-b from-brand-900/20 to-transparent pointer-events-none"
+        >
+        </div>
+
+        <div class="z-10 w-full">
+            <LoginForm client:load />
+        </div>
+    </body>
+</html>
