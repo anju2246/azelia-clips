@@ -2,7 +2,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from server.routes.jobs import router
+from server.routes.clips import router as clips_router
+from server.routes.settings import router as settings_router
+from server.routes.analytics import router as analytics_router
 from packages.core.config import settings
 
 from packages.core.db.engine import init_db
@@ -14,7 +16,6 @@ async def lifespan(app: FastAPI):
     init_db()
     
     # Start Job Queue Background Workers
-    # Here we would register the main processing logic and then start:
     await job_queue.start_workers(num_workers=1)
     
     yield
@@ -49,7 +50,9 @@ app.add_middleware(
 )
 
 # Include routes
-app.include_router(router, prefix="/api")
+app.include_router(clips_router, prefix="/api")
+app.include_router(settings_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api")
 
 @app.get("/")
 def health_check():
