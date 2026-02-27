@@ -11,9 +11,19 @@ export default defineConfig({
   integrations: [react()],
 
   vite: {
+    server: {
+      watch: {
+        usePolling: true, // Forces faster reloads
+      },
+      hmr: true, // Force Hot Module Replacement
+    },
+    optimizeDeps: {
+      force: true, // Disables Vite pre-bundling cache
+    },
     plugins: [
       tailwindcss(),
       VitePWA({
+        disable: process.env.NODE_ENV === 'development', // KILL aggressive offline caching in DEV
         registerType: 'autoUpdate',
         manifest: {
           name: 'Celia Clips',

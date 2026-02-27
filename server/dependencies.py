@@ -42,9 +42,13 @@ async def processing_worker(job_id: str, payload: Dict[str, Any]):
             transcription_config=transcription_config
         )
         
-        # Run processing
-        # This blocks until finished, but it runs inside the SQLiteJobQueue asyncio worker
-        clips_count = processor.process_single(file_path, job_id=job_id)
+        import asyncio
+        
+        # Run processing IN A SEPARATE THREAD to prevent blocking the FastAPI event loop
+        def run_processing():
+            return processor.process_single(file_path, job_id=job_id)
+            
+        clips_count = await asyncio.to_thread(run_processing)
         
         # Sync to Local Database
         with Session(engine) as session:

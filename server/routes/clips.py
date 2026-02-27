@@ -15,13 +15,13 @@ from fastapi.responses import FileResponse
 from sqlmodel import Session
 
 from server.models import (
-    JobResponse, JobStatus, ProcessRequest, Clip,
+    JobResponse, JobStatus, ProcessRequest, ProcessLocalRequest, Clip,
     EpisodeResponse
 )
 from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
-from server.middleware.auth import require_auth
+from server.middleware.auth import optional_auth
 from packages.core.db.engine import engine
 from packages.core.db.models import Episode
 from packages.clips.vision.face_tracker import FaceTracker
@@ -54,7 +54,7 @@ async def process_video(
     assemblyai_key: str | None = Form(None),
     supabase_url: str | None = Form(None),
     supabase_key: str | None = Form(None),
-    user: dict = Depends(require_auth)
+    user: dict = Depends(optional_auth)
 ):
     """Upload a video and start processing."""
     
@@ -104,7 +104,7 @@ async def process_video(
     # Create Episode in SQLite
     with Session(engine) as session:
         episode = Episode(
-            user_id=user["sub"] if user else "anonymous",
+            user_id=user.id if user else "anonymous",
             title=file.filename,
             video_path=str(file_path),
             status="queued"
@@ -135,11 +135,83 @@ async def process_video(
         message="Queued for processing"
     )
 
+@router.post("/process-local", response_model=JobResponse)
+async def process_local_video(
+    background_tasks: BackgroundTasks,
+    req: ProcessLocalRequest,
+    user: dict = Depends(optional_auth)
+):
+    """Process a video directly from the local file system using the Server-Side Picker."""
+    import os
+    
+    file_path_obj = Path(req.video_path)
+    if not file_path_obj.exists() or not file_path_obj.is_file():
+        raise HTTPException(status_code=400, detail="Local file does not exist")
+        
+    filename = file_path_obj.name
+    if not filename.lower().endswith(('.mp4', '.mov', '.mkv')):
+        raise HTTPException(status_code=400, detail="Invalid file type. Only MP4, MOV, MKV supported.")
+        
+    job_id = str(uuid.uuid4())
+    job_dir = DATA_DIR / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Symlink the file instantly instead of copying gigabytes
+    target_link = job_dir / "source.mp4"
+    try:
+        os.symlink(file_path_obj, target_link)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
+        
+    transcription_config = {
+        "source_type": req.transcription_source,
+        "assemblyai_api_key": req.assemblyai_key,
+        "supabase_url": req.supabase_url,
+        "supabase_key": req.supabase_key
+    }
+    
+    # Initialize Job in Store (Legacy for UI compatibility)
+    store.create_job(
+        job_id=job_id,
+        episode_id=filename,
+        config=req.dict()
+    )
+    
+    with Session(engine) as session:
+        episode = Episode(
+            user_id=user.id if user else "anonymous",
+            title=filename,
+            video_path=str(target_link),
+            status="queued"
+        )
+        session.add(episode)
+        session.commit()
+        session.refresh(episode)
+        
+    payload = {
+        "episode_id": episode.id,
+        "video_path": str(target_link),
+        "settings": req.dict(),
+        "transcription_config": transcription_config,
+        "auth_token": None
+    }
+    
+    asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
+    
+    job = store.get_job(job_id)
+    return JobResponse(
+        id=job.job_id,
+        status=JobStatus(job.status),
+        filename=filename,
+        created_at=job.created_at,
+        progress=0,
+        message="Queued local file for processing"
+    )
 
 # ─── Job Status & Clips ─────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, user: dict = Depends(require_auth)):
+async def get_job(job_id: str, user: dict = Depends(optional_auth)):
     """Get job status."""
     job = store.get_job(job_id)
     if not job:
@@ -304,10 +376,10 @@ async def assign_roles(job_id: str, role_map: dict):
 async def list_episodes():
     """List episodes from configured podcast directory."""
     try:
-        from server.processor import BatchProcessor
-        processor = BatchProcessor(external_drive_path=settings.podcast_dir, dry_run=True)
         if not settings.podcast_dir.exists():
-             return []
+            return []
+        from server.processor import BatchProcessor
+        processor = BatchProcessor(external_drive_path=settings.podcast_dir)
              
         episodes = processor.discover_episodes(start=1, end=9999)
         
@@ -432,7 +504,7 @@ async def upload_transcript_endpoint(episode_number: int):
 async def websocket_job_status(websocket: WebSocket, job_id: str):
     """
     Tethers a WebSocket connection to stream real-time progress.
-    Avoids heavy polling from the UI.
+    Sends events in {event, data} format matching the frontend LiveProcessingWidget.
     """
     await websocket.accept()
     
@@ -440,20 +512,31 @@ async def websocket_job_status(websocket: WebSocket, job_id: str):
         while True:
             job = store.get_job(job_id)
             if not job:
-                await websocket.send_json({"error": "Job not found"})
+                await websocket.send_json({"event": "error", "data": {"error": "Job not found"}})
                 await asyncio.sleep(2)
                 continue
-                
-            await websocket.send_json({
-                "job_id": job.job_id,
-                "status": job.status,
-                "progress": job.progress,
-                "message": job.message
-            })
             
-            # Close connection automatically if terminal state is reached
-            if job.status in ["completed", "failed", "error", "cancelled"]:
+            if job.status in ["completed"]:
+                await websocket.send_json({
+                    "event": "completed",
+                    "data": {"progress": 100, "message": job.message, "status": job.status}
+                })
                 break
+            elif job.status in ["failed", "error", "cancelled"]:
+                await websocket.send_json({
+                    "event": "error",
+                    "data": {"error": job.message or "Processing failed"}
+                })
+                break
+            else:
+                await websocket.send_json({
+                    "event": "progress",
+                    "data": {
+                        "progress": job.progress,
+                        "message": job.message,
+                        "status": job.status
+                    }
+                })
                 
             # Stream every 1.5s
             await asyncio.sleep(1.5)

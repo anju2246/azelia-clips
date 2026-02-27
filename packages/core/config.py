@@ -17,14 +17,20 @@ class Settings(BaseSettings):
     )
 
     # API Keys
+    ai_provider_order: str = Field(default="groq,openai,anthropic,vertex", description="Comma-separated list of AI providers by priority")
     groq_api_key: str = Field(default="", description="Groq API key for LLM inference")
+    groq_model: str = Field(default="llama-3.3-70b-versatile", description="Selected Groq model")
     groq_api_key_2: str = Field(default="", description="Secondary Groq API key (fallback)")
     hf_token: str = Field(default="", alias="HF_TOKEN", description="HuggingFace token for Pyannote")
     anthropic_api_key: str = Field(default="", description="Anthropic API key for Claude")
+    anthropic_model: str = Field(default="claude-3-7-sonnet-20250219", description="Selected Anthropic model")
+    openai_api_key: str = Field(default="", description="OpenAI API key for ChatGPT")
+    openai_model: str = Field(default="gpt-4o", description="Selected OpenAI model")
 
     # GCP Configuration
     gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID", description="Google Cloud Project ID")
     gcp_location: str = Field(default="us-central1", alias="GCP_LOCATION", description="GCP region")
+    vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas", description="Selected Vertex AI model")
 
     # Supabase
     supabase_url: str = Field(default="", description="Supabase project URL")

@@ -1,11 +1,11 @@
 // Celia Clips API Client
 // Interfaces matching server/models.py
 
-export type JobStatus = 'pending' | 'processing' | 'paused' | 'resuming' | 'completed' | 'error' | 'cancelled';
+export type JobStatus = 'pending' | 'processing' | 'paused' | 'resuming' | 'completed' | 'error' | 'failed' | 'cancelled';
 
 export interface Clip {
   id: number;
-  filename: str;
+  filename: string;
   start_time: number;
   end_time: number;
   duration: number;
@@ -39,18 +39,38 @@ export interface ProcessRequest {
   supabase_key?: string;
 }
 
+export interface ProcessLocalRequest extends ProcessRequest {
+  video_path: string;
+}
+
 export interface SettingsResponse {
   podcast_name: string;
   podcast_dir: string;
-  groq_api_key: string;
-  supabase_url: string;
-  supabase_key: string;
+  ai_provider_order?: string[];
+  groq_api_key?: string;
+  groq_model?: string;
+  openai_api_key?: string;
+  openai_model?: string;
+  anthropic_api_key?: string;
+  anthropic_model?: string;
+  gcp_project_id?: string;
+  vertex_model?: string;
+  supabase_url?: string;
+  supabase_key?: string;
 }
 
 export interface UpdateSettingsRequest {
   podcast_name?: string;
   podcast_dir?: string;
+  ai_provider_order?: string[];
   groq_api_key?: string;
+  groq_model?: string;
+  openai_api_key?: string;
+  openai_model?: string;
+  anthropic_api_key?: string;
+  anthropic_model?: string;
+  gcp_project_id?: string;
+  vertex_model?: string;
   supabase_url?: string;
   supabase_key?: string;
 }
@@ -79,7 +99,7 @@ const API_BASE = import.meta.env?.PUBLIC_API_URL || 'http://localhost:8000/api';
  */
 async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
-  
+
   // Default headers (can be overridden by options.headers)
   const headers = new Headers(options.headers || {});
   if (!headers.has('Accept')) {
@@ -87,9 +107,9 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   }
 
   // TODO: Add Auth token headers if self-hosted requires it
-  
+
   const response = await fetch(url, { ...options, headers });
-  
+
   if (!response.ok) {
     let errorMsg = `API Error ${response.status}: ${response.statusText}`;
     try {
@@ -100,7 +120,7 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
     }
     throw new Error(errorMsg);
   }
-  
+
   return response.json() as Promise<T>;
 }
 
@@ -109,8 +129,8 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 export const ClipsApi = {
   // Episodes
   getEpisodes: () => fetchApi<EpisodeResponse[]>('/episodes'),
-  
-  processEpisode: (episodeNum: number, req: ProcessRequest = {}) => 
+
+  processEpisode: (episodeNum: number, req: ProcessRequest = {}) =>
     fetchApi<JobResponse>(`/episodes/${episodeNum}/process`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -124,7 +144,7 @@ export const ClipsApi = {
   processVideo: (file: File, req: ProcessRequest) => {
     const formData = new FormData();
     formData.append('file', file);
-    
+
     // Append other form fields
     Object.entries(req).forEach(([key, value]) => {
       if (value !== undefined) {
@@ -134,13 +154,20 @@ export const ClipsApi = {
 
     return fetchApi<JobResponse>('/process', {
       method: 'POST',
-      // fetch will automatically set Content-Type: multipart/form-data with boundary
-      body: formData 
+      body: formData
     });
   },
 
+  // Zero-upload local processing
+  processLocalVideo: (req: ProcessLocalRequest) =>
+    fetchApi<JobResponse>('/process-local', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req)
+    }),
+
   // Approve a clip (stub for API implementation)
-  approveClip: (clipId: number) => 
+  approveClip: (clipId: number) =>
     fetchApi<any>(`/clips/${clipId}/approve`, { method: 'POST' }),
 };
 
@@ -148,8 +175,8 @@ export const ClipsApi = {
 
 export const SettingsApi = {
   getSettings: () => fetchApi<SettingsResponse>('/settings'),
-  
-  updateSettings: (req: UpdateSettingsRequest) => 
+
+  updateSettings: (req: UpdateSettingsRequest) =>
     fetchApi<SettingsResponse>('/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -161,16 +188,23 @@ export const SettingsApi = {
 
 export const IntelligenceApi = {
   getInsights: () => fetchApi<IntelligenceInsights>('/analytics/insights'),
-  
+
   getYouTubeStatus: () => fetchApi<any>('/connections/youtube'),
-  
+
   fetchYouTubeAnalytics: () => fetchApi<any>('/analytics/fetch-youtube', { method: 'POST' })
 };
 
 /**
- * Helper to construct WebSocket URLs
+ * Helper to construct WebSocket URLs.
+ * Handles both absolute (http://...) and relative (/api) API_BASE values.
  */
 export function getWebSocketUrl(endpoint: string): string {
-  const wsBase = API_BASE.replace(/^http/, 'ws');
-  return `${wsBase}${endpoint}`;
+  if (API_BASE.startsWith('http')) {
+    // Absolute URL: just swap protocol
+    const wsBase = API_BASE.replace(/^http/, 'ws');
+    return `${wsBase}${endpoint}`;
+  }
+  // Relative URL: build from current window location
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}${API_BASE}${endpoint}`;
 }

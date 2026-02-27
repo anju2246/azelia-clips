@@ -1,4 +1,6 @@
-from dataclasses import dataclass, field
+import json
+from dataclasses import dataclass, field, asdict
+from pathlib import Path
 from typing import List, Optional
 
 @dataclass
@@ -78,3 +80,30 @@ class Transcript:
     def full_text(self) -> str:
         """Concatenate all segment texts."""
         return " ".join(seg.text for seg in self.segments)
+
+    def save(self, path: Path) -> None:
+        """Save transcript to a JSON file."""
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(asdict(self), f, indent=2, ensure_ascii=False)
+
+    @classmethod
+    def load(cls, path: Path) -> "Transcript":
+        """Load transcript from a JSON file."""
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        segments = [
+            Segment(
+                text=s["text"],
+                start=s["start"],
+                end=s["end"],
+                speaker=s.get("speaker"),
+                words=[Word(**w) for w in s.get("words", [])],
+            )
+            for s in data.get("segments", [])
+        ]
+        return cls(
+            segments=segments,
+            language=data.get("language", "es"),
+            duration=data.get("duration", 0.0),
+            source_file=data.get("source_file", ""),
+        )
