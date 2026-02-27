@@ -45,19 +45,38 @@ class ProcessRequest(BaseModel):
     supabase_url: Optional[str] = None
     supabase_key: Optional[str] = None
 
+class ProcessLocalRequest(ProcessRequest):
+    video_path: str
+
 # --- New Models for Local Mode ---
 
 class SettingsResponse(BaseModel):
     podcast_name: str
     podcast_dir: str
+    ai_provider_order: List[str] = Field(default=["groq", "openai", "anthropic", "vertex"])
     groq_api_key: str = Field(default="", description="Masked key")
+    groq_model: str = Field(default="llama-3.3-70b-versatile")
+    openai_api_key: str = Field(default="", description="Masked key")
+    openai_model: str = Field(default="gpt-4o")
+    anthropic_api_key: str = Field(default="", description="Masked key")
+    anthropic_model: str = Field(default="claude-3-7-sonnet-20250219")
+    gcp_project_id: str = Field(default="", description="Plaintext project ID")
+    vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas")
     supabase_url: str = Field(default="")
     supabase_key: str = Field(default="", description="Masked key")
     
 class UpdateSettingsRequest(BaseModel):
     podcast_name: Optional[str] = None
     podcast_dir: Optional[str] = None
+    ai_provider_order: Optional[List[str]] = None
     groq_api_key: Optional[str] = None
+    groq_model: Optional[str] = None
+    openai_api_key: Optional[str] = None
+    openai_model: Optional[str] = None
+    anthropic_api_key: Optional[str] = None
+    anthropic_model: Optional[str] = None
+    gcp_project_id: Optional[str] = None
+    vertex_model: Optional[str] = None
     supabase_url: Optional[str] = None
     supabase_key: Optional[str] = None
 

@@ -20,11 +20,10 @@ def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) 
 
 def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
     """
-    Auth dependency that skips validation in local dev (when SUPABASE_JWT_SECRET is not set).
-    In production, validates the JWT normally.
+    Auth dependency that is truly optional for local-first usage.
+    - If credentials are provided, validates the JWT.
+    - If no credentials are provided, returns a dev user (local mode).
     """
-    if not settings.supabase_jwt_secret:
-        return User(id="dev-user", email="dev@local", role="authenticated")
     if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
+        return User(id="dev-user", email="dev@local", role="authenticated")
     return verify_supabase_jwt(credentials.credentials)

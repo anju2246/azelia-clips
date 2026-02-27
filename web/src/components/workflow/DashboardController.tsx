@@ -1,17 +1,60 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { UploadZone } from './UploadZone';
 import { LibraryView } from './LibraryView';
 import { LiveProcessingWidget } from './LiveProcessingWidget';
 import { ClipsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
+const JOB_STORAGE_KEY = 'celia_active_job_id';
+
 export const DashboardController: React.FC = () => {
-    const [activeJobId, setActiveJobId] = useState<string | null>(null);
+    const [activeJobId, setActiveJobId] = useState<string | null>(() => {
+        // Recover active job from localStorage on mount
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem(JOB_STORAGE_KEY);
+        }
+        return null;
+    });
+
+    // Check if recovered job is still active
+    useEffect(() => {
+        if (!activeJobId) return;
+
+        const checkJob = async () => {
+            try {
+                const job = await ClipsApi.getJob(activeJobId);
+                if (job.status === 'completed' || job.status === 'error' || job.status === 'failed') {
+                    // Job already finished — clear it
+                    clearActiveJob();
+                    if (job.status === 'completed') {
+                        toast.success(`Previous job completed: ${job.message}`);
+                    } else {
+                        toast.error(`Previous job failed: ${job.error || job.message}`);
+                    }
+                }
+                // If still running, the LiveProcessingWidget will take over
+            } catch {
+                // Job not found — clear stale reference
+                clearActiveJob();
+            }
+        };
+
+        checkJob();
+    }, []);
+
+    const setAndPersistJobId = (jobId: string) => {
+        setActiveJobId(jobId);
+        localStorage.setItem(JOB_STORAGE_KEY, jobId);
+    };
+
+    const clearActiveJob = () => {
+        setActiveJobId(null);
+        localStorage.removeItem(JOB_STORAGE_KEY);
+    };
 
     const handleProcessEpisode = async (episodeNum: number) => {
         const loadingToast = toast.loading('Starting episode processing...');
         try {
-            // Use default config for library episodes
             const response = await ClipsApi.processEpisode(episodeNum, {
                 min_duration: 30,
                 max_duration: 90,
@@ -20,7 +63,7 @@ export const DashboardController: React.FC = () => {
                 transcription_source: 'local_whisper'
             });
             toast.success('Episode processing started!', { id: loadingToast });
-            setActiveJobId(response.id);
+            setAndPersistJobId(response.id);
         } catch (error: any) {
             console.error(error);
             toast.error(error.message || 'Failed to process episode', { id: loadingToast });
@@ -33,9 +76,9 @@ export const DashboardController: React.FC = () => {
             <LiveProcessingWidget
                 jobId={activeJobId}
                 onJobComplete={() => {
-                    // Keep showing it so they can click "Review Clips", or handle state change
+                    // Keep showing so user can click "Review Clips"
                 }}
-                onCancel={() => setActiveJobId(null)}
+                onCancel={() => clearActiveJob()}
             />
         );
     }
@@ -54,7 +97,7 @@ export const DashboardController: React.FC = () => {
             </div>
 
             <UploadZone
-                onJobStarted={(jobId) => setActiveJobId(jobId)}
+                onJobStarted={(jobId) => setAndPersistJobId(jobId)}
             />
         </div>
     );

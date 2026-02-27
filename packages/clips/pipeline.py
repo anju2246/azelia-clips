@@ -167,7 +167,7 @@ class BatchProcessor:
         store = get_job_store() if job_id else None
         
         from packages.clips.transcription.transcriber import Transcript
-        from packages.clips.curation.curator_v2 import MultiAgentCurator
+        from packages.clips.curation.pipeline import CurationPipeline
         from packages.clips.vision.reframer import reframe_video
         from packages.clips.subtitles.generator import SubtitleGenerator
         
@@ -238,9 +238,9 @@ class BatchProcessor:
         if curation_path.exists():
             console.print(f"[green]✓[/green] Using existing curation from {curation_path.name}")
             with open(curation_path, "r") as f:
-                from packages.clips.curation.curator_v2 import CuratedClipV2
+                from packages.clips.curation.models import CuratedClip
                 data = json.load(f)
-                curated_clips = [CuratedClipV2.from_dict(d) for d in data]
+                curated_clips = [CuratedClip.model_validate(d) for d in data]
         else:
             console.print(f"[dim]   Running multi-agent curation (finding ALL valid clips)...[/dim]")
             
@@ -256,9 +256,9 @@ class BatchProcessor:
                     return curr.status == 'paused' if curr else False
                 return False
             
-            curator = MultiAgentCurator()
+            curator = CurationPipeline()
             from packages.core.config import settings
-            curated_clips = curator.curate_chunked(
+            curated_clips = curator.curate(
                 transcript,
                 top_n=None,  # Get ALL clips, not limited to clips_per_episode
                 min_duration=self.min_duration,
@@ -271,7 +271,7 @@ class BatchProcessor:
             
             # Save curation results for future re-processing
             with open(curation_path, "w") as f:
-                json.dump([c.to_dict() for c in curated_clips], f, indent=2, ensure_ascii=False)
+                json.dump([c.model_dump() for c in curated_clips], f, indent=2, ensure_ascii=False)
             console.print(f"[dim]   Curation saved to {curation_path.name}[/dim]")
         
         if not curated_clips:
@@ -675,13 +675,13 @@ if __name__ == "__main__":
             console.print(f"\n[bold blue]EP{ep.episode_number:03d}[/bold blue]")
             
             # Load or run curation
-            from packages.clips.curation.curator_v2 import CuratedClipV2
+            from packages.clips.curation.models import CuratedClip
             curation_path = ep.episode_folder / "curation.json"
             
             if curation_path.exists():
                 console.print(f"[green]✓[/green] Using existing curation")
                 with open(curation_path, "r") as f:
-                    curated_clips = [CuratedClipV2.from_dict(d) for d in json.load(f)]
+                    curated_clips = [CuratedClip.model_validate(d) for d in json.load(f)]
             else:
                 console.print("[dim]   Running curation...[/dim]")
                 # Would need to load transcript and run curator here
