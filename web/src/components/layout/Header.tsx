@@ -1,7 +1,30 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Search, Bell, User } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 export const Header: React.FC = () => {
+    const [displayName, setDisplayName] = useState('');
+    const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+
+    useEffect(() => {
+        (async () => {
+            try {
+                const { data: { user } } = await supabase.auth.getUser();
+                if (user) {
+                    setDisplayName(
+                        user.user_metadata?.full_name ||
+                        user.user_metadata?.name ||
+                        user.email?.split('@')[0] ||
+                        'Creator'
+                    );
+                    setAvatarUrl(user.user_metadata?.avatar_url || null);
+                }
+            } catch (e) {
+                // Silently ignore
+            }
+        })();
+    }, []);
+
     return (
         <header className="h-16 border-b border-zinc-800/50 bg-black/40 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between px-6">
             <div className="flex items-center gap-4 flex-1">
@@ -26,15 +49,27 @@ export const Header: React.FC = () => {
                 </button>
 
                 {/* User Profile */}
-                <div className="flex items-center gap-3 pl-4 border-l border-zinc-800/50">
+                <a href="/dashboard/profile" className="flex items-center gap-3 pl-4 border-l border-zinc-800/50 hover:opacity-80 transition-opacity">
                     <div className="text-right hidden md:block">
-                        <p className="text-sm font-medium text-zinc-200 leading-tight">Creator</p>
+                        <p className="text-sm font-medium text-zinc-200 leading-tight">{displayName || 'Loading...'}</p>
                         <p className="text-xs text-zinc-500">Local Environment</p>
                     </div>
-                    <button className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 overflow-hidden hover:border-brand-500 transition-colors">
-                        <User className="h-4 w-4 text-zinc-400" />
-                    </button>
-                </div>
+                    {avatarUrl ? (
+                        <img
+                            src={avatarUrl}
+                            alt={displayName}
+                            className="h-8 w-8 rounded-full object-cover border border-zinc-700 hover:border-brand-500 transition-colors"
+                        />
+                    ) : (
+                        <div className="h-8 w-8 rounded-full bg-zinc-800 flex items-center justify-center border border-zinc-700 overflow-hidden hover:border-brand-500 transition-colors">
+                            {displayName ? (
+                                <span className="text-xs font-medium text-zinc-300">{displayName.charAt(0).toUpperCase()}</span>
+                            ) : (
+                                <User className="h-4 w-4 text-zinc-400" />
+                            )}
+                        </div>
+                    )}
+                </a>
             </div>
         </header>
     );
