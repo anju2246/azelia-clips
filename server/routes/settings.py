@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 
 from server.models import SettingsResponse, UpdateSettingsRequest
 from packages.core.config import settings
-from server.middleware.auth import optional_auth
+from server.middleware.auth import require_auth
 
 router = APIRouter()
 
@@ -20,7 +20,7 @@ def mask_key(key: str) -> str:
 
 
 @router.get("/settings", response_model=SettingsResponse)
-async def get_settings(user: dict = Depends(optional_auth)):
+async def get_settings(user: dict = Depends(require_auth)):
     """Get current application settings."""
     provider_order = [p.strip() for p in settings.ai_provider_order.split(',')] if settings.ai_provider_order else ["groq", "openai", "anthropic", "vertex"]
     return SettingsResponse(

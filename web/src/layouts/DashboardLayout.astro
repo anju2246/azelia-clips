@@ -30,6 +30,44 @@ const currentPath = Astro.url.pathname;
       href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
       rel="stylesheet"
     />
+    <script>
+      import { supabase } from "../lib/supabase";
+
+      // Auth & Onboarding Gate
+      window.addEventListener("DOMContentLoaded", async () => {
+        try {
+          // 1. Auth Guard: Check if user is logged in
+          const { data: authData } = await supabase.auth.getSession();
+          if (!authData?.session) {
+            window.location.replace("/login");
+            return; // Stop execution
+          }
+
+          // 2. Onboarding Gate: Enforce API Key Configuration
+          const res = await fetch("/api/settings", {
+            headers: {
+              Authorization: `Bearer ${authData.session.access_token}`,
+            },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            const hasKey = !!(
+              data.groq_api_key ||
+              data.openai_api_key ||
+              data.anthropic_api_key ||
+              data.gcp_project_id
+            );
+
+            // If the user has zero AI engine keys configured, they cannot process anything.
+            if (!hasKey) {
+              window.location.replace("/onboarding");
+            }
+          }
+        } catch (e) {
+          console.error("Failed to check auth/onboarding status", e);
+        }
+      });
+    </script>
   </head>
   <body
     class="bg-zinc-950 text-zinc-100 antialiased selection:bg-brand-500/30 font-sans min-h-screen relative overflow-hidden flex"

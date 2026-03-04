@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from server.routes.clips import router as clips_router
 from server.routes.settings import router as settings_router
 from server.routes.analytics import router as analytics_router
+from server.routes.auth import router as auth_router
 from packages.core.config import settings
 
 from packages.core.db.engine import init_db
@@ -61,6 +62,7 @@ os.makedirs(static_dir, exist_ok=True)
 app.include_router(clips_router, prefix="/api")
 app.include_router(settings_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
 
 @app.get("/api/health")
 def health_check():

@@ -3,7 +3,22 @@ import { LoginForm } from "../components/auth/LoginForm";
 import "../styles/global.css";
 ---
 
-<!doctype html>
+<script>
+    import { supabase } from "../lib/supabase";
+
+    // If already logged in, skip the login page
+    (async () => {
+        try {
+            const { data } = await supabase.auth.getSession();
+            if (data?.session) {
+                window.location.replace("/dashboard");
+            }
+        } catch (e) {
+            // Silently ignore — show login form
+        }
+    })();
+</script>
+
 <html lang="en" class="dark">
     <head>
         <meta charset="UTF-8" />
