@@ -33,6 +33,69 @@ def _find_client_secrets() -> str:
     )
 
 
+# ─── Personal Intelligence Insights ─────────────────────────────────────────
+
+@router.get("/analytics/insights")
+async def get_analytics_insights(authorization: str = Header(None)):
+    """
+    Aggregate insights from the local job store for Personal Intelligence.
+    Returns stats about processed episodes and generated clips.
+    """
+    from server.workers.job_store import get_job_store
+    
+    store = get_job_store()
+    
+    try:
+        # Query all completed jobs from SQLite
+        conn = store._get_conn()
+        cursor = conn.execute("""
+            SELECT 
+                COUNT(*) as total_jobs,
+                SUM(clips_generated) as total_clips,
+                COUNT(DISTINCT episode_id) as total_episodes,
+                AVG(clips_generated) as avg_clips_per_job
+            FROM jobs 
+            WHERE status = 'completed'
+        """)
+        row = cursor.fetchone()
+        
+        total_jobs = row[0] if row else 0
+        total_clips = row[1] or 0
+        total_episodes = row[2] or 0
+        avg_clips = row[3] or 0
+        
+        if total_clips == 0:
+            return {
+                "total_clips": 0,
+                "total_episodes": 0,
+                "average_score": 0,
+                "top_categories": {},
+                "top_hook_types": {},
+                "avg_duration": 0,
+            }
+        
+        return {
+            "total_clips": total_clips,
+            "total_episodes": total_episodes,
+            "total_jobs": total_jobs,
+            "average_score": 0,  # Will be populated when virality scoring is persisted
+            "top_categories": {},  # Will be populated from ic_telemetry_events
+            "top_hook_types": {},  # Will be populated from ic_telemetry_events
+            "avg_duration": 0,  # Will be populated from clip metadata
+            "avg_clips_per_episode": round(avg_clips, 1),
+        }
+    except Exception as e:
+        # Table might not exist yet (first run)
+        return {
+            "total_clips": 0,
+            "total_episodes": 0,
+            "average_score": 0,
+            "top_categories": {},
+            "top_hook_types": {},
+            "avg_duration": 0,
+        }
+
+
 # ─── Platform Connections ────────────────────────────────────────────────────
 
 @router.get("/connections/youtube")
