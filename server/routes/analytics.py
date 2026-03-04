@@ -2,9 +2,35 @@
 Server Routes — Platform Analytics & YouTube OAuth
 """
 
+import os
+import glob
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header, Body
 
 router = APIRouter()
+
+
+def _find_client_secrets() -> str:
+    """Auto-discover Google OAuth client_secrets file.
+    Searches in private/ first (gitignored), then project root.
+    Supports Google's long filenames like 'client_secret_1234...json'.
+    """
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    search_dirs = [
+        os.path.join(project_root, "private"),
+        project_root,
+    ]
+    patterns = ["client_secret*.json", "client_secrets.json"]
+    
+    for d in search_dirs:
+        for pattern in patterns:
+            matches = glob.glob(os.path.join(d, pattern))
+            if matches:
+                return matches[0]
+    
+    raise HTTPException(
+        status_code=500,
+        detail="Missing client_secrets.json. Download from Google Cloud Console and place in private/ folder."
+    )
 
 
 # ─── Platform Connections ────────────────────────────────────────────────────
@@ -214,10 +240,7 @@ async def authorize_youtube(
     from google_auth_oauthlib.flow import Flow
     
     try:
-        import os
-        secrets_file = "client_secrets.json"
-        if not os.path.exists(secrets_file):
-            raise HTTPException(status_code=500, detail="Missing client_secrets.json in server root. Please download from Google Cloud Console.")
+        secrets_file = _find_client_secrets()
 
         flow = Flow.from_client_secrets_file(
             secrets_file,
@@ -257,7 +280,7 @@ async def callback_youtube(
     analytics = AnalyticsSync(auth_token=token)
     
     try:
-        secrets_file = "client_secrets.json"
+        secrets_file = _find_client_secrets()
         flow = Flow.from_client_secrets_file(
             secrets_file,
             scopes=['https://www.googleapis.com/auth/youtube.readonly'],
