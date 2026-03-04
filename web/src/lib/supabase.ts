@@ -7,7 +7,7 @@ if (!supabaseUrl || !supabaseAnonKey) {
     console.warn('Missing Supabase environment variables. Auth features will be disabled.');
 }
 
-console.log('🔌 Connecting to Supabase Project:', supabaseUrl);
+
 
 export const supabase = createClient(
     supabaseUrl || '',

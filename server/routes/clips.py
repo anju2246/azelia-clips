@@ -21,7 +21,7 @@ from server.models import (
 from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
-from server.middleware.auth import optional_auth
+from server.middleware.auth import require_auth
 from packages.core.db.engine import engine
 from packages.core.db.models import Episode
 from packages.clips.vision.face_tracker import FaceTracker
@@ -54,7 +54,7 @@ async def process_video(
     assemblyai_key: str | None = Form(None),
     supabase_url: str | None = Form(None),
     supabase_key: str | None = Form(None),
-    user: dict = Depends(optional_auth)
+    user: dict = Depends(require_auth)
 ):
     """Upload a video and start processing."""
     
@@ -139,7 +139,7 @@ async def process_video(
 async def process_local_video(
     background_tasks: BackgroundTasks,
     req: ProcessLocalRequest,
-    user: dict = Depends(optional_auth)
+    user: dict = Depends(require_auth)
 ):
     """Process a video directly from the local file system using the Server-Side Picker."""
     import os
@@ -211,7 +211,7 @@ async def process_local_video(
 # ─── Job Status & Clips ─────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, user: dict = Depends(optional_auth)):
+async def get_job(job_id: str, user: dict = Depends(require_auth)):
     """Get job status."""
     job = store.get_job(job_id)
     if not job:

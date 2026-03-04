@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Home, Film, LineChart, Settings, Bell, User, LogOut, BellOff } from 'lucide-react';
+import { signOut } from '../../lib/supabase';
 
 interface SidebarProps {
     currentPath: string;
@@ -116,8 +117,16 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
                         Profile
                     </span>
                 </a>
-                <a
-                    href="/login"
+                <button
+                    onClick={async () => {
+                        try {
+                            await signOut();
+                        } catch (e) {
+                            console.error('Logout failed:', e);
+                        } finally {
+                            window.location.href = '/login';
+                        }
+                    }}
                     title="Logout"
                     className="group relative w-11 h-11 flex items-center justify-center rounded-2xl text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
                 >
@@ -125,7 +134,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
                     <span className="absolute left-full ml-3 px-2.5 py-1 bg-zinc-800 text-white text-xs font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 whitespace-nowrap transition-opacity shadow-xl border border-white/10 z-50">
                         Log Out
                     </span>
-                </a>
+                </button>
             </div>
         </aside>
     );

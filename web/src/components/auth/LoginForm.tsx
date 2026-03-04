@@ -1,31 +1,77 @@
 import React, { useState } from 'react';
-import { Github, Mail, ArrowRight } from 'lucide-react';
-import toast from 'react-hot-toast';
+import { Github, Mail, ArrowRight, User } from 'lucide-react';
+import toast, { Toaster } from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
 
 export const LoginForm: React.FC = () => {
+    const [isSignUp, setIsSignUp] = useState(false);
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
+    const [fullName, setFullName] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
         setIsLoading(true);
 
-        // For MVP Local Mode, we simulate login or just let them through
-        // In production, this would call Supabase auth or your FastAPI auth endpoint
-        setTimeout(() => {
-            toast.success('Successfully authenticated to Local Engine');
-            window.location.href = '/dashboard';
+        try {
+            if (isSignUp) {
+                const { data, error } = await supabase.auth.signUp({
+                    email,
+                    password,
+                    options: {
+                        data: {
+                            full_name: fullName,
+                        },
+                        emailRedirectTo: `${window.location.origin}/auth/callback`
+                    }
+                });
+
+                if (error) throw error;
+
+                toast.success('Registration successful!', { icon: '🎉' });
+                // If email confirmation is off, they might be logged in immediately
+                if (data.session) {
+                    window.location.href = '/dashboard';
+                } else {
+                    toast('Please check your email to verify your account.', { icon: '✉️' });
+                    setIsSignUp(false);
+                }
+            } else {
+                const { error } = await supabase.auth.signInWithPassword({
+                    email,
+                    password
+                });
+
+                if (error) throw error;
+
+                toast.success('Successfully authenticated', { icon: '🔑' });
+                window.location.href = '/dashboard';
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Authentication failed');
+        } finally {
             setIsLoading(false);
-        }, 800);
+        }
     };
 
-    const handleOAuth = (provider: string) => {
-        toast('OAuth flow would start here for ' + provider, { icon: '🔄' });
+    const handleOAuth = async (provider: 'google' | 'github') => {
+        try {
+            const { error } = await supabase.auth.signInWithOAuth({
+                provider: provider,
+                options: {
+                    redirectTo: `${window.location.origin}/auth/callback`
+                }
+            });
+            if (error) throw error;
+        } catch (error: any) {
+            toast.error(error.message || `Failed to login with ${provider}`);
+        }
     };
 
     return (
         <div className="w-full max-w-md mx-auto relative">
+            <Toaster position="top-center" />
             {/* Decorative elements */}
             <div className="absolute -inset-1 bg-gradient-to-r from-brand-500 to-emerald-500 rounded-[2rem] blur-xl opacity-20"></div>
 
@@ -34,11 +80,34 @@ export const LoginForm: React.FC = () => {
                     <div className="w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center mx-auto mb-6">
                         <span className="text-3xl font-bold text-brand-400">C</span>
                     </div>
-                    <h1 className="text-2xl font-bold text-white mb-2">Welcome Back</h1>
-                    <p className="text-zinc-400 text-sm">Sign in to your Intellectual Video Engine.</p>
+                    <h1 className="text-2xl font-bold text-white mb-2">
+                        {isSignUp ? 'Create an Account' : 'Welcome Back'}
+                    </h1>
+                    <p className="text-zinc-400 text-sm">
+                        {isSignUp ? 'Join the Intellectual Video Engine.' : 'Sign in to your Intellectual Video Engine.'}
+                    </p>
                 </div>
 
-                <form onSubmit={handleLogin} className="space-y-4 mb-6">
+                <form onSubmit={handleAuth} className="space-y-4 mb-6">
+                    {isSignUp && (
+                        <div>
+                            <label className="block text-xs font-medium text-zinc-400 mb-1.5 ml-1 uppercase tracking-wider">Full Name</label>
+                            <div className="relative">
+                                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
+                                    <User className="h-4 w-4 text-zinc-500" />
+                                </div>
+                                <input
+                                    type="text"
+                                    value={fullName}
+                                    onChange={(e) => setFullName(e.target.value)}
+                                    className="w-full pl-10 pr-4 py-3 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-white transition-all"
+                                    placeholder="Jane Doe"
+                                    required={isSignUp}
+                                />
+                            </div>
+                        </div>
+                    )}
+
                     <div>
                         <label className="block text-xs font-medium text-zinc-400 mb-1.5 ml-1 uppercase tracking-wider">Email Address</label>
                         <div className="relative">
@@ -60,12 +129,14 @@ export const LoginForm: React.FC = () => {
                     <div>
                         <div className="flex justify-between mb-1.5 ml-1">
                             <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">Password</label>
-                            <a href="#" className="text-xs text-brand-400 hover:text-brand-300">Forgot?</a>
+                            {!isSignUp && (
+                                <a href="#" className="text-xs text-brand-400 hover:text-brand-300">Forgot?</a>
+                            )}
                         </div>
                         <input
                             type="password"
                             value={password}
-                            autoComplete="current-password"
+                            autoComplete={isSignUp ? "new-password" : "current-password"}
                             onChange={(e) => setPassword(e.target.value)}
                             className="w-full px-4 py-3 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-white transition-all"
                             placeholder="••••••••"
@@ -81,9 +152,21 @@ export const LoginForm: React.FC = () => {
                         {isLoading ? (
                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
                         ) : (
-                            <>Sign In <ArrowRight className="w-4 h-4" /></>
+                            <>
+                                {isSignUp ? 'Sign Up' : 'Sign In'} <ArrowRight className="w-4 h-4" />
+                            </>
                         )}
                     </button>
+
+                    <div className="text-center mt-4">
+                        <button
+                            type="button"
+                            onClick={() => setIsSignUp(!isSignUp)}
+                            className="text-sm text-zinc-400 hover:text-white transition-colors"
+                        >
+                            {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
+                        </button>
+                    </div>
                 </form>
 
                 <div className="relative mb-6">

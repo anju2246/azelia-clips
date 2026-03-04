@@ -94,6 +94,8 @@ export interface IntelligenceInsights {
 // Global API Configuration
 const API_BASE = import.meta.env?.PUBLIC_API_URL || 'http://localhost:8000/api';
 
+import { supabase } from './supabase';
+
 /**
  * Helper for making typed fetch requests
  */
@@ -106,7 +108,17 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
     headers.set('Accept', 'application/json');
   }
 
-  // TODO: Add Auth token headers if self-hosted requires it
+  // Inject Auth token from Supabase session
+  if (!headers.has('Authorization')) {
+    try {
+      const { data } = await supabase.auth.getSession();
+      if (data?.session?.access_token) {
+        headers.set('Authorization', `Bearer ${data.session.access_token}`);
+      }
+    } catch (e) {
+      // Silently continue — the backend will return 401 if auth is required
+    }
+  }
 
   const response = await fetch(url, { ...options, headers });
 
