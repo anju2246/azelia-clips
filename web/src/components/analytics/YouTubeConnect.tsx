@@ -1,42 +1,136 @@
 import React, { useEffect, useState } from 'react';
-import { Youtube, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
-import { IntelligenceApi } from '../../lib/api';
+import { Youtube, CheckCircle2, AlertCircle, RefreshCw, Upload, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { supabase } from '../../lib/supabase';
+
+interface YouTubeStatus {
+    is_connected: boolean;
+    channel_name?: string;
+    channel_id?: string;
+    subscriber_count?: string;
+    video_count?: string;
+}
+
+const API_BASE = import.meta.env?.PUBLIC_API_URL || 'http://localhost:8000/api';
+
+async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers || {});
+    try {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token) {
+            headers.set('Authorization', `Bearer ${data.session.access_token}`);
+        }
+    } catch (e) { /* continue */ }
+    return fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+}
 
 export const YouTubeConnect: React.FC = () => {
-    const [status, setStatus] = useState<any>(null);
+    const [status, setStatus] = useState<YouTubeStatus>({ is_connected: false });
     const [isLoading, setIsLoading] = useState(true);
     const [isSyncing, setIsSyncing] = useState(false);
+    const [isConnecting, setIsConnecting] = useState(false);
 
     useEffect(() => {
         checkStatus();
+
+        // Handle OAuth callback if we have a code in the URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const code = urlParams.get('code');
+        if (code) {
+            handleOAuthCallback(code);
+            // Clean up URL
+            window.history.replaceState({}, '', window.location.pathname);
+        }
     }, []);
 
     const checkStatus = async () => {
         try {
-            // In a real app we'd fetch actual status. We simulate for MVP or fetch real if implemented.
-            const res = await IntelligenceApi.getYouTubeStatus();
-            setStatus(res);
+            const res = await fetchWithAuth('/connections/youtube');
+            if (res.ok) {
+                const data = await res.json();
+                setStatus(data);
+            } else {
+                setStatus({ is_connected: false });
+            }
         } catch (e) {
-            // API might return 404 if not connected
             setStatus({ is_connected: false });
         } finally {
             setIsLoading(false);
         }
     };
 
-    const handleConnect = () => {
-        // Redirect to OAuth
-        window.location.href = 'http://localhost:8000/api/auth/youtube/authorize';
+    const handleConnect = async () => {
+        setIsConnecting(true);
+        try {
+            const redirectUri = `${window.location.origin}/dashboard/intelligence`;
+            const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`);
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Failed to start YouTube authorization');
+            }
+
+            const { url } = await res.json();
+            // Redirect to Google OAuth consent screen
+            window.location.href = url;
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to connect YouTube');
+            setIsConnecting(false);
+        }
+    };
+
+    const handleOAuthCallback = async (code: string) => {
+        const toastId = toast.loading('Connecting your YouTube channel...');
+        try {
+            const redirectUri = `${window.location.origin}/dashboard/intelligence`;
+            const res = await fetchWithAuth('/auth/youtube/callback', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, redirect_uri: redirectUri })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Failed to complete YouTube authorization');
+            }
+
+            const data = await res.json();
+            toast.success(`Connected to ${data.channel}!`, { id: toastId, icon: '🎬' });
+            checkStatus();
+        } catch (error: any) {
+            toast.error(error.message || 'Connection failed', { id: toastId });
+        }
     };
 
     const handleSync = async () => {
         setIsSyncing(true);
         const toastId = toast.loading('Syncing analytics from YouTube...');
         try {
-            await IntelligenceApi.fetchYouTubeAnalytics();
-            toast.success('Analytics synced successfully!', { id: toastId });
-            checkStatus(); // Refresh data
+            // Get the provider token from Supabase session (if user logged in via Google)
+            const { data } = await supabase.auth.getSession();
+            const providerToken = data?.session?.provider_token;
+
+            if (!providerToken) {
+                toast.error('No Google provider token available. Re-login with Google to sync.', { id: toastId });
+                return;
+            }
+
+            const formData = new FormData();
+            formData.append('provider_token', providerToken);
+
+            const res = await fetchWithAuth('/analytics/fetch-youtube', {
+                method: 'POST',
+                body: formData
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Sync failed');
+            }
+
+            const result = await res.json();
+            toast.success(`Synced! ${result.videos_scanned} videos scanned, ${result.clips_matched} matched.`, { id: toastId });
+            checkStatus();
         } catch (error: any) {
             toast.error(error.message || 'Failed to sync analytics', { id: toastId });
         } finally {
@@ -91,9 +185,11 @@ export const YouTubeConnect: React.FC = () => {
                 ) : (
                     <button
                         onClick={handleConnect}
-                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-red-500/20"
+                        disabled={isConnecting}
+                        className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-red-500/20 disabled:opacity-50"
                     >
-                        <Youtube className="w-4 h-4" /> Connect Channel
+                        <Youtube className="w-4 h-4" />
+                        {isConnecting ? 'Connecting...' : 'Connect Channel'}
                     </button>
                 )}
             </div>

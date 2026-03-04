@@ -9,6 +9,44 @@ router = APIRouter()
 
 # ─── Platform Connections ────────────────────────────────────────────────────
 
+@router.get("/connections/youtube")
+async def get_youtube_connection_status(authorization: str = Header(None)):
+    """Check if YouTube is connected for the current user."""
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Missing Authorization header")
+    
+    token = authorization.replace("Bearer ", "").strip()
+    
+    try:
+        from server.services.analytics import AnalyticsSync
+        analytics = AnalyticsSync(auth_token=token)
+        
+        if not analytics.Enabled:
+            return {"is_connected": False}
+        
+        # Try to fetch the connection from user_connections table
+        res = analytics.client.table("user_connections")\
+            .select("*")\
+            .eq("platform", "youtube")\
+            .maybeSingle()\
+            .execute()
+        
+        if res.data:
+            metadata = res.data.get("metadata", {})
+            return {
+                "is_connected": True,
+                "channel_name": metadata.get("title", "YouTube Channel"),
+                "channel_id": metadata.get("channel_id"),
+                "subscriber_count": metadata.get("statistics", {}).get("subscriberCount"),
+                "video_count": metadata.get("statistics", {}).get("videoCount"),
+            }
+        
+        return {"is_connected": False}
+    except Exception:
+        # Table might not exist yet or service not configured
+        return {"is_connected": False}
+
+
 @router.post("/connections/{platform}")
 async def connect_platform_endpoint(platform: str, authorization: str = Header(None)):
     """Connect a social platform."""
