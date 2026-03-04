@@ -130,7 +130,27 @@ export const LoginForm: React.FC = () => {
                         <div className="flex justify-between mb-1.5 ml-1">
                             <label className="block text-xs font-medium text-zinc-400 uppercase tracking-wider">Password</label>
                             {!isSignUp && (
-                                <a href="#" className="text-xs text-brand-400 hover:text-brand-300">Forgot?</a>
+                                <button
+                                    type="button"
+                                    onClick={async () => {
+                                        if (!email) {
+                                            toast.error('Enter your email first, then click Forgot.');
+                                            return;
+                                        }
+                                        try {
+                                            const { error } = await supabase.auth.resetPasswordForEmail(email, {
+                                                redirectTo: `${window.location.origin}/auth/reset-password`,
+                                            });
+                                            if (error) throw error;
+                                            toast.success('Password reset email sent! Check your inbox.', { icon: '📧', duration: 5000 });
+                                        } catch (err: any) {
+                                            toast.error(err.message || 'Failed to send reset email');
+                                        }
+                                    }}
+                                    className="text-xs text-brand-400 hover:text-brand-300 cursor-pointer"
+                                >
+                                    Forgot?
+                                </button>
                             )}
                         </div>
                         <input
