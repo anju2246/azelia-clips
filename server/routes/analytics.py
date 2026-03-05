@@ -4,6 +4,7 @@ Server Routes — Platform Analytics & YouTube OAuth
 
 import os
 import glob
+from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header, Body
 
 router = APIRouter()
@@ -94,6 +95,289 @@ async def get_analytics_insights(authorization: str = Header(None)):
             "top_hook_types": {},
             "avg_duration": 0,
         }
+
+
+# ─── YouTube Shorts Sync & Insights ─────────────────────────────────────────
+
+import sqlite3
+from pathlib import Path
+
+YT_DB_PATH = Path(__file__).parent.parent / "data" / "youtube_shorts.db"
+
+def _get_yt_db():
+    """Get or create the YouTube shorts database."""
+    YT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(YT_DB_PATH))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS youtube_shorts (
+            video_id TEXT PRIMARY KEY,
+            title TEXT,
+            published_at TEXT,
+            duration_seconds INTEGER,
+            view_count INTEGER DEFAULT 0,
+            like_count INTEGER DEFAULT 0,
+            comment_count INTEGER DEFAULT 0,
+            channel_name TEXT,
+            channel_id TEXT,
+            thumbnail_url TEXT,
+            synced_at TEXT
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS youtube_sync_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+@router.get("/analytics/youtube/status")
+async def get_youtube_status():
+    """Check if YouTube shorts have been synced."""
+    try:
+        conn = _get_yt_db()
+        cursor = conn.execute("SELECT COUNT(*) FROM youtube_shorts")
+        count = cursor.fetchone()[0]
+        
+        cursor2 = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'channel_name'")
+        row = cursor2.fetchone()
+        channel_name = row[0] if row else None
+        
+        cursor3 = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'last_synced'")
+        row3 = cursor3.fetchone()
+        last_synced = row3[0] if row3 else None
+        
+        conn.close()
+        return {
+            "connected": count > 0,
+            "channel_name": channel_name,
+            "total_shorts": count,
+            "last_synced": last_synced,
+        }
+    except Exception:
+        return {"connected": False, "total_shorts": 0}
+
+
+@router.post("/analytics/youtube/sync")
+async def sync_youtube_shorts(body: dict = Body(...)):
+    """
+    Fetch ALL shorts from the user's YouTube channel using their Google provider token.
+    Paginates through all uploads, filters for shorts (<= 60s), and stores locally.
+    """
+    provider_token = body.get("provider_token")
+    if not provider_token:
+        raise HTTPException(status_code=400, detail="Missing provider_token")
+    
+    import requests
+    
+    YT_API = "https://www.googleapis.com/youtube/v3"
+    headers = {"Authorization": f"Bearer {provider_token}"}
+    
+    # Step 1: Get the channel info and uploads playlist
+    channel_res = requests.get(f"{YT_API}/channels", params={
+        "part": "snippet,contentDetails,statistics",
+        "mine": "true"
+    }, headers=headers)
+    
+    if channel_res.status_code != 200:
+        error_detail = channel_res.json().get("error", {}).get("message", "Unknown error")
+        raise HTTPException(status_code=400, detail=f"YouTube API error: {error_detail}")
+    
+    channels = channel_res.json().get("items", [])
+    if not channels:
+        raise HTTPException(status_code=404, detail="No YouTube channel found for this account")
+    
+    channel = channels[0]
+    channel_name = channel["snippet"]["title"]
+    channel_id = channel["id"]
+    uploads_playlist_id = channel["contentDetails"]["relatedPlaylists"]["uploads"]
+    
+    # Step 2: Paginate through ALL uploads
+    all_video_ids = []
+    next_page = None
+    
+    while True:
+        params = {
+            "part": "snippet",
+            "playlistId": uploads_playlist_id,
+            "maxResults": 50,
+        }
+        if next_page:
+            params["pageToken"] = next_page
+        
+        playlist_res = requests.get(f"{YT_API}/playlistItems", params=params, headers=headers)
+        if playlist_res.status_code != 200:
+            break
+        
+        data = playlist_res.json()
+        for item in data.get("items", []):
+            video_id = item["snippet"]["resourceId"]["videoId"]
+            all_video_ids.append(video_id)
+        
+        next_page = data.get("nextPageToken")
+        if not next_page:
+            break
+    
+    if not all_video_ids:
+        return {"total_shorts": 0, "channel_name": channel_name}
+    
+    # Step 3: Get video details in batches of 50 (API limit)
+    shorts = []
+    
+    for i in range(0, len(all_video_ids), 50):
+        batch = all_video_ids[i:i+50]
+        video_res = requests.get(f"{YT_API}/videos", params={
+            "part": "snippet,contentDetails,statistics",
+            "id": ",".join(batch)
+        }, headers=headers)
+        
+        if video_res.status_code != 200:
+            continue
+        
+        for video in video_res.json().get("items", []):
+            # Parse ISO 8601 duration (PT1M30S → 90 seconds)
+            duration_str = video["contentDetails"]["duration"]
+            duration_secs = _parse_iso_duration(duration_str)
+            
+            # Filter: only shorts (<= 60 seconds)
+            if duration_secs <= 60:
+                stats = video.get("statistics", {})
+                snippet = video["snippet"]
+                thumbnails = snippet.get("thumbnails", {})
+                thumb_url = thumbnails.get("high", thumbnails.get("default", {})).get("url", "")
+                
+                shorts.append({
+                    "video_id": video["id"],
+                    "title": snippet.get("title", ""),
+                    "published_at": snippet.get("publishedAt", ""),
+                    "duration_seconds": duration_secs,
+                    "view_count": int(stats.get("viewCount", 0)),
+                    "like_count": int(stats.get("likeCount", 0)),
+                    "comment_count": int(stats.get("commentCount", 0)),
+                    "channel_name": channel_name,
+                    "channel_id": channel_id,
+                    "thumbnail_url": thumb_url,
+                })
+    
+    # Step 4: Store in SQLite
+    conn = _get_yt_db()
+    now = datetime.now().isoformat()
+    
+    for s in shorts:
+        conn.execute("""
+            INSERT OR REPLACE INTO youtube_shorts 
+            (video_id, title, published_at, duration_seconds, view_count, like_count, 
+             comment_count, channel_name, channel_id, thumbnail_url, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            s["video_id"], s["title"], s["published_at"], s["duration_seconds"],
+            s["view_count"], s["like_count"], s["comment_count"],
+            s["channel_name"], s["channel_id"], s["thumbnail_url"], now
+        ))
+    
+    # Save sync metadata
+    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_name', ?)", (channel_name,))
+    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_id', ?)", (channel_id,))
+    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('last_synced', ?)", (now,))
+    conn.commit()
+    conn.close()
+    
+    return {
+        "total_shorts": len(shorts),
+        "total_videos_scanned": len(all_video_ids),
+        "channel_name": channel_name,
+    }
+
+
+@router.get("/analytics/youtube/insights")
+async def get_youtube_insights():
+    """Aggregate insights from synced YouTube Shorts data."""
+    try:
+        conn = _get_yt_db()
+        
+        # Basic totals
+        cursor = conn.execute("""
+            SELECT 
+                COUNT(*) as total,
+                COALESCE(SUM(view_count), 0) as total_views,
+                COALESCE(SUM(like_count), 0) as total_likes,
+                COALESCE(AVG(view_count), 0) as avg_views,
+                COALESCE(AVG(duration_seconds), 0) as avg_duration
+            FROM youtube_shorts
+        """)
+        row = cursor.fetchone()
+        total = row[0]; total_views = row[1]; total_likes = row[2]
+        avg_views = row[3]; avg_duration = row[4]
+        
+        if total == 0:
+            conn.close()
+            return {"total_shorts": 0, "total_views": 0, "total_likes": 0,
+                    "avg_views": 0, "avg_duration": 0, "best_performing": [],
+                    "duration_breakdown": []}
+        
+        # Top 10 performing shorts
+        best_cursor = conn.execute("""
+            SELECT title, view_count, video_id
+            FROM youtube_shorts
+            ORDER BY view_count DESC
+            LIMIT 10
+        """)
+        best_performing = [
+            {"title": r[0], "views": r[1], "url": f"https://youtube.com/shorts/{r[2]}"}
+            for r in best_cursor.fetchall()
+        ]
+        
+        # Duration breakdown
+        duration_breakdown = []
+        ranges = [
+            ("0-15s", 0, 15),
+            ("16-30s", 16, 30),
+            ("31-45s", 31, 45),
+            ("46-60s", 46, 60),
+        ]
+        for label, lo, hi in ranges:
+            dc = conn.execute("""
+                SELECT COUNT(*), COALESCE(AVG(view_count), 0)
+                FROM youtube_shorts
+                WHERE duration_seconds >= ? AND duration_seconds <= ?
+            """, (lo, hi))
+            dr = dc.fetchone()
+            if dr[0] > 0:
+                duration_breakdown.append({
+                    "range": label,
+                    "count": dr[0],
+                    "avg_views": int(dr[1])
+                })
+        
+        conn.close()
+        
+        return {
+            "total_shorts": total,
+            "total_views": int(total_views),
+            "total_likes": int(total_likes),
+            "avg_views": int(avg_views),
+            "avg_duration": round(avg_duration, 1),
+            "best_performing": best_performing,
+            "duration_breakdown": duration_breakdown,
+        }
+    except Exception:
+        return {"total_shorts": 0, "total_views": 0, "total_likes": 0,
+                "avg_views": 0, "avg_duration": 0, "best_performing": [],
+                "duration_breakdown": []}
+
+
+def _parse_iso_duration(duration: str) -> int:
+    """Parse ISO 8601 duration (PT1M30S) to seconds."""
+    import re
+    match = re.match(r'PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?', duration)
+    if not match:
+        return 0
+    hours = int(match.group(1) or 0)
+    minutes = int(match.group(2) or 0)
+    seconds = int(match.group(3) or 0)
+    return hours * 3600 + minutes * 60 + seconds
 
 
 # ─── Platform Connections ────────────────────────────────────────────────────

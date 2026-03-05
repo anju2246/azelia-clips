@@ -43,6 +43,13 @@ import "../../styles/global.css";
                         return;
                     }
 
+                    // 2.5 Check for a ?next= redirect (e.g., from YouTube OAuth)
+                    const nextUrl = url.searchParams.get("next");
+                    if (nextUrl && nextUrl.startsWith("/")) {
+                        window.location.replace(nextUrl);
+                        return;
+                    }
+
                     // 3. Check if user has API keys configured → Dashboard or Onboarding
                     try {
                         const res = await fetch("/api/settings", {
