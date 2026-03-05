@@ -289,6 +289,61 @@ async def sync_youtube_shorts(body: dict = Body(...)):
     }
 
 
+@router.post("/analytics/youtube/sync-with-code")
+async def sync_youtube_with_code(body: dict = Body(...)):
+    """
+    Exchange an OAuth authorization code for an access token, then sync all videos.
+    This combines the code exchange + full video sync into one step.
+    """
+    code = body.get("code")
+    redirect_uri = body.get("redirect_uri")
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code")
+    if not redirect_uri:
+        raise HTTPException(status_code=400, detail="Missing redirect_uri")
+    
+    import requests as http_requests
+    
+    # Load client credentials from client_secrets.json
+    secrets_path = _find_client_secrets()
+    import json
+    with open(secrets_path) as f:
+        secrets_data = json.load(f)
+    
+    # Handle both "web" and "installed" app types
+    client_info = secrets_data.get("web") or secrets_data.get("installed", {})
+    client_id = client_info.get("client_id")
+    client_secret = client_info.get("client_secret")
+    token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
+    
+    if not client_id or not client_secret:
+        raise HTTPException(status_code=500, detail="Invalid client_secrets.json — missing client_id or client_secret")
+    
+    # Exchange the authorization code for an access token
+    token_res = http_requests.post(token_uri, data={
+        "code": code,
+        "client_id": client_id,
+        "client_secret": client_secret,
+        "redirect_uri": redirect_uri,
+        "grant_type": "authorization_code",
+    })
+    
+    if token_res.status_code != 200:
+        error_msg = token_res.json().get("error_description", token_res.json().get("error", "Token exchange failed"))
+        raise HTTPException(status_code=400, detail=f"Failed to exchange code: {error_msg}")
+    
+    token_data = token_res.json()
+    access_token = token_data.get("access_token")
+    
+    if not access_token:
+        raise HTTPException(status_code=400, detail="No access token received from Google")
+    
+    # Now use the access token to sync — reuse the sync logic
+    result = await sync_youtube_shorts(body={"provider_token": access_token})
+    return result
+
+
 @router.get("/analytics/youtube/insights")
 async def get_youtube_insights():
     """Aggregate insights from synced YouTube Shorts data."""
