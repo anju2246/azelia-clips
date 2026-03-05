@@ -241,25 +241,23 @@ async def sync_youtube_shorts(body: dict = Body(...)):
             duration_str = video["contentDetails"]["duration"]
             duration_secs = _parse_iso_duration(duration_str)
             
-            # Filter: only shorts (<= 60 seconds)
-            if duration_secs <= 60:
-                stats = video.get("statistics", {})
-                snippet = video["snippet"]
-                thumbnails = snippet.get("thumbnails", {})
-                thumb_url = thumbnails.get("high", thumbnails.get("default", {})).get("url", "")
-                
-                shorts.append({
-                    "video_id": video["id"],
-                    "title": snippet.get("title", ""),
-                    "published_at": snippet.get("publishedAt", ""),
-                    "duration_seconds": duration_secs,
-                    "view_count": int(stats.get("viewCount", 0)),
-                    "like_count": int(stats.get("likeCount", 0)),
-                    "comment_count": int(stats.get("commentCount", 0)),
-                    "channel_name": channel_name,
-                    "channel_id": channel_id,
-                    "thumbnail_url": thumb_url,
-                })
+            stats = video.get("statistics", {})
+            snippet = video["snippet"]
+            thumbnails = snippet.get("thumbnails", {})
+            thumb_url = thumbnails.get("high", thumbnails.get("default", {})).get("url", "")
+            
+            shorts.append({
+                "video_id": video["id"],
+                "title": snippet.get("title", ""),
+                "published_at": snippet.get("publishedAt", ""),
+                "duration_seconds": duration_secs,
+                "view_count": int(stats.get("viewCount", 0)),
+                "like_count": int(stats.get("likeCount", 0)),
+                "comment_count": int(stats.get("commentCount", 0)),
+                "channel_name": channel_name,
+                "channel_id": channel_id,
+                "thumbnail_url": thumb_url,
+            })
     
     # Step 4: Store in SQLite
     conn = _get_yt_db()
@@ -334,8 +332,9 @@ async def get_youtube_insights():
         ranges = [
             ("0-15s", 0, 15),
             ("16-30s", 16, 30),
-            ("31-45s", 31, 45),
-            ("46-60s", 46, 60),
+            ("31-60s", 31, 60),
+            ("1-3 min", 61, 180),
+            ("3+ min", 181, 99999),
         ]
         for label, lo, hi in ranges:
             dc = conn.execute("""
