@@ -5,6 +5,19 @@ import { DirectoryPicker } from '../settings/DirectoryPicker';
 import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRight, CheckCircle2, User, Target, BarChart, Youtube, Link as LinkIcon, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 
+const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+
+async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers || {});
+    try {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token) {
+            headers.set('Authorization', `Bearer ${data.session.access_token}`);
+        }
+    } catch (e) { /* continue */ }
+    return fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+}
+
 export const OnboardingWizard: React.FC = () => {
     const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
     const [loading, setLoading] = useState(true);
@@ -24,6 +37,15 @@ export const OnboardingWizard: React.FC = () => {
 
     // Telemetry (Step 3) - Opt-out by default in the UI to encourage opt-in
     const [telemetry, setTelemetry] = useState(true);
+
+    // YouTube connection state
+    const [ytConnected, setYtConnected] = useState(false);
+    const [ytChannelName, setYtChannelName] = useState('');
+    const [ytConnecting, setYtConnecting] = useState(false);
+    const [ytChannels, setYtChannels] = useState<any[]>([]);
+    const [ytAccessToken, setYtAccessToken] = useState<string | null>(null);
+    const [ytShowPicker, setYtShowPicker] = useState(false);
+    const [ytManualHandle, setYtManualHandle] = useState('');
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, models: { id: string, label: string }[] }> = {
         'groq': {
@@ -77,18 +99,40 @@ export const OnboardingWizard: React.FC = () => {
     ];
 
     useEffect(() => {
-        const fetchExisting = async () => {
+        const init = async () => {
             try {
                 const existing = await SettingsApi.getSettings();
                 setFormData(existing);
-                // Assume if someone hits onboarding they are new, but if they have a name we load it
             } catch (e) {
                 console.warn("Could not load existing settings", e);
-            } finally {
-                setLoading(false);
             }
+
+            // Check for YouTube OAuth callback
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            if (code) {
+                window.history.replaceState({}, '', window.location.pathname);
+                setStep(3);
+                setLoading(false);
+                handleYouTubeCallback(code);
+                return;
+            }
+
+            // Check if YouTube is already connected
+            try {
+                const res = await fetchWithAuth('/analytics/youtube/status');
+                if (res.ok) {
+                    const data = await res.json();
+                    if (data.connected) {
+                        setYtConnected(true);
+                        setYtChannelName(data.channel_name || 'Connected');
+                    }
+                }
+            } catch (e) { /* not connected */ }
+
+            setLoading(false);
         };
-        fetchExisting();
+        init();
     }, []);
 
     const handleUpdate = (updates: Partial<UpdateSettingsRequest>) => {
@@ -129,11 +173,100 @@ export const OnboardingWizard: React.FC = () => {
         }
     };
 
+    const handleYouTubeConnect = async () => {
+        try {
+            const redirectUri = window.location.origin + '/onboarding';
+            const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`);
+            if (!res.ok) throw new Error('Failed to start authorization');
+            const { url } = await res.json();
+            window.location.href = url;
+        } catch (error: any) {
+            toast.error(error.message || 'Failed to connect YouTube');
+        }
+    };
+
+    const handleYouTubeCallback = async (code: string) => {
+        setYtConnecting(true);
+        const toastId = toast.loading('Connecting YouTube...');
+        try {
+            const redirectUri = window.location.origin + '/onboarding';
+            const res = await fetchWithAuth('/analytics/youtube/sync-with-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code, redirect_uri: redirectUri })
+            });
+            if (!res.ok) throw new Error((await res.json()).detail || 'Connection failed');
+            const result = await res.json();
+
+            if (result.needs_channel_selection) {
+                toast.dismiss(toastId);
+                setYtChannels(result.channels || []);
+                setYtAccessToken(result.access_token);
+                setYtShowPicker(true);
+                toast.success(`Found ${result.channels?.length || 0} channel(s). Pick the one to sync.`, { icon: '📺' });
+            } else {
+                toast.success(`Synced ${result.total_shorts} videos from ${result.channel_name}!`, { id: toastId, icon: '🎬' });
+                setYtConnected(true);
+                setYtChannelName(result.channel_name);
+            }
+        } catch (error: any) {
+            toast.error(error.message || 'Connection failed', { id: toastId });
+        } finally {
+            setYtConnecting(false);
+        }
+    };
+
+    const handleYtSelectChannel = async (channelId: string) => {
+        if (!ytAccessToken) return;
+        setYtConnecting(true);
+        const toastId = toast.loading('Syncing channel...');
+        try {
+            const res = await fetchWithAuth('/analytics/youtube/sync-with-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ access_token: ytAccessToken, channel_id: channelId })
+            });
+            if (!res.ok) throw new Error((await res.json()).detail || 'Sync failed');
+            const result = await res.json();
+            toast.success(`Synced ${result.total_shorts} videos from ${result.channel_name}!`, { id: toastId, icon: '🎬' });
+            setYtConnected(true);
+            setYtChannelName(result.channel_name);
+            setYtShowPicker(false);
+        } catch (error: any) {
+            toast.error(error.message || 'Sync failed', { id: toastId });
+        } finally {
+            setYtConnecting(false);
+        }
+    };
+
+    const handleYtManualHandle = async () => {
+        if (!ytAccessToken || !ytManualHandle.trim()) return;
+        let handle = ytManualHandle.trim();
+        if (handle.includes('youtube.com/')) {
+            const match = handle.match(/@[\w-]+/);
+            if (match) handle = match[0];
+        }
+        if (!handle.startsWith('@')) handle = `@${handle}`;
+        setYtConnecting(true);
+        const toastId = toast.loading(`Looking up ${handle}...`);
+        try {
+            const searchRes = await fetch(
+                `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&forHandle=${encodeURIComponent(handle.replace('@', ''))}`,
+                { headers: { Authorization: `Bearer ${ytAccessToken}` } }
+            );
+            if (!searchRes.ok) throw new Error(`Channel ${handle} not found`);
+            const data = await searchRes.json();
+            if (!data.items?.length) throw new Error(`Channel ${handle} not found`);
+            toast.dismiss(toastId);
+            await handleYtSelectChannel(data.items[0].id);
+        } catch (error: any) {
+            toast.error(error.message || 'Channel not found', { id: toastId });
+            setYtConnecting(false);
+        }
+    };
+
     const handleSocialConnect = (platform: string) => {
-        toast.success("Podrás conectar tus redes desde el Dashboard un vez terminemos el setup base.", {
-            icon: '🔗',
-            duration: 4000
-        });
+        toast('Próximamente — TikTok integration', { icon: '🔜' });
     };
 
     const hasAnyKey = !!(formData.groq_api_key || formData.openai_api_key || formData.anthropic_api_key || formData.gcp_project_id);
@@ -328,19 +461,58 @@ export const OnboardingWizard: React.FC = () => {
                         {/* Social Connections */}
                         <div className="pt-4">
                             <h4 className="text-sm font-medium text-zinc-300 mb-3 flex items-center gap-2"><LinkIcon className="w-4 h-4" /> Conexiones Sociales</h4>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                                <button onClick={() => handleSocialConnect('youtube')} className="flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-red-500/30 transition-all text-left">
-                                    <Youtube className="w-6 h-6 text-red-500" />
-                                    <div>
-                                        <div className="text-zinc-200 font-medium text-sm">YouTube Channel</div>
-                                        <div className="text-zinc-500 text-xs mt-0.5">Analizar Shorts</div>
+                            <div className="space-y-3">
+                                {/* YouTube Button */}
+                                {ytConnected ? (
+                                    <div className="flex items-center gap-3 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-left">
+                                        <CheckCircle2 className="w-6 h-6 text-green-500" />
+                                        <div>
+                                            <div className="text-white font-medium text-sm">YouTube Connected</div>
+                                            <div className="text-green-400 text-xs mt-0.5">{ytChannelName}</div>
+                                        </div>
                                     </div>
-                                </button>
-                                <button onClick={() => handleSocialConnect('tiktok')} className="flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-[#00f2fe]/30 transition-all text-left">
+                                ) : ytShowPicker ? (
+                                    <div className="p-4 rounded-xl bg-black/20 border border-red-500/20 space-y-3">
+                                        <h4 className="text-white font-medium text-sm flex items-center gap-2">
+                                            <Youtube className="w-5 h-5 text-red-500" /> Select Your Channel
+                                        </h4>
+                                        <div className="space-y-2 max-h-48 overflow-y-auto">
+                                            {ytChannels.map((ch: any) => (
+                                                <button key={ch.id} onClick={() => handleYtSelectChannel(ch.id)} disabled={ytConnecting}
+                                                    className="w-full flex items-center gap-3 p-3 rounded-lg bg-zinc-800/50 border border-white/5 hover:border-red-500/30 transition-all text-left disabled:opacity-50">
+                                                    {ch.thumbnail && <img src={ch.thumbnail} alt="" className="w-8 h-8 rounded-full" />}
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="text-zinc-200 text-sm font-medium truncate">{ch.title}</div>
+                                                        <div className="text-zinc-500 text-xs">{ch.handle ? `@${ch.handle}` : ''} · {ch.subscriber_count || 0} subs</div>
+                                                    </div>
+                                                </button>
+                                            ))}
+                                        </div>
+                                        <div className="flex gap-2 pt-2 border-t border-white/5">
+                                            <input type="text" value={ytManualHandle} onChange={e => setYtManualHandle(e.target.value)}
+                                                placeholder="@channelhandle" className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-200 placeholder-zinc-600 focus:outline-none focus:border-red-500/50" />
+                                            <button onClick={handleYtManualHandle} disabled={ytConnecting || !ytManualHandle.trim()}
+                                                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-500 disabled:opacity-50 transition-all">Sync</button>
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <button onClick={handleYouTubeConnect} disabled={ytConnecting}
+                                        className="w-full flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-red-500/30 transition-all text-left cursor-pointer disabled:opacity-50">
+                                        {ytConnecting ? <Loader2 className="w-6 h-6 text-red-500 animate-spin" /> : <Youtube className="w-6 h-6 text-red-500" />}
+                                        <div className="flex-1">
+                                            <div className="text-zinc-200 font-medium text-sm">YouTube Channel</div>
+                                            <div className="text-zinc-500 text-xs mt-0.5">Connect to unlock Personal Intelligence</div>
+                                        </div>
+                                        <span className="text-[10px] uppercase tracking-wider text-brand-400 font-bold bg-brand-500/10 px-2 py-1 rounded-md">Recommended</span>
+                                    </button>
+                                )}
+
+                                {/* TikTok Button (future) */}
+                                <button onClick={() => handleSocialConnect('tiktok')} className="w-full flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-[#00f2fe]/30 transition-all text-left cursor-pointer">
                                     <svg className="w-5 h-5 ml-0.5 text-zinc-200" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" /></svg>
                                     <div>
                                         <div className="text-zinc-200 font-medium text-sm">TikTok Account</div>
-                                        <div className="text-zinc-500 text-xs mt-0.5">Automargin tracking</div>
+                                        <div className="text-zinc-500 text-xs mt-0.5">Próximamente</div>
                                     </div>
                                 </button>
                             </div>
