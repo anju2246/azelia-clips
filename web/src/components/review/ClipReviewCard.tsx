@@ -15,7 +15,8 @@ export const ClipReviewCard: React.FC<ClipReviewCardProps> = ({ clip, jobId, onA
     const [isPlaying, setIsPlaying] = useState(false);
     const [isHovering, setIsHovering] = useState(false);
 
-    const videoUrl = `http://localhost:8000/api/clips/${jobId}/${clip.filename}`;
+    const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+    const videoUrl = `${API_BASE}/clips/${jobId}/${clip.filename}`;
 
     const togglePlay = (e: React.MouseEvent) => {
         e.stopPropagation();

@@ -11,7 +11,7 @@ interface Episode {
     path: string;
 }
 
-const API_URL = 'http://localhost:8000/api';
+const API_URL = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
 export default function EpisodeList() {
     const [episodes, setEpisodes] = useState<Episode[]>([]);
