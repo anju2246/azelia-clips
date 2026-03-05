@@ -16,6 +16,12 @@ export default defineConfig({
         usePolling: true, // Forces faster reloads
       },
       hmr: true, // Force Hot Module Replacement
+      proxy: {
+        '/api': {
+          target: 'http://localhost:8000',
+          changeOrigin: true,
+        },
+      },
     },
     optimizeDeps: {
       force: true, // Disables Vite pre-bundling cache
