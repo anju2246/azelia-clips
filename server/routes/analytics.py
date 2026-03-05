@@ -796,9 +796,9 @@ async def authorize_youtube(
             "client_id": client_id,
             "redirect_uri": redirect_uri,
             "response_type": "code",
-            "scope": "https://www.googleapis.com/auth/youtube.readonly",
+            "scope": "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
             "access_type": "offline",
-            "prompt": "consent",
+            "prompt": "consent select_account",
         }
         
         authorization_url = f"{auth_uri}?{urlencode(params)}"
