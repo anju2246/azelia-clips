@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { UploadZone } from './UploadZone';
 import { LibraryView } from './LibraryView';
 import { LiveProcessingWidget } from './LiveProcessingWidget';
+import { YouTubeNudge } from '../analytics/YouTubeNudge';
 import { ClipsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
@@ -85,6 +86,7 @@ export const DashboardController: React.FC = () => {
 
     return (
         <div className="flex flex-col gap-12">
+            <YouTubeNudge />
             <LibraryView onProcessEpisode={handleProcessEpisode} />
 
             <div className="relative">
