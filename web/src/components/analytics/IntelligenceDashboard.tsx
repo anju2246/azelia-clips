@@ -24,7 +24,7 @@ export const IntelligenceDashboard: React.FC = () => {
     const loadStats = async () => {
         try {
             // Try to fetch real stats from the API
-            const API_BASE = import.meta.env?.PUBLIC_API_URL || 'http://localhost:8000/api';
+            const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
             const { data: session } = await supabase.auth.getSession();
             const headers: HeadersInit = { 'Accept': 'application/json' };
             if (session?.session?.access_token) {

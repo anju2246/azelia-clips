@@ -20,7 +20,7 @@ interface YouTubeInsights {
     duration_breakdown: { range: string; count: number; avg_views: number }[];
 }
 
-const API_BASE = import.meta.env?.PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers || {});

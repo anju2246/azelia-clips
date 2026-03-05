@@ -92,7 +92,7 @@ export interface IntelligenceInsights {
 }
 
 // Global API Configuration
-const API_BASE = import.meta.env?.PUBLIC_API_URL || 'http://localhost:8000/api';
+const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
 import { supabase } from './supabase';
 

@@ -69,8 +69,7 @@ export default function UploadWidget() {
         if (supabaseKey) formData.append('supabase_key', supabaseKey);
 
         try {
-            // In dev, we point to localhost:8000. In prod, this would be relative or configured.
-            const API_URL = import.meta.env.PUBLIC_API_URL || 'http://localhost:8001';
+            const API_URL = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
             // Get Auth Token if available
             let token = null;
@@ -89,7 +88,7 @@ export default function UploadWidget() {
                 }
             }
 
-            const res = await fetch(`${API_URL}/api/process`, {
+            const res = await fetch(`${API_URL}/process`, {
                 method: 'POST',
                 body: formData,
                 headers: {
