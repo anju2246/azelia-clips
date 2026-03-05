@@ -459,8 +459,9 @@ async def _sync_channel(access_token: str, channel_id: str):
     conn = _get_yt_db()
     now = datetime.now().isoformat()
     
-    # Clear old data for this channel
-    conn.execute("DELETE FROM youtube_shorts WHERE channel_id = ?", (channel_id,))
+    # Clear ALL old data — only one channel at a time
+    conn.execute("DELETE FROM youtube_shorts")
+    conn.execute("DELETE FROM youtube_sync_meta")
     
     for s in shorts:
         conn.execute("""
