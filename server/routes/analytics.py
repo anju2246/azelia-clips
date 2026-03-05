@@ -292,56 +292,195 @@ async def sync_youtube_shorts(body: dict = Body(...)):
 @router.post("/analytics/youtube/sync-with-code")
 async def sync_youtube_with_code(body: dict = Body(...)):
     """
-    Exchange an OAuth authorization code for an access token, then sync all videos.
-    This combines the code exchange + full video sync into one step.
+    Step 1: Exchange OAuth code for access token, then list available channels.
+    Returns the token + list of channels so the user can pick which to sync.
+    If channel_id is provided, skip channel selection and sync directly.
     """
     code = body.get("code")
     redirect_uri = body.get("redirect_uri")
-    
-    if not code:
-        raise HTTPException(status_code=400, detail="Missing authorization code")
-    if not redirect_uri:
-        raise HTTPException(status_code=400, detail="Missing redirect_uri")
+    channel_id = body.get("channel_id")  # Optional: skip picker and sync this channel
+    access_token = body.get("access_token")  # Optional: reuse existing token
     
     import requests as http_requests
-    
-    # Load client credentials from client_secrets.json
-    secrets_path = _find_client_secrets()
     import json
-    with open(secrets_path) as f:
-        secrets_data = json.load(f)
     
-    # Handle both "web" and "installed" app types
-    client_info = secrets_data.get("web") or secrets_data.get("installed", {})
-    client_id = client_info.get("client_id")
-    client_secret = client_info.get("client_secret")
-    token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
-    
-    if not client_id or not client_secret:
-        raise HTTPException(status_code=500, detail="Invalid client_secrets.json — missing client_id or client_secret")
-    
-    # Exchange the authorization code for an access token
-    token_res = http_requests.post(token_uri, data={
-        "code": code,
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "redirect_uri": redirect_uri,
-        "grant_type": "authorization_code",
-    })
-    
-    if token_res.status_code != 200:
-        error_msg = token_res.json().get("error_description", token_res.json().get("error", "Token exchange failed"))
-        raise HTTPException(status_code=400, detail=f"Failed to exchange code: {error_msg}")
-    
-    token_data = token_res.json()
-    access_token = token_data.get("access_token")
-    
+    # If no token yet, exchange the code
     if not access_token:
-        raise HTTPException(status_code=400, detail="No access token received from Google")
+        if not code:
+            raise HTTPException(status_code=400, detail="Missing authorization code")
+        if not redirect_uri:
+            raise HTTPException(status_code=400, detail="Missing redirect_uri")
+        
+        secrets_path = _find_client_secrets()
+        with open(secrets_path) as f:
+            secrets_data = json.load(f)
+        
+        client_info = secrets_data.get("web") or secrets_data.get("installed", {})
+        client_id = client_info.get("client_id")
+        client_secret = client_info.get("client_secret")
+        token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
+        
+        if not client_id or not client_secret:
+            raise HTTPException(status_code=500, detail="Invalid client_secrets.json")
+        
+        token_res = http_requests.post(token_uri, data={
+            "code": code,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "redirect_uri": redirect_uri,
+            "grant_type": "authorization_code",
+        })
+        
+        if token_res.status_code != 200:
+            import logging
+            logging.error(f"YouTube token exchange failed: {token_res.text}")
+            error_msg = token_res.json().get("error_description", "Token exchange failed")
+            raise HTTPException(status_code=400, detail=f"Failed to exchange code: {error_msg}")
+        
+        access_token = token_res.json().get("access_token")
+        if not access_token:
+            raise HTTPException(status_code=400, detail="No access token received")
     
-    # Now use the access token to sync — reuse the sync logic
-    result = await sync_youtube_shorts(body={"provider_token": access_token})
-    return result
+    headers = {"Authorization": f"Bearer {access_token}"}
+    YT_API = "https://www.googleapis.com/youtube/v3"
+    
+    # If channel_id provided, sync directly
+    if channel_id:
+        result = await _sync_channel(access_token, channel_id)
+        return result
+    
+    # Otherwise, list all accessible channels for the user to pick
+    # 1. Get the default "mine" channel
+    channels = []
+    mine_res = http_requests.get(f"{YT_API}/channels", params={
+        "part": "snippet,statistics,contentDetails",
+        "mine": "true"
+    }, headers=headers)
+    
+    if mine_res.status_code == 200:
+        for ch in mine_res.json().get("items", []):
+            thumb = ch["snippet"].get("thumbnails", {}).get("default", {}).get("url", "")
+            channels.append({
+                "id": ch["id"],
+                "title": ch["snippet"]["title"],
+                "handle": ch["snippet"].get("customUrl", ""),
+                "subscribers": ch["statistics"].get("subscriberCount", "0"),
+                "video_count": ch["statistics"].get("videoCount", "0"),
+                "thumbnail": thumb,
+            })
+    
+    # If only 1 channel, sync it automatically
+    if len(channels) == 1:
+        result = await _sync_channel(access_token, channels[0]["id"])
+        return result
+    
+    # Multiple channels or none: return them for selection
+    return {
+        "needs_channel_selection": True,
+        "access_token": access_token,
+        "channels": channels,
+    }
+
+
+async def _sync_channel(access_token: str, channel_id: str):
+    """Sync all videos from a specific channel by ID."""
+    import requests as http_requests
+    
+    headers = {"Authorization": f"Bearer {access_token}"}
+    YT_API = "https://www.googleapis.com/youtube/v3"
+    
+    # Get channel info
+    ch_res = http_requests.get(f"{YT_API}/channels", params={
+        "part": "snippet,contentDetails,statistics",
+        "id": channel_id
+    }, headers=headers)
+    
+    if ch_res.status_code != 200 or not ch_res.json().get("items"):
+        raise HTTPException(status_code=404, detail="Channel not found")
+    
+    channel = ch_res.json()["items"][0]
+    channel_name = channel["snippet"]["title"]
+    uploads_playlist = channel["contentDetails"]["relatedPlaylists"]["uploads"]
+    
+    # Fetch all videos from uploads playlist
+    all_video_ids = []
+    next_page = None
+    
+    while True:
+        params = {"part": "snippet", "playlistId": uploads_playlist, "maxResults": 50}
+        if next_page:
+            params["pageToken"] = next_page
+        
+        pl_res = http_requests.get(f"{YT_API}/playlistItems", params=params, headers=headers)
+        if pl_res.status_code != 200:
+            break
+        
+        data = pl_res.json()
+        for item in data.get("items", []):
+            all_video_ids.append(item["snippet"]["resourceId"]["videoId"])
+        
+        next_page = data.get("nextPageToken")
+        if not next_page:
+            break
+    
+    # Get video details in batches of 50
+    shorts = []
+    for i in range(0, len(all_video_ids), 50):
+        batch = all_video_ids[i:i+50]
+        vid_res = http_requests.get(f"{YT_API}/videos", params={
+            "part": "snippet,contentDetails,statistics",
+            "id": ",".join(batch)
+        }, headers=headers)
+        
+        if vid_res.status_code != 200:
+            continue
+        
+        for video in vid_res.json().get("items", []):
+            duration_secs = _parse_iso_duration(video["contentDetails"]["duration"])
+            stats = video.get("statistics", {})
+            snippet = video["snippet"]
+            thumbnails = snippet.get("thumbnails", {})
+            thumb_url = thumbnails.get("high", thumbnails.get("default", {})).get("url", "")
+            
+            shorts.append({
+                "video_id": video["id"],
+                "title": snippet.get("title", ""),
+                "published_at": snippet.get("publishedAt", ""),
+                "duration_seconds": duration_secs,
+                "view_count": int(stats.get("viewCount", 0)),
+                "like_count": int(stats.get("likeCount", 0)),
+                "comment_count": int(stats.get("commentCount", 0)),
+                "channel_name": channel_name,
+                "channel_id": channel_id,
+                "thumbnail_url": thumb_url,
+            })
+    
+    # Store in SQLite
+    conn = _get_yt_db()
+    now = datetime.now().isoformat()
+    
+    # Clear old data for this channel
+    conn.execute("DELETE FROM youtube_shorts WHERE channel_id = ?", (channel_id,))
+    
+    for s in shorts:
+        conn.execute("""
+            INSERT OR REPLACE INTO youtube_shorts 
+            (video_id, title, published_at, duration_seconds, view_count, like_count, comment_count, channel_name, channel_id, thumbnail_url)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (s["video_id"], s["title"], s["published_at"], s["duration_seconds"],
+              s["view_count"], s["like_count"], s["comment_count"], s["channel_name"], s["channel_id"], s["thumbnail_url"]))
+    
+    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_name', ?)", (channel_name,))
+    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('last_synced', ?)", (now,))
+    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_id', ?)", (channel_id,))
+    conn.commit()
+    conn.close()
+    
+    return {
+        "total_shorts": len(shorts),
+        "channel_name": channel_name,
+        "channel_id": channel_id,
+    }
 
 
 @router.get("/analytics/youtube/insights")
@@ -635,28 +774,38 @@ async def authorize_youtube(
     authorization: str = Header(None)
 ):
     """
-    Start OAuth flow for YouTube connection (resource-only).
-    Returns the Google authorization URL.
+    Start OAuth flow for YouTube connection.
+    Returns the Google authorization URL (built manually, no PKCE).
     """
-    from google_auth_oauthlib.flow import Flow
+    import json
+    from urllib.parse import urlencode
     
     try:
         secrets_file = _find_client_secrets()
-
-        flow = Flow.from_client_secrets_file(
-            secrets_file,
-            scopes=['https://www.googleapis.com/auth/youtube.readonly'],
-            redirect_uri=redirect_uri
-        )
+        with open(secrets_file) as f:
+            secrets_data = json.load(f)
         
-        authorization_url, state = flow.authorization_url(
-            access_type='offline',
-            prompt='consent',
-            include_granted_scopes='true'
-        )
+        client_info = secrets_data.get("web") or secrets_data.get("installed", {})
+        client_id = client_info.get("client_id")
+        auth_uri = client_info.get("auth_uri", "https://accounts.google.com/o/oauth2/v2/auth")
         
+        if not client_id:
+            raise HTTPException(status_code=500, detail="Missing client_id in client_secrets.json")
+        
+        params = {
+            "client_id": client_id,
+            "redirect_uri": redirect_uri,
+            "response_type": "code",
+            "scope": "https://www.googleapis.com/auth/youtube.readonly",
+            "access_type": "offline",
+            "prompt": "consent",
+        }
+        
+        authorization_url = f"{auth_uri}?{urlencode(params)}"
         return {"url": authorization_url}
         
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

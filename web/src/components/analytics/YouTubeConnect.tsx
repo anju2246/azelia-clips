@@ -39,13 +39,17 @@ export const YouTubeConnect: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSyncing, setIsSyncing] = useState(false);
 
+    // Channel picker state
+    const [channels, setChannels] = useState<any[]>([]);
+    const [accessToken, setAccessToken] = useState<string | null>(null);
+    const [showChannelPicker, setShowChannelPicker] = useState(false);
+    const [manualHandle, setManualHandle] = useState('');
+
     useEffect(() => {
-        // Check if we have a ?code= from OAuth callback
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
 
         if (code) {
-            // Clean URL immediately
             window.history.replaceState({}, '', window.location.pathname);
             handleOAuthCallback(code);
         } else {
@@ -78,7 +82,6 @@ export const YouTubeConnect: React.FC = () => {
     };
 
     const handleConnect = async () => {
-        // Use backend OAuth flow — lets user pick ANY Google account
         try {
             const redirectUri = window.location.origin + '/dashboard/intelligence';
             const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`);
@@ -89,7 +92,6 @@ export const YouTubeConnect: React.FC = () => {
             }
 
             const { url } = await res.json();
-            // Redirect to Google consent (user picks their YouTube account)
             window.location.href = url;
         } catch (error: any) {
             toast.error(error.message || 'Failed to connect YouTube');
@@ -101,7 +103,6 @@ export const YouTubeConnect: React.FC = () => {
         const toastId = toast.loading('Connecting your YouTube channel...');
 
         try {
-            // Exchange the code for an access token via backend
             const redirectUri = window.location.origin + '/dashboard/intelligence';
             const res = await fetchWithAuth('/analytics/youtube/sync-with-code', {
                 method: 'POST',
@@ -115,20 +116,103 @@ export const YouTubeConnect: React.FC = () => {
             }
 
             const result = await res.json();
-            toast.success(`Synced ${result.total_shorts} videos from ${result.channel_name}!`, { id: toastId, icon: '🎬' });
 
+            // If backend asks us to pick a channel
+            if (result.needs_channel_selection) {
+                toast.dismiss(toastId);
+                setChannels(result.channels || []);
+                setAccessToken(result.access_token);
+                setShowChannelPicker(true);
+                setIsLoading(false);
+                if (result.channels?.length === 0) {
+                    toast('No channels found. Enter your channel handle below.', { icon: '🔍' });
+                } else {
+                    toast.success(`Found ${result.channels.length} channel(s). Pick the one to sync.`, { icon: '📺' });
+                }
+                return;
+            }
+
+            // Direct sync (single channel)
+            toast.success(`Synced ${result.total_shorts} videos from ${result.channel_name}!`, { id: toastId, icon: '🎬' });
             setStatus({
                 connected: true,
                 channel_name: result.channel_name,
                 total_shorts: result.total_shorts,
                 last_synced: new Date().toISOString()
             });
-
             await loadInsights();
         } catch (error: any) {
             toast.error(error.message || 'Connection failed', { id: toastId });
         } finally {
             setIsLoading(false);
+        }
+    };
+
+    const handleSelectChannel = async (channelId: string) => {
+        if (!accessToken) return;
+        setIsSyncing(true);
+        const toastId = toast.loading('Syncing channel...');
+
+        try {
+            const res = await fetchWithAuth('/analytics/youtube/sync-with-code', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ access_token: accessToken, channel_id: channelId })
+            });
+
+            if (!res.ok) {
+                const err = await res.json();
+                throw new Error(err.detail || 'Sync failed');
+            }
+
+            const result = await res.json();
+            toast.success(`Synced ${result.total_shorts} videos from ${result.channel_name}!`, { id: toastId, icon: '🎬' });
+            setShowChannelPicker(false);
+            setStatus({
+                connected: true,
+                channel_name: result.channel_name,
+                total_shorts: result.total_shorts,
+                last_synced: new Date().toISOString()
+            });
+            await loadInsights();
+        } catch (error: any) {
+            toast.error(error.message || 'Sync failed', { id: toastId });
+        } finally {
+            setIsSyncing(false);
+        }
+    };
+
+    const handleManualChannel = async () => {
+        if (!accessToken || !manualHandle.trim()) return;
+        // Extract handle: support @handle, youtube.com/@handle, or channel URL
+        let handle = manualHandle.trim();
+        if (handle.includes('youtube.com/')) {
+            const match = handle.match(/@[\w-]+/);
+            if (match) handle = match[0];
+        }
+        if (!handle.startsWith('@')) handle = `@${handle}`;
+
+        setIsSyncing(true);
+        const toastId = toast.loading(`Looking up ${handle}...`);
+
+        try {
+            // Use YouTube API to resolve handle to channel ID
+            const searchRes = await fetch(
+                `https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics,contentDetails&forHandle=${encodeURIComponent(handle.replace('@', ''))}`,
+                { headers: { Authorization: `Bearer ${accessToken}` } }
+            );
+
+            if (!searchRes.ok || !(await searchRes.clone().json()).items?.length) {
+                throw new Error(`Channel ${handle} not found`);
+            }
+
+            const channelData = await searchRes.json();
+            const channelId = channelData.items[0].id;
+            toast.dismiss(toastId);
+            await handleSelectChannel(channelId);
+        } catch (error: any) {
+            toast.error(error.message || 'Channel not found', { id: toastId });
+            setIsSyncing(false);
         }
     };
 
@@ -149,6 +233,65 @@ export const YouTubeConnect: React.FC = () => {
             <div className="flex justify-center items-center py-12">
                 <Loader2 className="w-8 h-8 text-red-500 animate-spin" />
                 <span className="ml-3 text-zinc-400">Connecting to YouTube...</span>
+            </div>
+        );
+    }
+
+    // Channel picker UI
+    if (showChannelPicker) {
+        return (
+            <div className="space-y-6">
+                <div className="bg-zinc-900/40 border border-white/5 rounded-2xl p-6">
+                    <h3 className="text-xl font-bold text-white mb-2">Select Your Channel</h3>
+                    <p className="text-sm text-zinc-400 mb-6">
+                        We found multiple channels. Pick the one you want to sync:
+                    </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-6">
+                        {channels.map((ch) => (
+                            <button
+                                key={ch.id}
+                                onClick={() => handleSelectChannel(ch.id)}
+                                disabled={isSyncing}
+                                className="flex items-center gap-4 p-4 bg-zinc-800/60 hover:bg-zinc-700/60 border border-white/5 hover:border-red-500/30 rounded-xl transition-all cursor-pointer text-left disabled:opacity-50"
+                            >
+                                {ch.thumbnail && (
+                                    <img src={ch.thumbnail} alt={ch.title} className="w-12 h-12 rounded-full object-cover" />
+                                )}
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-white font-semibold truncate">{ch.title}</p>
+                                    {ch.handle && <p className="text-sm text-zinc-500">{ch.handle}</p>}
+                                    <p className="text-xs text-zinc-600">
+                                        {Number(ch.subscribers).toLocaleString()} subs · {ch.video_count} videos
+                                    </p>
+                                </div>
+                            </button>
+                        ))}
+                    </div>
+
+                    <div className="border-t border-white/5 pt-4">
+                        <p className="text-sm text-zinc-500 mb-3">
+                            Channel not listed? Enter its handle (e.g., @inminentepodcast):
+                        </p>
+                        <div className="flex gap-2">
+                            <input
+                                type="text"
+                                value={manualHandle}
+                                onChange={(e) => setManualHandle(e.target.value)}
+                                placeholder="@channelhandle"
+                                className="flex-1 bg-zinc-800 border border-white/10 rounded-lg px-4 py-2 text-white placeholder-zinc-600 focus:outline-none focus:border-red-500/50"
+                                onKeyDown={(e) => e.key === 'Enter' && handleManualChannel()}
+                            />
+                            <button
+                                onClick={handleManualChannel}
+                                disabled={isSyncing || !manualHandle.trim()}
+                                className="px-5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg font-medium transition-colors cursor-pointer disabled:opacity-50"
+                            >
+                                {isSyncing ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Sync'}
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         );
     }
@@ -200,8 +343,8 @@ export const YouTubeConnect: React.FC = () => {
                         </button>
                     ) : (
                         <button
-                            onClick={handleConnect}
-                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-red-500/20"
+                            onClick={() => { console.log('YT CLICK'); handleConnect(); }}
+                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-red-500/20 cursor-pointer"
                         >
                             <Youtube className="w-4 h-4" /> Connect YouTube
                         </button>
