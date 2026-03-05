@@ -360,10 +360,83 @@ def from_supabase(
         console.print("\n[dim]No video provided. Use --video to extract clips.[/dim]")
 
 
+@app.command()
+def start(
+    port: Annotated[int, typer.Option("--port", "-p", help="Server port")] = 8000,
+    host: Annotated[str, typer.Option("--host", help="Server host")] = "0.0.0.0",
+    build: Annotated[bool, typer.Option("--build", "-b", help="Build Astro frontend before starting")] = False,
+    dev: Annotated[bool, typer.Option("--dev", help="Run in dev mode (Astro dev server + FastAPI with reload)")] = False,
+):
+    """
+    🚀 Start the Celia Clips server
+
+    Production:
+        celia start --build        # Build frontend + start server
+        celia start                # Start server (uses existing build)
+
+    Development:
+        celia start --dev          # Start with hot-reload (Astro + FastAPI)
+    """
+    import subprocess
+    import sys
+    import os
+
+    project_root = Path(__file__).resolve().parent.parent.parent
+    web_dir = project_root / "web"
+
+    if dev:
+        console.print("[bold blue]🎬 Celia Clips[/bold blue] — Development Mode\n")
+        console.print("[dim]Starting Astro dev server + FastAPI with reload...[/dim]")
+        console.print(f"[green]→[/green] Frontend: http://localhost:4321")
+        console.print(f"[green]→[/green] API:      http://localhost:{port}")
+        console.print("[dim]Press Ctrl+C to stop both.[/dim]\n")
+
+        # Start Astro dev server in background
+        astro_proc = subprocess.Popen(
+            ["npm", "run", "dev"],
+            cwd=str(web_dir),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+
+        try:
+            import uvicorn
+            uvicorn.run("server.app:app", host=host, port=port, reload=True)
+        finally:
+            astro_proc.terminate()
+            astro_proc.wait()
+        return
+
+    # Production mode
+    if build:
+        console.print("[bold blue]🎬 Celia Clips[/bold blue] — Building frontend...\n")
+        result = subprocess.run(
+            ["npm", "run", "build"],
+            cwd=str(web_dir),
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            console.print(f"[red]Build failed:[/red]\n{result.stderr}")
+            raise typer.Exit(1)
+        console.print("[green]✓[/green] Frontend built successfully\n")
+
+    # Check if build exists
+    dist_dir = web_dir / "dist"
+    if not (dist_dir / "index.html").exists():
+        console.print("[yellow]⚠[/yellow] No frontend build found. Run with --build flag first:")
+        console.print("[dim]  celia start --build[/dim]")
+        raise typer.Exit(1)
+
+    console.print(f"[bold blue]🎬 Celia Clips[/bold blue] — Server running at http://{host}:{port}\n")
+    console.print("[dim]Press Ctrl+C to stop.[/dim]")
+
+    import uvicorn
+    uvicorn.run("server.app:app", host=host, port=port)
+
+
 if __name__ == "__main__":
     app()
-
-
 @app.command(name="upload-transcript")
 def upload_transcript_cmd(
     target: Annotated[Path, typer.Argument(help="Transcript JSON file or Episode Folder")],
