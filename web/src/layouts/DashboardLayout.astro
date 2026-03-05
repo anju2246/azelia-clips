@@ -73,14 +73,15 @@ const currentPath = Astro.url.pathname;
     class="bg-zinc-950 text-zinc-100 antialiased selection:bg-brand-500/30 font-sans min-h-screen relative overflow-hidden flex"
   >
     <!-- Background Effects -->
-    <div class="noise-overlay"></div>
-    <div class="grid-overlay"></div>
+    <div class="noise-overlay" style="pointer-events:none;z-index:0"></div>
+    <div class="grid-overlay" style="pointer-events:none;z-index:0"></div>
 
     <!-- Layout Structure -->
     <Sidebar currentPath={currentPath} client:load />
 
     <div
-      class="flex-1 flex flex-col h-screen relative z-10 w-full overflow-hidden"
+      class="flex-1 flex flex-col h-screen relative w-full overflow-hidden"
+      style="z-index:10"
     >
       <main class="flex-1 overflow-y-auto p-8 pt-10 scroll-smooth">
         <div class="max-w-7xl mx-auto w-full h-full">
