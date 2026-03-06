@@ -126,6 +126,12 @@ async def browse_directory(path: str = "~"):
     # Expand ~ and resolve
     target = Path(os.path.expanduser(path)).resolve()
 
+    # Security: restrict browsing to user home and external drives
+    home = Path(os.path.expanduser("~")).resolve()
+    allowed_roots = [home, Path("/Volumes").resolve()]
+    if not any(target.is_relative_to(root) for root in allowed_roots):
+        return {"path": str(target), "parent": str(home), "dirs": [], "error": "Access restricted to home directory and external drives"}
+
     if not target.exists() or not target.is_dir():
         return {"path": str(target), "parent": str(target.parent), "dirs": [], "error": "Directory not found"}
 
@@ -161,6 +167,12 @@ async def browse_files(path: str = "~"):
     import os
 
     target = Path(os.path.expanduser(path)).resolve()
+
+    # Security: restrict browsing to user home and external drives
+    home = Path(os.path.expanduser("~")).resolve()
+    allowed_roots = [home, Path("/Volumes").resolve()]
+    if not any(target.is_relative_to(root) for root in allowed_roots):
+        return {"path": str(target), "parent": str(home), "entries": [], "error": "Access restricted to home directory and external drives"}
 
     if not target.exists() or not target.is_dir():
         return {"path": str(target), "parent": str(target.parent), "entries": [], "error": "Directory not found"}
@@ -211,6 +223,11 @@ async def resolve_path(name: str):
     """
     import os
     import subprocess
+    import re
+
+    # Security: sanitize folder name (alphanumeric, hyphens, underscores, spaces only)
+    if not re.match(r'^[\w\s\-\.]+$', name):
+        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name"}
 
     home = Path(os.path.expanduser("~"))
     

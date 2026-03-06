@@ -144,9 +144,15 @@ async def process_local_video(
     """Process a video directly from the local file system using the Server-Side Picker."""
     import os
     
-    file_path_obj = Path(req.video_path)
+    file_path_obj = Path(req.video_path).resolve()
     if not file_path_obj.exists() or not file_path_obj.is_file():
         raise HTTPException(status_code=400, detail="Local file does not exist")
+    
+    # Security: Only allow files under user home or /Volumes (external drives)
+    home = Path(os.path.expanduser("~")).resolve()
+    allowed_roots = [home, Path("/Volumes").resolve()]
+    if not any(file_path_obj.is_relative_to(root) for root in allowed_roots):
+        raise HTTPException(status_code=403, detail="Access denied: file must be in your home directory or external drives")
         
     filename = file_path_obj.name
     if not filename.lower().endswith(('.mp4', '.mov', '.mkv')):
