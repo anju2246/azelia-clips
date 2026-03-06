@@ -34,9 +34,9 @@ Azelia ("We") uses Usage Data for:
 
 ## 4. Your Rights
 
-*   **Consent**: By using the Software, you consent to this data collection.
-*   **Opt-out**: Disable telemetry by setting `CELIA_TELEMETRY_OPT_OUT=true` in your environment, or contact us at [legal@azelia.ai](mailto:legal@azelia.ai).
-*   **Deletion**: You have the right to request deletion of your data associated with your user ID (if applicable) in compliance with applicable laws, including GDPR and Colombian Habeas Data regulation (Ley 1581 de 2012).
+*   **Consent**: During onboarding, you are asked to opt in to telemetry. You may revoke this consent at any time.
+*   **Opt-out**: Disable telemetry by setting `CELIA_TELEMETRY_OPT_OUT=true` in your environment, or by toggling the setting in the dashboard, or by contacting [legal@azelia.ai](mailto:legal@azelia.ai).
+*   **Deletion**: You have the right to request deletion of your identifiable data (account info, user profile) in compliance with applicable laws, including GDPR and Colombian Habeas Data regulation (Ley 1581 de 2012). Anonymized, aggregated data is irreversibly decoupled from your identity and cannot be deleted, as it cannot be attributed to any specific user.
 
 ## 5. Changes to These Terms
 

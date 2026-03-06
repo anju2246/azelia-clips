@@ -60,8 +60,8 @@ If you connect your YouTube channel, the data retrieved is governed by the [YouT
 
 We collect anonymized usage telemetry as described in our [Privacy Policy](PRIVACY_POLICY.md) and [Data Usage Terms](DATA_USAGE_TERMS.md).
 
-- Telemetry is **opt-out**: set `CELIA_TELEMETRY_OPT_OUT=true` to disable
-- We may use aggregated, anonymized data for product improvement and commercial insights
+- Telemetry is **opt-in**: you are asked for consent during onboarding. You can revoke consent at any time by setting `CELIA_TELEMETRY_OPT_OUT=true`
+- We may use and commercially license aggregated, anonymized data for product improvement and industry insights. This data cannot be traced back to any individual user
 - We do not collect your content (videos, transcripts, clips)
 
 ## 7. Data Integrity
