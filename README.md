@@ -165,6 +165,8 @@ Need a managed, hosted solution? Contact us directly for enterprise/agency prici
 
 ### Legal
 
+- **[Privacy Policy](PRIVACY_POLICY.md)** — What data we collect and how we handle it.
+- **[Terms of Service](TERMS_OF_SERVICE.md)** — Usage rules and legal obligations.
 - **[Contributor License Agreement (CLA)](CLA.md)** — Required for contributing.
 - **[Data Usage Terms](DATA_USAGE_TERMS.md)** — How we handle anonymized analytics. Telemetry is opt-out via `CELIA_TELEMETRY_OPT_OUT=true`.
 
