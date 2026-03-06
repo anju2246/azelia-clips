@@ -119,7 +119,8 @@ async def process_video(
         "video_path": str(file_path),
         "settings": process_settings.dict(),
         "transcription_config": transcription_config,
-        "auth_token": auth_token
+        "auth_token": auth_token,
+        "user_id": user.id if hasattr(user, 'id') else "anonymous"
     }
     
     asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
@@ -199,7 +200,8 @@ async def process_local_video(
         "video_path": str(target_link),
         "settings": req.dict(),
         "transcription_config": transcription_config,
-        "auth_token": None
+        "auth_token": None,
+        "user_id": user.id if hasattr(user, 'id') else "anonymous"
     }
     
     asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
