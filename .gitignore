@@ -50,9 +50,15 @@ web/package-lock.json
 
 # Debug/runtime logs
 *.log
-data/jobs.db
-celia.db
 supabase_schema.sql
+
+# SQLite databases — NUCLEAR: block ALL .db/.sqlite files globally
+# This ensures no local user data is EVER accidentally committed
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
 
 # Model weights (auto-downloaded)
 *.pt

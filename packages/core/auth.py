@@ -1,6 +1,6 @@
 import jwt
 from typing import Dict, Any, Optional
-from fastapi import HTTPException, status, Security
+from fastapi import HTTPException, status, Security, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from packages.core.config import settings
@@ -62,3 +62,19 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
     """
     token = credentials.credentials
     return verify_supabase_jwt(token)
+
+
+async def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    """
+    FastAPI Dependency that rejects any request not from a super_admin.
+    The role comes from the JWT, which is signed by Supabase's JWT secret.
+    It cannot be forged — the user_profiles.role column is the source of truth.
+    
+    Usage in route: async def admin_route(user: User = Depends(require_super_admin)):
+    """
+    if user.role != "super_admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Insufficient permissions"
+        )
+    return user

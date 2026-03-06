@@ -78,6 +78,12 @@ class Settings(BaseSettings):
         description="Name of the podcast for captions and context"
     )
 
+    # Telemetry (opt-in, default OFF — no data sent without explicit consent)
+    celia_telemetry_enabled: bool = Field(
+        default=False,
+        description="Whether user has consented to anonymous telemetry for IC"
+    )
+
     def ensure_output_dir(self) -> Path:
         """Create output directory if it doesn't exist."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
