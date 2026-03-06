@@ -11,11 +11,10 @@
 
 Celia Clips takes a podcast episode and outputs ready-to-post vertical clips with:
 
-1. **🎤 Transcription** — WhisperX with word-level timestamps + speaker diarization
+1. **🎤 Transcription** — WhisperX / MLX-Whisper with word-level timestamps + speaker diarization
 2. **🧠 AI Curation** — Multi-agent system (Finder → Critic → Ranker) selects the most viral moments
-3. **👁️ Smart Reframing** — MediaPipe face tracking for 16:9 → 9:16 conversion
+3. **👁️ Smart Reframing** — MTCNN + FaceNet face tracking for 16:9 → 9:16 conversion
 4. **📝 Styled Subtitles** — Animated captions with keyword highlighting
-5. **🎵 Audio Separation** — Demucs-based voice/music isolation
 
 ```
 podcast.mp4 (60 min) → 5 vertical clips (30-90s each) + subtitles + captions
@@ -26,7 +25,7 @@ podcast.mp4 (60 min) → 5 vertical clips (30-90s each) + subtitles + captions
 ### Install
 
 ```bash
-# Core (curation + subtitles)
+# Core (curation + subtitles + server)
 pip install -e .
 
 # With transcription (requires GPU or Apple Silicon)
@@ -41,18 +40,33 @@ pip install -e ".[all]"
 
 ### Configure
 
-```bash
-cp .env.example .env
-```
+All configuration happens through the **web dashboard** — no `.env` editing required.
 
-Edit `.env` with your API keys:
+On first launch, the onboarding wizard walks you through:
+1. 📛 Podcast name & profile
+2. 🤖 AI provider setup (Groq, OpenAI, Claude, or Vertex AI)
+3. 🔗 YouTube connection (optional — for analytics)
 
-| Key | Where to get it | Cost |
-|-----|----------------|------|
-| `GROQ_API_KEY` | [groq.com](https://console.groq.com) | Free tier available |
-| `HF_TOKEN` | [huggingface.co](https://huggingface.co/settings/tokens) | Free (accept pyannote terms) |
+> For development/advanced config, see `docs/configuration.md`.
 
 ### Run
+
+#### Dashboard Mode (Recommended)
+
+```bash
+# Build frontend + start server
+celia start --build
+
+# Or start with existing build
+celia start
+
+# Development mode (hot-reload)
+celia start --dev
+```
+
+Open `http://localhost:8000` and you're ready to go.
+
+#### CLI Mode
 
 ```bash
 # Full pipeline: transcribe → curate → extract → subtitle
@@ -61,7 +75,7 @@ celia process video.mp4 --output ./clips --top 5
 # Individual steps
 celia transcribe video.mp4                 # Transcribe only
 celia curate transcript.json --top 10      # Curate from transcript
-celia reframe clip.mp4 --style vertical    # Reframe to 9:16
+celia reframe clip.mp4 --mode face         # Reframe to 9:16
 celia subtitles clip.mp4 transcript.json   # Generate subtitles
 ```
 
@@ -72,11 +86,11 @@ celia subtitles clip.mp4 transcript.json   # Generate subtitles
 │                     celia process                        │
 ├─────────────┬──────────────┬─────────────┬──────────────┤
 │  Transcribe │    Curate    │   Reframe   │  Subtitles   │
-│  WhisperX   │  Finder  ──→│  MediaPipe  │  ASS/SRT     │
-│  + Pyannote │  Critic  ──→│  Face Track │  + Highlight  │
-│  diarize    │  Ranker     │  DeepSORT   │  + Animate    │
+│  WhisperX / │  Finder  ──→│   MTCNN +   │  ASS/SRT     │
+│  MLX-Whisper│  Critic  ──→│   FaceNet   │  + Highlight  │
+│  + Pyannote │  Ranker     │  Identity   │  + Animate    │
 ├─────────────┴──────────────┴─────────────┴──────────────┤
-│              LLM Provider (Groq / Vertex AI)             │
+│     LLM Provider (Groq / OpenAI / Claude / Vertex AI)    │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -102,6 +116,7 @@ Celia Clips is the first product in the **Celia** suite — an open-source toolk
 ## Requirements
 
 - **Python** 3.11+
+- **Node.js** 18+ (for the web dashboard)
 - **FFmpeg** — `brew install ffmpeg` (macOS) / `apt install ffmpeg` (Linux)
 - **For ASR**: Apple Silicon (MPS) or GPU with 4GB+ VRAM
 - **For Diarization**: HuggingFace token with [pyannote access](https://huggingface.co/pyannote/speaker-diarization-3.1)
@@ -109,17 +124,29 @@ Celia Clips is the first product in the **Celia** suite — an open-source toolk
 ## Project Structure
 
 ```
-src/
-├── asr/              # WhisperX transcription + speaker diarization
-├── audio/            # Demucs audio separation
-├── curation/         # Multi-agent clip selection
-│   ├── signals/      # Text, audio, structural analyzers
-│   ├── prompts.py    # LLM prompt templates
-│   └── curator_v2.py # Core pipeline
-├── vision/           # Face tracking + video reframing
-├── subtitles/        # ASS subtitle generation
-├── cli.py            # CLI entry point
-└── llm_provider.py   # Multi-provider LLM client
+packages/
+├── core/              # Auth, config, branding, LLM routing
+│   ├── config.py      # Centralized settings (Pydantic)
+│   ├── branding.py    # Brand constants (easy rebrand)
+│   └── db/            # SQLite models + engine
+├── clips/             # Clip generation pipeline
+│   ├── curation/      # Multi-agent clip selection
+│   │   └── agents/    # Finder, Critic, Ranker
+│   ├── vision/        # MTCNN + FaceNet face tracking
+│   ├── transcription/ # WhisperX / MLX-Whisper
+│   ├── subtitles/     # ASS subtitle generation
+│   └── cli.py         # CLI entry point
+server/
+├── routes/            # FastAPI endpoints
+│   ├── clips.py       # Upload, process, serve clips
+│   ├── settings.py    # App config + directory browser
+│   ├── analytics.py   # YouTube OAuth + analytics
+│   └── auth.py        # Auth endpoints
+web/
+└── src/               # Astro + React dashboard
+    ├── components/     # UI components
+    ├── pages/          # Routes (dashboard, login, onboarding)
+    └── lib/            # API client, Supabase config
 ```
 
 ## Contributing
@@ -139,7 +166,7 @@ Need a managed, hosted solution? Contact us directly for enterprise/agency prici
 ### Legal
 
 - **[Contributor License Agreement (CLA)](CLA.md)** — Required for contributing.
-- **[Data Usage Terms](DATA_USAGE_TERMS.md)** — How we handle anonymized analytics.
+- **[Data Usage Terms](DATA_USAGE_TERMS.md)** — How we handle anonymized analytics. Telemetry is opt-out via `CELIA_TELEMETRY_OPT_OUT=true`.
 
 
 ---

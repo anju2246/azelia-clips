@@ -24,8 +24,8 @@ Thanks for your interest in contributing to Celia Clips — part of the **Celia*
 We use [Ruff](https://github.com/astral-sh/ruff) for linting and formatting:
 
 ```bash
-ruff check src/
-ruff format src/
+ruff check packages/ server/
+ruff format packages/ server/
 ```
 
 ### Running Tests
