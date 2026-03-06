@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2 } from 'lucide-react';
+import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2, BarChart3, Shield } from 'lucide-react';
 import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '../../lib/api';
 import { DirectoryPicker } from './DirectoryPicker';
+import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
@@ -16,6 +17,10 @@ export const SettingsForm: React.FC = () => {
     const [generateTeasers, setGenerateTeasers] = useState(false);
     const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'vertex']);
     const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+
+    // Telemetry consent state
+    const [telemetryEnabled, setTelemetryEnabled] = useState(false);
+    const [telemetryLoading, setTelemetryLoading] = useState(false);
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, models: { id: string, label: string }[] }> = {
         'groq': {
@@ -78,6 +83,21 @@ export const SettingsForm: React.FC = () => {
             if (data.ai_provider_order && data.ai_provider_order.length > 0) {
                 setProviderOrder(data.ai_provider_order);
             }
+
+            // Load telemetry consent status
+            try {
+                const { data: sessionData } = await supabase.auth.getSession();
+                if (sessionData?.session?.access_token) {
+                    const telResp = await fetch(`${API_BASE}/telemetry/status`, {
+                        headers: { 'Authorization': `Bearer ${sessionData.session.access_token}` }
+                    });
+                    if (telResp.ok) {
+                        const telData = await telResp.json();
+                        setTelemetryEnabled(telData.telemetry_enabled);
+                    }
+                }
+            } catch { /* telemetry status is non-critical */ }
+
         } catch (error) {
             toast.error('Failed to load settings');
         } finally {
@@ -355,6 +375,63 @@ export const SettingsForm: React.FC = () => {
                     >
                         {generateTeasers ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
                     </button>
+                </section>
+
+                {/* Telemetry & Collective Intelligence */}
+                <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
+                    <div className="p-6">
+                        <div className="flex items-start justify-between">
+                            <div className="space-y-1 pr-6">
+                                <h3 className="font-semibold text-white flex items-center gap-2">
+                                    <BarChart3 className="w-5 h-5 text-brand-400" /> Collective Intelligence (Telemetry)
+                                </h3>
+                                <p className="text-sm text-zinc-400 leading-relaxed">
+                                    Share anonymized clip metrics (scores, durations, hook types) to power the IC Engine.
+                                    <strong className="text-zinc-300"> We never upload video, audio, or transcripts.</strong>
+                                </p>
+                                <div className="flex items-center gap-2 mt-2">
+                                    <Shield className="w-3.5 h-3.5 text-green-400" />
+                                    <span className="text-xs text-green-400/80">Data is anonymized before leaving your machine</span>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                disabled={telemetryLoading}
+                                onClick={async () => {
+                                    setTelemetryLoading(true);
+                                    try {
+                                        const { data: sessionData } = await supabase.auth.getSession();
+                                        if (!sessionData?.session?.access_token) {
+                                            toast.error('Not authenticated');
+                                            return;
+                                        }
+                                        const resp = await fetch(`${API_BASE}/telemetry/consent`, {
+                                            method: 'POST',
+                                            headers: {
+                                                'Authorization': `Bearer ${sessionData.session.access_token}`,
+                                                'Content-Type': 'application/json',
+                                            },
+                                            body: JSON.stringify({ enabled: !telemetryEnabled }),
+                                        });
+                                        if (resp.ok) {
+                                            const result = await resp.json();
+                                            setTelemetryEnabled(result.telemetry_enabled);
+                                            toast.success(result.message);
+                                        } else {
+                                            toast.error('Failed to update telemetry');
+                                        }
+                                    } catch {
+                                        toast.error('Failed to update telemetry');
+                                    } finally {
+                                        setTelemetryLoading(false);
+                                    }
+                                }}
+                                className={`cursor-pointer transition-colors flex-shrink-0 ${telemetryEnabled ? 'text-brand-500' : 'text-zinc-600'} ${telemetryLoading ? 'opacity-50' : ''}`}
+                            >
+                                {telemetryEnabled ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
+                            </button>
+                        </div>
+                    </div>
                 </section>
 
                 {/* Action Bar */}

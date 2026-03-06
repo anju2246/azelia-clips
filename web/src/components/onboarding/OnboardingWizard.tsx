@@ -35,8 +35,8 @@ export const OnboardingWizard: React.FC = () => {
         primary_goal: ''
     });
 
-    // Telemetry (Step 3) - Opt-out by default in the UI to encourage opt-in
-    const [telemetry, setTelemetry] = useState(true);
+    // Telemetry (Step 3) - Opt-in: default OFF, user must explicitly enable
+    const [telemetry, setTelemetry] = useState(false);
 
     // YouTube connection state
     const [ytConnected, setYtConnected] = useState(false);
@@ -158,8 +158,14 @@ export const OnboardingWizard: React.FC = () => {
             // 2. Sync Local Settings (Env)
             await SettingsApi.updateSettings({ ...formData });
 
-            // Note: Telemetry flag is naturally handled via ENV outside the pure settings API in architecture,
-            // but we register the intent. Realistically, we'd update a config flag here via a separate endpoint.
+            // 3. Save Telemetry Consent via API
+            try {
+                await fetchWithAuth('/telemetry/consent', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: telemetry }),
+                });
+            } catch { /* non-critical — telemetry preference saved on next settings visit */ }
 
             toast.success("¡Bienvenido a Celia Clips!");
             setTimeout(() => {
