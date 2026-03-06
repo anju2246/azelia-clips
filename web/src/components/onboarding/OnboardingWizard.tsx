@@ -38,6 +38,9 @@ export const OnboardingWizard: React.FC = () => {
     // Telemetry (Step 3) - Opt-in: default OFF, user must explicitly enable
     const [telemetry, setTelemetry] = useState(false);
 
+    // Terms & Conditions
+    const [acceptedTerms, setAcceptedTerms] = useState(false);
+
     // YouTube connection state
     const [ytConnected, setYtConnected] = useState(false);
     const [ytChannelName, setYtChannelName] = useState('');
@@ -275,7 +278,9 @@ export const OnboardingWizard: React.FC = () => {
         toast('Próximamente — TikTok integration', { icon: '🔜' });
     };
 
-    const hasAnyKey = !!(formData.groq_api_key || formData.openai_api_key || formData.anthropic_api_key || formData.gcp_project_id);
+    const hasAnyKey = [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.gcp_project_id].some(
+        key => typeof key === 'string' && key.trim().length >= 20
+    );
 
     if (loading) return (
         <div className="flex justify-center items-center py-20"><Loader2 className="w-8 h-8 text-brand-500 animate-spin" /></div>
@@ -454,7 +459,12 @@ export const OnboardingWizard: React.FC = () => {
                                         <BarChart className="w-4 h-4 text-brand-400" /> Inteligencia Colectiva (Telemetría)
                                     </h3>
                                     <p className="text-sm text-zinc-400 leading-relaxed">
-                                        Únete al motor global de Celia. Al activar esto, donas métricas de retención 100% anónimas sobre qué hooks funcionan en tu nicho para nutrir la Inteligencia Colectiva (IC). NUNCA subimos video o audio. A cambio, tu cuenta acumulará un perfil de retención avanzado para cuando decidas hacer upgrade al IC Engine Pro.
+                                        ¿Quieres que tus clips sean cada vez más virales? Celia aprende de la comunidad. Al unirte, envías datos anónimos sobre métricas de retención y qué hooks logran más vistas en tu nicho.
+                                        <br /><br />
+                                        <strong className="text-brand-300">¿Por qué activarlo?</strong><br />
+                                        • Mejoras el algoritmo de tu propio nicho.<br />
+                                        • Obtienes prioridad en nuevas funciones "Beta".<br />
+                                        • NUNCA enviamos tus videos, audios ni guiones. Solo números y clasificaciones.
                                     </p>
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
@@ -592,11 +602,41 @@ export const OnboardingWizard: React.FC = () => {
                         })}
                     </div>
 
-                    <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
-                        <button onClick={handlePrev} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">Atrás</button>
-                        <button onClick={handleFinish} disabled={!hasAnyKey || saving} className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold rounded-xl hover:from-brand-500 focus:ring-4 focus:ring-brand-500/30 transition-all disabled:opacity-50 shadow-lg shadow-brand-500/20">
-                            {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} Terminar Setup
-                        </button>
+                    <div className="flex flex-col gap-4 pt-6 border-t border-white/10 mt-6">
+                        <label className="flex items-start gap-3 cursor-pointer group">
+                            <div className="relative flex items-center mt-0.5">
+                                <input
+                                    type="checkbox"
+                                    checked={acceptedTerms}
+                                    onChange={(e) => setAcceptedTerms(e.target.checked)}
+                                    className="peer sr-only"
+                                />
+                                <div className="w-5 h-5 rounded border border-white/20 bg-black/50 peer-checked:bg-brand-500 peer-checked:border-brand-500 transition-all flex items-center justify-center">
+                                    <CheckCircle2 className="w-3.5 h-3.5 text-white opacity-0 peer-checked:opacity-100 transition-opacity" />
+                                </div>
+                            </div>
+                            <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors cursor-pointer leading-tight">
+                                He leído y acepto los <a href="https://celiaclips.com/terms" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Términos y Condiciones</a> y la <a href="https://celiaclips.com/privacy" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Política de Privacidad</a> de Celia Clips.
+                            </span>
+                        </label>
+
+                        <div className="flex items-center justify-between">
+                            <button onClick={handlePrev} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">Atrás</button>
+                            <div className="flex flex-col items-end gap-1">
+                                <button
+                                    onClick={handleFinish}
+                                    disabled={!hasAnyKey || !acceptedTerms || saving}
+                                    className="flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold rounded-xl hover:from-brand-500 focus:ring-4 focus:ring-brand-500/30 transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-brand-500/20"
+                                >
+                                    {saving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Sparkles className="w-5 h-5" />} Terminar Setup
+                                </button>
+                                {(!hasAnyKey || !acceptedTerms) && (
+                                    <span className="text-xs text-red-400/80 mr-1">
+                                        {!hasAnyKey ? "Ingresa una API Key válida" : "Acepta los términos para continuar"}
+                                    </span>
+                                )}
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

@@ -13,13 +13,24 @@ Admin routes (super_admin only):
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
-from packages.core.auth import User, get_current_user, require_super_admin
+from server.middleware.auth import require_auth, optional_auth
+from packages.core.auth import User
 from packages.core.services.telemetry import telemetry
 from packages.core.config import settings
 import os
 from pathlib import Path
 
 router = APIRouter()
+
+
+def require_super_admin(user: User = Depends(require_auth)) -> User:
+    """Rejects any request not from a super_admin."""
+    if user.role != 'super_admin':
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail='Insufficient permissions'
+        )
+    return user
 
 
 class ConsentRequest(BaseModel):
@@ -41,7 +52,7 @@ class TelemetryStatusResponse(BaseModel):
 @router.post("/telemetry/consent", response_model=ConsentResponse)
 async def toggle_telemetry_consent(
     body: ConsentRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(optional_auth),
 ):
     """
     Toggle telemetry consent. Persists to .env file so it survives restarts.
@@ -86,7 +97,7 @@ async def toggle_telemetry_consent(
 
 
 @router.get("/telemetry/status", response_model=TelemetryStatusResponse)
-async def get_telemetry_status(user: User = Depends(get_current_user)):
+async def get_telemetry_status(user: User = Depends(optional_auth)):
     """Returns current telemetry consent state."""
     return TelemetryStatusResponse(
         telemetry_enabled=telemetry.enabled,

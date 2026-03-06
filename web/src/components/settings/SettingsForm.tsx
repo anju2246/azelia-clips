@@ -1,8 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2, BarChart3, Shield } from 'lucide-react';
 import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '../../lib/api';
 import { DirectoryPicker } from './DirectoryPicker';
-import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
@@ -12,7 +11,9 @@ export const SettingsForm: React.FC = () => {
     const [formData, setFormData] = useState<UpdateSettingsRequest>({});
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
-    const [isDirty, setIsDirty] = useState(false);
+    const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isInitialLoadRef = useRef(true);
     const [showBrowser, setShowBrowser] = useState(false);
     const [generateTeasers, setGenerateTeasers] = useState(false);
     const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'vertex']);
@@ -65,8 +66,38 @@ export const SettingsForm: React.FC = () => {
         newOrder[idx] = newOrder[idx + dir];
         newOrder[idx + dir] = temp;
         setProviderOrder(newOrder);
-        setIsDirty(true);
     };
+
+    // Debounced auto-save: triggers 1.5s after the last change
+    const triggerAutoSave = useCallback(() => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(async () => {
+            setSaveStatus('saving');
+            try {
+                const payload: UpdateSettingsRequest = { ...formData, ai_provider_order: providerOrder };
+                if (payload.groq_api_key === '********' || !payload.groq_api_key) delete payload.groq_api_key;
+                if (payload.openai_api_key === '********' || !payload.openai_api_key) delete payload.openai_api_key;
+                if (payload.anthropic_api_key === '********' || !payload.anthropic_api_key) delete payload.anthropic_api_key;
+                if (payload.gcp_project_id === 'e.g. ce-video-engine' || !payload.gcp_project_id) delete payload.gcp_project_id;
+                if (payload.supabase_key === '********' || !payload.supabase_key) delete payload.supabase_key;
+                const updated = await SettingsApi.updateSettings(payload);
+                setSettings(updated);
+                setSaveStatus('saved');
+                setTimeout(() => setSaveStatus('idle'), 2000);
+            } catch (error: any) {
+                setSaveStatus('error');
+                toast.error(error.message || 'Failed to auto-save settings');
+                setTimeout(() => setSaveStatus('idle'), 3000);
+            }
+        }, 1500);
+    }, [formData, providerOrder]);
+
+    // Watch for changes and auto-save (skip initial load)
+    useEffect(() => {
+        if (isInitialLoadRef.current) return;
+        triggerAutoSave();
+        return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
+    }, [formData, providerOrder, triggerAutoSave]);
 
     useEffect(() => {
         loadSettings();
@@ -83,10 +114,12 @@ export const SettingsForm: React.FC = () => {
             if (data.ai_provider_order && data.ai_provider_order.length > 0) {
                 setProviderOrder(data.ai_provider_order);
             }
+            // Mark initial load as complete after state is set
+            setTimeout(() => { isInitialLoadRef.current = false; }, 100);
 
             // Load telemetry consent status
             try {
-                const { data: sessionData } = await supabase.auth.getSession();
+                const { data: sessionData } = await (await import('../../lib/supabase')).supabase.auth.getSession();
                 if (sessionData?.session?.access_token) {
                     const telResp = await fetch(`${API_BASE}/telemetry/status`, {
                         headers: { 'Authorization': `Bearer ${sessionData.session.access_token}` }
@@ -105,30 +138,27 @@ export const SettingsForm: React.FC = () => {
         }
     };
 
+    // Manual save is no longer needed — auto-save handles everything
     const handleSave = async (e: React.FormEvent) => {
         e.preventDefault();
-        setIsSaving(true);
-        const loadingToast = toast.loading('Saving settings...');
-
+        // Force immediate save
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        setSaveStatus('saving');
         try {
-            // Only send fields that have been explicitly modified or are non-empty strings
-            // For API keys, if they are exactly 8 asterisks (masked), we don't send them.
             const payload: UpdateSettingsRequest = { ...formData, ai_provider_order: providerOrder };
-
             if (payload.groq_api_key === '********' || !payload.groq_api_key) delete payload.groq_api_key;
             if (payload.openai_api_key === '********' || !payload.openai_api_key) delete payload.openai_api_key;
             if (payload.anthropic_api_key === '********' || !payload.anthropic_api_key) delete payload.anthropic_api_key;
             if (payload.gcp_project_id === 'e.g. ce-video-engine' || !payload.gcp_project_id) delete payload.gcp_project_id;
             if (payload.supabase_key === '********' || !payload.supabase_key) delete payload.supabase_key;
-
             const updated = await SettingsApi.updateSettings(payload);
             setSettings(updated);
-            toast.success('Settings saved successfully', { id: loadingToast });
-            setIsDirty(false);
+            setSaveStatus('saved');
+            setTimeout(() => setSaveStatus('idle'), 2000);
         } catch (error: any) {
-            toast.error(error.message || 'Failed to save settings', { id: loadingToast });
-        } finally {
-            setIsSaving(false);
+            setSaveStatus('error');
+            toast.error(error.message || 'Failed to save settings');
+            setTimeout(() => setSaveStatus('idle'), 3000);
         }
     };
 
@@ -163,7 +193,7 @@ export const SettingsForm: React.FC = () => {
                             <input
                                 type="text"
                                 value={formData.podcast_name ?? settings?.podcast_name ?? ''}
-                                onChange={(e) => { setFormData({ ...formData, podcast_name: e.target.value }); setIsDirty(true); }}
+                                onChange={(e) => { setFormData(prev => ({ ...prev, podcast_name: e.target.value })); }}
                                 className="w-full px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white"
                                 placeholder="e.g. The Inminente Podcast"
                             />
@@ -174,7 +204,7 @@ export const SettingsForm: React.FC = () => {
                                 <input
                                     type="text"
                                     value={formData.podcast_dir ?? settings?.podcast_dir ?? ''}
-                                    onChange={(e) => { setFormData({ ...formData, podcast_dir: e.target.value }); setIsDirty(true); }}
+                                    onChange={(e) => { setFormData(prev => ({ ...prev, podcast_dir: e.target.value })); }}
                                     className="flex-1 px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white font-mono text-sm"
                                     placeholder="/Users/name/Documents/Podcasts/"
                                 />
@@ -192,14 +222,12 @@ export const SettingsForm: React.FC = () => {
                                             const data = await res.json();
 
                                             if (data.count === 1) {
-                                                setFormData({ ...formData, podcast_dir: data.matches[0] });
-                                                setIsDirty(true);
+                                                setFormData(prev => ({ ...prev, podcast_dir: data.matches[0] }));
                                                 toast.success(`Found: ${data.matches[0]}`, { id: 'resolve' });
                                             } else if (data.count > 1) {
                                                 // Multiple matches — let user pick
                                                 const choice = data.matches[0]; // Default to first
-                                                setFormData({ ...formData, podcast_dir: choice });
-                                                setIsDirty(true);
+                                                setFormData(prev => ({ ...prev, podcast_dir: choice }));
                                                 toast.success(`Found ${data.count} matches, using: ${choice}`, { id: 'resolve' });
                                             } else {
                                                 toast.error(`Could not find "${folderName}" on disk. Try the manual picker.`, { id: 'resolve' });
@@ -225,8 +253,7 @@ export const SettingsForm: React.FC = () => {
                                 isOpen={showBrowser}
                                 currentPath={formData.podcast_dir ?? settings?.podcast_dir ?? ''}
                                 onSelect={(path) => {
-                                    setFormData({ ...formData, podcast_dir: path });
-                                    setIsDirty(true);
+                                    setFormData(prev => ({ ...prev, podcast_dir: path }));
                                     toast.success(`Selected: ${path}`);
                                 }}
                                 onClose={() => setShowBrowser(false)}
@@ -302,7 +329,7 @@ export const SettingsForm: React.FC = () => {
                                                     // @ts-ignore
                                                     placeholder={settings?.[config.field] ? '********' : config.ph}
                                                     // @ts-ignore
-                                                    onChange={(e) => { setFormData({ ...formData, [config.field]: e.target.value }); setIsDirty(true); }}
+                                                    onChange={(e) => { setFormData(prev => ({ ...prev, [config.field]: e.target.value })); }}
                                                     className="w-full px-3 py-2 bg-black border border-brand-500/30 rounded-lg focus:outline-none focus:border-brand-500 text-white font-mono text-sm shadow-[0_0_15px_rgba(168,85,247,0.1)]"
                                                 />
                                             </div>
@@ -312,7 +339,7 @@ export const SettingsForm: React.FC = () => {
                                                     // @ts-ignore
                                                     value={formData[config.modelField] ?? settings?.[config.modelField] ?? config.models[0].id}
                                                     // @ts-ignore
-                                                    onChange={(e) => { setFormData({ ...formData, [config.modelField]: e.target.value }); setIsDirty(true); }}
+                                                    onChange={(e) => { setFormData(prev => ({ ...prev, [config.modelField]: e.target.value })); }}
                                                     className="w-full px-3 py-2 bg-black border border-brand-500/30 rounded-lg focus:outline-none focus:border-brand-500 text-white text-sm cursor-pointer hover:border-brand-500/50 transition-colors"
                                                 >
                                                     {config.models.map(m => (
@@ -344,7 +371,7 @@ export const SettingsForm: React.FC = () => {
                             <input
                                 type="text"
                                 value={formData.supabase_url ?? settings?.supabase_url ?? ''}
-                                onChange={(e) => { setFormData({ ...formData, supabase_url: e.target.value }); setIsDirty(true); }}
+                                onChange={(e) => { setFormData(prev => ({ ...prev, supabase_url: e.target.value })); }}
                                 className="w-full px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white font-mono text-sm"
                             />
                         </div>
@@ -353,7 +380,7 @@ export const SettingsForm: React.FC = () => {
                             <input
                                 type="password"
                                 placeholder={settings?.supabase_key ? '********' : 'Enter Service Role Key'}
-                                onChange={(e) => { setFormData({ ...formData, supabase_key: e.target.value }); setIsDirty(true); }}
+                                onChange={(e) => { setFormData(prev => ({ ...prev, supabase_key: e.target.value })); }}
                                 className="w-full px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white font-mono"
                             />
                         </div>
@@ -400,9 +427,11 @@ export const SettingsForm: React.FC = () => {
                                 onClick={async () => {
                                     setTelemetryLoading(true);
                                     try {
+                                        const { supabase } = await import('../../lib/supabase');
                                         const { data: sessionData } = await supabase.auth.getSession();
                                         if (!sessionData?.session?.access_token) {
-                                            toast.error('Not authenticated');
+                                            toast.error('Please log in to change telemetry settings');
+                                            setTelemetryLoading(false);
                                             return;
                                         }
                                         const resp = await fetch(`${API_BASE}/telemetry/consent`, {
@@ -418,9 +447,10 @@ export const SettingsForm: React.FC = () => {
                                             setTelemetryEnabled(result.telemetry_enabled);
                                             toast.success(result.message);
                                         } else {
-                                            toast.error('Failed to update telemetry');
+                                            const err = await resp.json().catch(() => ({}));
+                                            toast.error(err.detail || 'Failed to update telemetry');
                                         }
-                                    } catch {
+                                    } catch (e) {
                                         toast.error('Failed to update telemetry');
                                     } finally {
                                         setTelemetryLoading(false);
@@ -434,19 +464,18 @@ export const SettingsForm: React.FC = () => {
                     </div>
                 </section>
 
-                {/* Action Bar */}
+                {/* Auto-Save Status Indicator */}
                 <div className="sticky bottom-6 flex justify-end">
-                    <button
-                        type="submit"
-                        disabled={isSaving || !isDirty}
-                        className={`cursor-pointer flex items-center gap-2 px-8 py-3 rounded-xl font-medium transition-all disabled:cursor-not-allowed ${isDirty
-                            ? 'bg-brand-600 hover:bg-brand-500 text-white shadow-lg shadow-brand-500/20'
-                            : 'bg-zinc-800 text-zinc-500'
-                            } disabled:opacity-50`}
-                    >
-                        {isSaving ? <Loader2 className="w-5 h-5 animate-spin" /> : <Save className="w-5 h-5" />}
-                        {isSaving ? 'Saving...' : isDirty ? 'Save Configuration' : 'No Changes'}
-                    </button>
+                    <div className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${saveStatus === 'saving' ? 'bg-brand-600/20 text-brand-400 border border-brand-500/30' :
+                            saveStatus === 'saved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                                saveStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                                    'bg-zinc-800/50 text-zinc-500 border border-white/5'
+                        }`}>
+                        {saveStatus === 'saving' && <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>}
+                        {saveStatus === 'saved' && <><CheckCircle2 className="w-4 h-4" /> Saved</>}
+                        {saveStatus === 'error' && <><Save className="w-4 h-4" /> Save failed</>}
+                        {saveStatus === 'idle' && <><Save className="w-4 h-4 opacity-50" /> Auto-save enabled</>}
+                    </div>
                 </div>
 
             </form>
