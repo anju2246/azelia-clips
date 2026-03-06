@@ -1,0 +1,17 @@
+#!/bin/sh
+# Pre-commit hook: block SQLite/database files from being committed
+# Even if someone runs `git add -f celia.db`, this will catch it.
+
+DB_FILES=$(git diff --cached --name-only | grep -iE '\.(db|sqlite|sqlite3|db-shm|db-wal)$')
+
+if [ -n "$DB_FILES" ]; then
+    echo ""
+    echo "🚫 BLOCKED: You are trying to commit database files:"
+    echo ""
+    echo "$DB_FILES" | while read f; do echo "   ❌ $f"; done
+    echo ""
+    echo "These files contain local user data and must NEVER be committed."
+    echo "Run: git reset HEAD <file> to unstage them."
+    echo ""
+    exit 1
+fi
