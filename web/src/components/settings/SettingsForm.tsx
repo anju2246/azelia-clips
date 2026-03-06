@@ -2,7 +2,7 @@ import React, { useEffect, useState, useRef, useCallback } from 'react';
 import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2, BarChart3, Shield } from 'lucide-react';
 import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '../../lib/api';
 import { DirectoryPicker } from './DirectoryPicker';
-import toast from 'react-hot-toast';
+import toast, { Toaster } from 'react-hot-toast';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
@@ -13,7 +13,7 @@ export const SettingsForm: React.FC = () => {
     const [isSaving, setIsSaving] = useState(false);
     const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const isInitialLoadRef = useRef(true);
+    const readyForAutoSaveRef = useRef(false);
     const [showBrowser, setShowBrowser] = useState(false);
     const [generateTeasers, setGenerateTeasers] = useState(false);
     const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'vertex']);
@@ -69,10 +69,10 @@ export const SettingsForm: React.FC = () => {
     };
 
     // Debounced auto-save: triggers 1.5s after the last change
-    const triggerAutoSave = useCallback(() => {
+    const triggerAutoSave = useCallback(async () => {
         if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        setSaveStatus('saving');
         saveTimerRef.current = setTimeout(async () => {
-            setSaveStatus('saving');
             try {
                 const payload: UpdateSettingsRequest = { ...formData, ai_provider_order: providerOrder };
                 if (payload.groq_api_key === '********' || !payload.groq_api_key) delete payload.groq_api_key;
@@ -83,6 +83,7 @@ export const SettingsForm: React.FC = () => {
                 const updated = await SettingsApi.updateSettings(payload);
                 setSettings(updated);
                 setSaveStatus('saved');
+                toast.success('Settings saved', { duration: 1500, icon: '✓', style: { background: '#18181b', color: '#a1a1aa', border: '1px solid rgba(255,255,255,0.05)', fontSize: '13px' } });
                 setTimeout(() => setSaveStatus('idle'), 2000);
             } catch (error: any) {
                 setSaveStatus('error');
@@ -94,7 +95,7 @@ export const SettingsForm: React.FC = () => {
 
     // Watch for changes and auto-save (skip initial load)
     useEffect(() => {
-        if (isInitialLoadRef.current) return;
+        if (!readyForAutoSaveRef.current) return;
         triggerAutoSave();
         return () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); };
     }, [formData, providerOrder, triggerAutoSave]);
@@ -114,8 +115,8 @@ export const SettingsForm: React.FC = () => {
             if (data.ai_provider_order && data.ai_provider_order.length > 0) {
                 setProviderOrder(data.ai_provider_order);
             }
-            // Mark initial load as complete after state is set
-            setTimeout(() => { isInitialLoadRef.current = false; }, 100);
+            // Mark ready for auto-save after React settles
+            setTimeout(() => { readyForAutoSaveRef.current = true; }, 500);
 
             // Load telemetry consent status
             try {
@@ -172,6 +173,7 @@ export const SettingsForm: React.FC = () => {
 
     return (
         <div className="max-w-4xl mx-auto pb-12">
+            <Toaster position="top-center" toastOptions={{ style: { background: '#18181b', color: '#e4e4e7', border: '1px solid rgba(255,255,255,0.1)' } }} />
             <div className="mb-8">
                 <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
                     Engine Settings
@@ -467,9 +469,9 @@ export const SettingsForm: React.FC = () => {
                 {/* Auto-Save Status Indicator */}
                 <div className="sticky bottom-6 flex justify-end">
                     <div className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${saveStatus === 'saving' ? 'bg-brand-600/20 text-brand-400 border border-brand-500/30' :
-                            saveStatus === 'saved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                                saveStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
-                                    'bg-zinc-800/50 text-zinc-500 border border-white/5'
+                        saveStatus === 'saved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
+                            saveStatus === 'error' ? 'bg-red-500/10 text-red-400 border border-red-500/20' :
+                                'bg-zinc-800/50 text-zinc-500 border border-white/5'
                         }`}>
                         {saveStatus === 'saving' && <><Loader2 className="w-4 h-4 animate-spin" /> Saving...</>}
                         {saveStatus === 'saved' && <><CheckCircle2 className="w-4 h-4" /> Saved</>}
