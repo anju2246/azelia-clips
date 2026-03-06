@@ -1,8 +1,8 @@
 # Data Usage Terms
 
-Effective Date: February 13, 2026
+Effective Date: March 6, 2026
 
-By installing, accessing, or using **Celia Clips** ("the Software"), you agree to the collection and use of data as described in these Data Usage Terms.
+By installing, accessing, or using **Azelia Clips** ("the Software"), you agree to the collection and use of data as described in these Data Usage Terms. See also our [Privacy Policy](PRIVACY_POLICY.md) and [Terms of Service](TERMS_OF_SERVICE.md).
 
 ## 1. What Data We Collect
 
@@ -20,7 +20,7 @@ When you use the Software, we may collect the following anonymized technical and
 
 ## 2. How We Use Your Data
 
-Inminente Podcast ("We") uses Usage Data for:
+Azelia ("We") uses Usage Data for:
 1.  **Product Improvement**: Optimizing algorithms for clip selection and virality prediction.
 2.  **Collective Intelligence**: Aggregating data across users to identify trends in successful content formats.
 3.  **Research & Reporting**: Generating anonymized industry reports on podcast trends.
@@ -35,8 +35,8 @@ Inminente Podcast ("We") uses Usage Data for:
 ## 4. Your Rights
 
 *   **Consent**: By using the Software, you consent to this data collection.
-*   **Opt-out**: You may request to opt-out of data collection by contacting us at [hola@inminente.co](mailto:hola@inminente.co).
-*   **Deletion**: You have the right to request deletion of your data associated with your user ID (if applicable) in compliance with applicable laws, including GDPR and Colombian Habeas Data regulation.
+*   **Opt-out**: Disable telemetry by setting `CELIA_TELEMETRY_OPT_OUT=true` in your environment, or contact us at [legal@azelia.ai](mailto:legal@azelia.ai).
+*   **Deletion**: You have the right to request deletion of your data associated with your user ID (if applicable) in compliance with applicable laws, including GDPR and Colombian Habeas Data regulation (Ley 1581 de 2012).
 
 ## 5. Changes to These Terms
 
