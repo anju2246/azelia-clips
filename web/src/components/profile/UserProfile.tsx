@@ -79,6 +79,8 @@ export const UserProfile: React.FC = () => {
     const avatarUrl = user?.user_metadata?.avatar_url;
     const provider = user?.app_metadata?.provider || 'email';
     const createdAt = user?.created_at;
+    const userRole = user?.user_metadata?.role || 'user'; // Try to get role from metadata or db
+    const isFounder = userRole === 'founder' || userRole === 'super_admin';
 
     // Determine auth providers linked
     const identities = user?.identities || [];
@@ -174,42 +176,80 @@ export const UserProfile: React.FC = () => {
             {/* Current Plan */}
             <section className="mb-8">
                 <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">Subscription Plan</h3>
-                <div className="bg-gradient-to-br from-brand-900/40 to-emerald-900/10 border border-brand-500/20 rounded-2xl p-6 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/10 blur-[80px] rounded-full pointer-events-none" />
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
-                        <div className="flex items-start gap-4">
-                            <div className="w-12 h-12 bg-brand-500/20 rounded-xl flex items-center justify-center shrink-0">
-                                <Sparkles className="w-6 h-6 text-brand-400" />
-                            </div>
-                            <div>
-                                <div className="flex items-center gap-3 mb-1">
-                                    <h4 className="text-xl font-bold text-white">Founder Edition</h4>
-                                    <span className="px-2.5 py-0.5 bg-brand-500 text-black text-xs font-bold rounded-full uppercase tracking-wider">Active</span>
+                {isFounder ? (
+                    <div className="bg-gradient-to-br from-brand-900/40 to-emerald-900/10 border border-brand-500/20 rounded-2xl p-6 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/10 blur-[80px] rounded-full pointer-events-none" />
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+                            <div className="flex items-start gap-4">
+                                <div className="w-12 h-12 bg-brand-500/20 rounded-xl flex items-center justify-center shrink-0">
+                                    <Sparkles className="w-6 h-6 text-brand-400" />
                                 </div>
-                                <p className="text-zinc-400 text-sm">Unlimited access during MVP phase.</p>
+                                <div>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <h4 className="text-xl font-bold text-white">Founder Edition</h4>
+                                        <span className="px-2.5 py-0.5 bg-brand-500 text-black text-xs font-bold rounded-full uppercase tracking-wider">Active</span>
+                                    </div>
+                                    <p className="text-zinc-400 text-sm">Unlimited access for early adopters.</p>
+                                </div>
+                            </div>
+                            <div className="text-left sm:text-right">
+                                <p className="text-2xl font-bold text-white mb-1">$0<span className="text-sm font-normal text-zinc-500"> /mo</span></p>
+                                <p className="text-xs text-brand-400">Early Access Granted</p>
                             </div>
                         </div>
-                        <div className="text-left sm:text-right">
-                            <p className="text-2xl font-bold text-white mb-1">$0<span className="text-sm font-normal text-zinc-500"> /mo</span></p>
-                            <p className="text-xs text-brand-400">Early Access Granted</p>
-                        </div>
-                    </div>
 
-                    <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                        <div className="flex flex-col gap-1">
-                            <span className="text-zinc-400 text-xs uppercase tracking-wider">Storage</span>
-                            <span className="text-white font-medium text-sm">Unlimited raw processing</span>
-                        </div>
-                        <div className="flex flex-col gap-1">
-                            <span className="text-zinc-400 text-xs uppercase tracking-wider">Intelligence</span>
-                            <span className="text-white font-medium text-sm">Full Collective API Access</span>
-                        </div>
-                        <div className="flex flex-col gap-1 sm:text-right">
-                            <span className="text-zinc-400 text-xs uppercase tracking-wider">Support</span>
-                            <span className="text-white font-medium text-sm">Priority Lane</span>
+                        <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="flex flex-col gap-1">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Storage</span>
+                                <span className="text-white font-medium text-sm">Priority processing</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Intelligence</span>
+                                <span className="text-white font-medium text-sm">Full Collective API Access</span>
+                            </div>
+                            <div className="flex flex-col gap-1 sm:text-right">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Support</span>
+                                <span className="text-white font-medium text-sm">Priority Lane</span>
+                            </div>
                         </div>
                     </div>
-                </div>
+                ) : (
+                    <div className="bg-zinc-900/40 border border-white/5 rounded-2xl p-6 relative overflow-hidden">
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+                            <div className="flex items-start gap-4">
+                                <div className="w-12 h-12 bg-white/5 rounded-xl flex items-center justify-center shrink-0">
+                                    <User className="w-6 h-6 text-zinc-400" />
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <h4 className="text-xl font-bold text-white">Community</h4>
+                                        <span className="px-2.5 py-0.5 bg-white/10 text-white text-xs font-bold rounded-full uppercase tracking-wider">Active</span>
+                                    </div>
+                                    <p className="text-zinc-400 text-sm">The open-source video engine base plan.</p>
+                                </div>
+                            </div>
+                            <div className="text-left sm:text-right">
+                                <p className="text-2xl font-bold text-white mb-1">$0<span className="text-sm font-normal text-zinc-500"> /mo</span></p>
+                                <p className="text-xs text-zinc-500">Free forever</p>
+                            </div>
+                        </div>
+
+                        <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="flex flex-col gap-1">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Storage</span>
+                                <span className="text-white font-medium text-sm">Local Processing</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Intelligence</span>
+                                <span className="text-white font-medium text-sm">Bring Your Own Key</span>
+                            </div>
+                            <div className="flex flex-col gap-1 sm:text-right">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Support</span>
+                                <span className="text-white font-medium text-sm">Community Forum</span>
+                            </div>
+                        </div>
+                    </div>
+                )}
             </section>
 
             {/* Connected Accounts */}
