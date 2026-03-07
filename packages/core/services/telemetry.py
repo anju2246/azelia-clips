@@ -28,14 +28,14 @@ class TelemetryService:
     Handles opt-in telemetry for the Collective Intelligence (IC) Engine.
     
     Consent model:
-      - CELIA_TELEMETRY_ENABLED=true in .env → user has opted in
+      - AZELIA_TELEMETRY_ENABLED=true in .env → user has opted in
       - Default: false (OFF) — no data leaves the machine
       - Toggled via Settings UI or during Onboarding wizard
     """
 
     def __init__(self):
         # Opt-in: only enabled when user explicitly consents
-        self.enabled = settings.celia_telemetry_enabled
+        self.enabled = settings.azelia_telemetry_enabled
         self.supabase: Optional[Client] = None
 
         if self.enabled and settings.supabase_url and settings.supabase_key:
@@ -51,7 +51,7 @@ class TelemetryService:
         from importlib import reload
         import packages.core.config as config_module
         reload(config_module)
-        self.enabled = config_module.settings.celia_telemetry_enabled
+        self.enabled = config_module.settings.azelia_telemetry_enabled
 
         if self.enabled and not self.supabase and settings.supabase_url and settings.supabase_key:
             try:

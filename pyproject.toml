@@ -1,14 +1,14 @@
 [project]
-name = "celia-clips"
+name = "azelia-clips"
 version = "0.1.0"
-description = "AI-powered podcast clip generator — part of the Celia suite by Inminente"
+description = "AI-powered podcast clip generator — part of the Azelia suite by Inminente"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.11"
 authors = [
     { name = "Inminente Podcast" },
 ]
-keywords = ["podcast", "clips", "ai", "video", "short-form", "viral", "reels", "tiktok", "celia"]
+keywords = ["podcast", "clips", "ai", "video", "short-form", "viral", "reels", "tiktok", "azelia"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: End Users/Desktop",
@@ -52,7 +52,7 @@ vision = [
     "pyannote.audio>=3.1.0",
 ]
 all = [
-    "celia-clips[asr,asr-mlx,vision]",
+    "azelia-clips[asr,asr-mlx,vision]",
 ]
 dev = [
     "pytest>=7.0.0",
@@ -63,13 +63,13 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://celia.inminente.co"
-Documentation = "https://celia.inminente.co/clips"
+Homepage = "https://azelia.ai"
+Documentation = "https://azelia.ai/clips"
 Repository = "https://github.com/anju2246/celia-clips"
 Issues = "https://github.com/anju2246/celia-clips/issues"
 
 [project.scripts]
-celia = "packages.clips.cli:app"
+azelia = "packages.clips.cli:app"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]

@@ -170,7 +170,7 @@ export const OnboardingWizard: React.FC = () => {
                 });
             } catch { /* non-critical — telemetry preference saved on next settings visit */ }
 
-            toast.success("¡Bienvenido a Celia Clips!");
+            toast.success("¡Bienvenido a Azelia Clips!");
             setTimeout(() => {
                 window.location.replace('/dashboard');
             }, 1000);
@@ -300,7 +300,7 @@ export const OnboardingWizard: React.FC = () => {
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Configuremos tu espacio</h1>
-                        <p className="text-zinc-400 mt-2 text-lg">Celia analiza tus videos localmente. Dile cómo se llama tu proyecto y dónde encontrar el material.</p>
+                        <p className="text-zinc-400 mt-2 text-lg">Azelia analiza tus videos localmente. Dile cómo se llama tu proyecto y dónde encontrar el material.</p>
                     </div>
 
                     <div className="space-y-5 mt-8">
@@ -386,7 +386,7 @@ export const OnboardingWizard: React.FC = () => {
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Conozcámonos un poco</h1>
-                        <p className="text-zinc-400 mt-2 text-lg">Esta información afina los algoritmos de recomendación de Celia para tu nicho específico.</p>
+                        <p className="text-zinc-400 mt-2 text-lg">Esta información afina los algoritmos de recomendación de Azelia para tu nicho específico.</p>
                     </div>
 
                     <div className="space-y-6 mt-6">
@@ -459,7 +459,7 @@ export const OnboardingWizard: React.FC = () => {
                                         <BarChart className="w-4 h-4 text-brand-400" /> Inteligencia Colectiva (Telemetría)
                                     </h3>
                                     <p className="text-sm text-zinc-400 leading-relaxed">
-                                        ¿Quieres que tus clips sean cada vez más virales? Celia aprende de la comunidad. Al unirte, envías datos anónimos sobre métricas de retención y qué hooks logran más vistas en tu nicho.
+                                        ¿Quieres que tus clips sean cada vez más virales? Azelia aprende de la comunidad. Al unirte, envías datos anónimos sobre métricas de retención y qué hooks logran más vistas en tu nicho.
                                         <br /><br />
                                         <strong className="text-brand-300">¿Por qué activarlo?</strong><br />
                                         • Mejoras el algoritmo de tu propio nicho.<br />
@@ -549,7 +549,7 @@ export const OnboardingWizard: React.FC = () => {
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Conecta tu Inteligencia</h1>
-                        <p className="text-zinc-400 mt-2">Para mantener tus datos privados, Celia filtra los videos orquestando IAs a través de llaves API locales.</p>
+                        <p className="text-zinc-400 mt-2">Para mantener tus datos privados, Azelia filtra los videos orquestando IAs a través de llaves API locales.</p>
                     </div>
 
                     <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-4 flex gap-3 items-start">
@@ -616,7 +616,7 @@ export const OnboardingWizard: React.FC = () => {
                                 </div>
                             </div>
                             <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors cursor-pointer leading-tight">
-                                He leído y acepto los <a href="https://celiaclips.com/terms" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Términos y Condiciones</a> y la <a href="https://celiaclips.com/privacy" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Política de Privacidad</a> de Celia Clips.
+                                He leído y acepto los <a href="https://azeliaclips.com/terms" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Términos y Condiciones</a> y la <a href="https://azeliaclips.com/privacy" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Política de Privacidad</a> de Azelia Clips.
                             </span>
                         </label>
 

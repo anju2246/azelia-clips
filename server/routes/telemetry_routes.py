@@ -65,23 +65,23 @@ async def toggle_telemetry_consent(
     if env_path.exists():
         env_lines = env_path.read_text().splitlines()
 
-    # Update or add CELIA_TELEMETRY_ENABLED
+    # Update or add AZELIA_TELEMETRY_ENABLED
     found = False
     new_value = "true" if body.enabled else "false"
     for i, line in enumerate(env_lines):
-        if line.startswith("CELIA_TELEMETRY_ENABLED"):
-            env_lines[i] = f"CELIA_TELEMETRY_ENABLED={new_value}"
+        if line.startswith("AZELIA_TELEMETRY_ENABLED"):
+            env_lines[i] = f"AZELIA_TELEMETRY_ENABLED={new_value}"
             found = True
             break
 
     if not found:
-        env_lines.append(f"CELIA_TELEMETRY_ENABLED={new_value}")
+        env_lines.append(f"AZELIA_TELEMETRY_ENABLED={new_value}")
 
     # Write back
     env_path.write_text("\n".join(env_lines) + "\n")
 
     # Update environment variable for current process
-    os.environ["CELIA_TELEMETRY_ENABLED"] = new_value
+    os.environ["AZELIA_TELEMETRY_ENABLED"] = new_value
 
     # Reload telemetry service consent state
     telemetry.reload_consent()

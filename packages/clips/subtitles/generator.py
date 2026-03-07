@@ -100,7 +100,7 @@ class SubtitleGenerator:
         """Generate ASS file header with styles."""
         s = self.style
         return f"""[Script Info]
-Title: Celia Clips Subtitles
+Title: Azelia Clips Subtitles
 ScriptType: v4.00+
 PlayResX: 1080
 PlayResY: 1920
