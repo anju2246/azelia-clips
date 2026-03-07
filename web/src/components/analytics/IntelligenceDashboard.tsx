@@ -75,7 +75,7 @@ export const IntelligenceDashboard: React.FC = () => {
                         <h3 className="text-2xl font-bold text-white mb-3">Personal Intelligence</h3>
                         <p className="text-zinc-400 max-w-lg mx-auto mb-6 leading-relaxed">
                             Process your first episode to unlock insights about your content.
-                            Celia analyzes hook types, topics, pacing, and virality patterns
+                            Azelia analyzes hook types, topics, pacing, and virality patterns
                             unique to <strong className="text-zinc-300">your</strong> podcast.
                         </p>
                         <a

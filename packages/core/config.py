@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     )
 
     # Telemetry (opt-in, default OFF — no data sent without explicit consent)
-    celia_telemetry_enabled: bool = Field(
+    azelia_telemetry_enabled: bool = Field(
         default=False,
         description="Whether user has consented to anonymous telemetry for IC"
     )

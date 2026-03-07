@@ -1,4 +1,4 @@
-"""Command-line interface for Celia Clips."""
+"""Command-line interface for Azelia Clips."""
 
 from pathlib import Path
 from typing import Annotated, Optional
@@ -7,8 +7,8 @@ import typer
 from rich.console import Console
 
 app = typer.Typer(
-    name="celia",
-    help="🎬 Celia Clips: Turn podcasts into viral short-form clips",
+    name="azelia",
+    help="🎬 Azelia Clips: Turn podcasts into viral short-form clips",
     add_completion=False,
 )
 console = Console()
@@ -31,12 +31,12 @@ def process(
     🚀 Full pipeline: Transcribe → Curate → Extract clips
 
     Example:
-        celia process podcast.mp4 --top 5 --output ./clips
+        azelia process podcast.mp4 --top 5 --output ./clips
     """
     from packages.clips.transcription.transcriber import Transcript
     from packages.clips.curation import ClipCurator, ClipExtractor
 
-    console.print("[bold blue]🎬 Celia Clips[/bold blue] - AI Video Repurposing\n")
+    console.print("[bold blue]🎬 Azelia Clips[/bold blue] - AI Video Repurposing\n")
 
     # Step 1: Get transcript
     if transcript_path and transcript_path.exists():
@@ -108,7 +108,7 @@ def transcribe(
     🎤 Transcribe audio with word-level timestamps
 
     Example:
-        celia transcribe podcast.mp4 --lang es
+        azelia transcribe podcast.mp4 --lang es
     """
     try:
         from packages.clips.transcription.transcriber import transcribe_file
@@ -133,7 +133,7 @@ def curate(
     🧠 Curate viral clips from existing transcript
 
     Example:
-        celia curate transcript.json --top 5
+        azelia curate transcript.json --top 5
     """
     import json
     from packages.clips.transcription.transcriber import Transcript
@@ -165,7 +165,7 @@ def subtitles(
     Styles: hormozi, mrbeast, minimal, podcast
 
     Example:
-        celia subtitles transcript.json --style hormozi
+        azelia subtitles transcript.json --style hormozi
     """
     from packages.clips.subtitles.generator import generate_subtitles
 
@@ -196,8 +196,8 @@ def reframe(
     - center: Simple center crop (fastest)
 
     Example:
-        celia reframe video.mp4 --mode face
-        celia reframe video.mp4 --mode center --output vertical.mp4
+        azelia reframe video.mp4 --mode face
+        azelia reframe video.mp4 --mode center --output vertical.mp4
     """
     if not video.exists():
         console.print(f"[red]Error:[/red] Video not found: {video}")
@@ -210,7 +210,7 @@ def reframe(
         from packages.clips.vision import FaceTracker
         import cv2
 
-        console.print("[bold blue]🎬 Celia Clips[/bold blue] - Face Tracking Reframe\n")
+        console.print("[bold blue]🎬 Azelia Clips[/bold blue] - Face Tracking Reframe\n")
         # TODO (Paso 5): Wire up biometric face tracking
         console.print("[yellow]⚠ Face tracking is being migrated to biometric system.[/yellow]")
         console.print("[dim]   Using center crop as temporary fallback.[/dim]")
@@ -218,7 +218,7 @@ def reframe(
 
     if mode == "center":
         from packages.clips.vision import VideoReframer
-        console.print("[bold blue]🎬 Celia Clips[/bold blue] - Center Reframe\n")
+        console.print("[bold blue]🎬 Azelia Clips[/bold blue] - Center Reframe\n")
         reframer = VideoReframer()
         reframer.reframe_center(video, output, start, duration)
 
@@ -227,7 +227,7 @@ def reframe(
 def version():
     """Show version information."""
     from packages.clips import __version__
-    console.print(f"[bold]Celia Clips[/bold] v{__version__}")
+    console.print(f"[bold]Azelia Clips[/bold] v{__version__}")
 
 
 @app.command()
@@ -238,7 +238,7 @@ def episodes(
     📻 List available episodes from Supabase
 
     Example:
-        celia episodes --limit 10
+        azelia episodes --limit 10
     """
     try:
         from server.sources import list_episodes
@@ -264,15 +264,15 @@ def from_supabase(
     🚀 Curate clips from Inminente Podcast episode in Supabase
 
     Example:
-        celia from-supabase EP108 --top 5
-        celia from-supabase EP108 --all --guest "Juan Pérez"
-        celia from-supabase EP108 --video ep108.mp4 --output ./clips
+        azelia from-supabase EP108 --top 5
+        azelia from-supabase EP108 --all --guest "Juan Pérez"
+        azelia from-supabase EP108 --video ep108.mp4 --output ./clips
     """
     import json
     from server.sources import get_transcript
     from packages.clips.curation import ClipCurator, ClipExtractor
 
-    console.print("[bold blue]🎬 Celia Clips[/bold blue] - Supabase Mode\n")
+    console.print("[bold blue]🎬 Azelia Clips[/bold blue] - Supabase Mode\n")
 
     # Get transcript from Supabase
     console.print(f"[blue]📡[/blue] Fetching transcript for: {episode_id}")
@@ -368,14 +368,14 @@ def start(
     dev: Annotated[bool, typer.Option("--dev", help="Run in dev mode (Astro dev server + FastAPI with reload)")] = False,
 ):
     """
-    🚀 Start the Celia Clips server
+    🚀 Start the Azelia Clips server
 
     Production:
-        celia start --build        # Build frontend + start server
-        celia start                # Start server (uses existing build)
+        azelia start --build        # Build frontend + start server
+        azelia start                # Start server (uses existing build)
 
     Development:
-        celia start --dev          # Start with hot-reload (Astro + FastAPI)
+        azelia start --dev          # Start with hot-reload (Astro + FastAPI)
     """
     import subprocess
     import sys
@@ -385,7 +385,7 @@ def start(
     web_dir = project_root / "web"
 
     if dev:
-        console.print("[bold blue]🎬 Celia Clips[/bold blue] — Development Mode\n")
+        console.print("[bold blue]🎬 Azelia Clips[/bold blue] — Development Mode\n")
         console.print("[dim]Starting Astro dev server + FastAPI with reload...[/dim]")
         console.print(f"[green]→[/green] Frontend: http://localhost:4321")
         console.print(f"[green]→[/green] API:      http://localhost:{port}")
@@ -409,7 +409,7 @@ def start(
 
     # Production mode
     if build:
-        console.print("[bold blue]🎬 Celia Clips[/bold blue] — Building frontend...\n")
+        console.print("[bold blue]🎬 Azelia Clips[/bold blue] — Building frontend...\n")
         result = subprocess.run(
             ["npm", "run", "build"],
             cwd=str(web_dir),
@@ -425,10 +425,10 @@ def start(
     dist_dir = web_dir / "dist"
     if not (dist_dir / "index.html").exists():
         console.print("[yellow]⚠[/yellow] No frontend build found. Run with --build flag first:")
-        console.print("[dim]  celia start --build[/dim]")
+        console.print("[dim]  azelia start --build[/dim]")
         raise typer.Exit(1)
 
-    console.print(f"[bold blue]🎬 Celia Clips[/bold blue] — Server running at http://{host}:{port}\n")
+    console.print(f"[bold blue]🎬 Azelia Clips[/bold blue] — Server running at http://{host}:{port}\n")
     console.print("[dim]Press Ctrl+C to stop.[/dim]")
 
     import uvicorn
@@ -452,8 +452,8 @@ def upload_transcript_cmd(
     2. An episode folder (containing transcript.json)
     
     Example:
-        celia upload-transcript ./episodes/EP108
-        celia upload-transcript transcript.json --id EP108
+        azelia upload-transcript ./episodes/EP108
+        azelia upload-transcript transcript.json --id EP108
     """
     from packages.clips.transcription.transcriber import Transcript
     from server.sources.supabase_transcripts import upload_transcript

@@ -25,7 +25,7 @@ async def lifespan(app: FastAPI):
     # Graceful Shutdown
     await job_queue.stop_workers()
 
-app = FastAPI(title="Celia Clips API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Azelia Clips API", version="0.1.0", lifespan=lifespan)
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -68,7 +68,7 @@ app.include_router(telemetry_router, prefix="/api")
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "ok", "service": "Celia Clips API"}
+    return {"status": "ok", "service": "Azelia Clips API"}
 
 # Mount the Astro built static directory at the root
 # html=True serves index.html automatically for directory roots

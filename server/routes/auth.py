@@ -1,5 +1,5 @@
 """
-Auth routes for Celia Clips.
+Auth routes for Azelia Clips.
 Provides server-side auth callback and user info endpoints.
 """
 from fastapi import APIRouter, Depends, HTTPException

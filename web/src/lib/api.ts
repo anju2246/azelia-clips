@@ -1,4 +1,4 @@
-// Celia Clips API Client
+// Azelia Clips API Client
 // Interfaces matching server/models.py
 
 export type JobStatus = 'pending' | 'processing' | 'paused' | 'resuming' | 'completed' | 'error' | 'failed' | 'cancelled';
