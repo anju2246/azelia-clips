@@ -54,8 +54,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
 
             {/* Brand Logo */}
             <a href="/dashboard" className="mb-8">
-                <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-brand-500 to-emerald-600 flex items-center justify-center font-bold text-white text-lg shadow-lg shadow-brand-500/20 hover:scale-105 transition-transform">
-                    Az
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center hover:scale-105 transition-transform overflow-hidden shadow-lg shadow-brand-500/20">
+                    <img src="/favicon.svg" alt="Azelia Logo" className="w-full h-full object-contain" />
                 </div>
             </a>
 
