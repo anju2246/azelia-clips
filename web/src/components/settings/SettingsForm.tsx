@@ -15,7 +15,6 @@ export const SettingsForm: React.FC = () => {
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readyForAutoSaveRef = useRef(false);
     const [showBrowser, setShowBrowser] = useState(false);
-    const [generateTeasers, setGenerateTeasers] = useState(false);
     const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'vertex']);
     const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
@@ -111,9 +110,13 @@ export const SettingsForm: React.FC = () => {
             setFormData({
                 podcast_name: data.podcast_name,
                 podcast_dir: data.podcast_dir,
+                generate_teasers: data.generate_teasers,
             });
             if (data.ai_provider_order && data.ai_provider_order.length > 0) {
                 setProviderOrder(data.ai_provider_order);
+            }
+            if (data.generate_teasers !== undefined) {
+                setFormData(prev => ({ ...prev, generate_teasers: data.generate_teasers }));
             }
             // Mark ready for auto-save after React settles
             setTimeout(() => { readyForAutoSaveRef.current = true; }, 500);
@@ -399,10 +402,13 @@ export const SettingsForm: React.FC = () => {
                     </div>
                     <button
                         type="button"
-                        onClick={() => setGenerateTeasers(!generateTeasers)}
-                        className={`cursor-pointer transition-colors ${generateTeasers ? 'text-brand-500' : 'text-zinc-600'}`}
+                        onClick={() => {
+                            const currentVal = formData.generate_teasers ?? settings?.generate_teasers ?? false;
+                            setFormData(prev => ({ ...prev, generate_teasers: !currentVal }));
+                        }}
+                        className={`cursor-pointer transition-colors ${(formData.generate_teasers ?? settings?.generate_teasers ?? false) ? 'text-brand-500' : 'text-zinc-600'}`}
                     >
-                        {generateTeasers ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
+                        {(formData.generate_teasers ?? settings?.generate_teasers ?? false) ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
                     </button>
                 </section>
 
