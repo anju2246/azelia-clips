@@ -36,7 +36,8 @@ async def get_settings(user: dict = Depends(require_auth)):
         gcp_project_id=settings.gcp_project_id,
         vertex_model=settings.vertex_model,
         supabase_url=settings.supabase_url,
-        supabase_key=mask_key(settings.supabase_key)
+        supabase_key=mask_key(settings.supabase_key),
+        generate_teasers=settings.generate_teasers
     )
 
 @router.post("/settings", response_model=SettingsResponse)
@@ -106,6 +107,10 @@ async def update_settings(req: UpdateSettingsRequest):
     if req.supabase_key:
         env_content["SUPABASE_KEY"] = req.supabase_key
         settings.supabase_key = req.supabase_key
+        
+    if req.generate_teasers is not None:
+        env_content["GENERATE_TEASERS"] = str(req.generate_teasers).lower()
+        settings.generate_teasers = req.generate_teasers
     
     # Write back to .env
     with open(env_path, "w") as f:

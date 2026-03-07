@@ -64,6 +64,7 @@ class SettingsResponse(BaseModel):
     vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas")
     supabase_url: str = Field(default="")
     supabase_key: str = Field(default="", description="Masked key")
+    generate_teasers: bool = Field(default=False)
     
 class UpdateSettingsRequest(BaseModel):
     podcast_name: Optional[str] = None
@@ -79,6 +80,7 @@ class UpdateSettingsRequest(BaseModel):
     vertex_model: Optional[str] = None
     supabase_url: Optional[str] = None
     supabase_key: Optional[str] = None
+    generate_teasers: Optional[bool] = None
 
 class EpisodeResponse(BaseModel):
     id: str

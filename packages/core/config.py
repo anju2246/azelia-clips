@@ -58,6 +58,7 @@ class Settings(BaseSettings):
     clip_max_duration: int = Field(default=90, description="Maximum clip duration in seconds")
     clip_top_n: int = Field(default=10, description="Number of top clips to extract")
     clip_overlap: int = Field(default=2, description="Overlap seconds for context")
+    generate_teasers: bool = Field(default=False, description="Whether to extract B-roll/hook teasers")
 
     # LLM Settings
     llm_model: str = Field(

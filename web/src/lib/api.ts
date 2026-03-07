@@ -57,6 +57,7 @@ export interface SettingsResponse {
   vertex_model?: string;
   supabase_url?: string;
   supabase_key?: string;
+  generate_teasers?: boolean;
 }
 
 export interface UpdateSettingsRequest {
@@ -73,6 +74,7 @@ export interface UpdateSettingsRequest {
   vertex_model?: string;
   supabase_url?: string;
   supabase_key?: string;
+  generate_teasers?: boolean;
 }
 
 export interface EpisodeResponse {
