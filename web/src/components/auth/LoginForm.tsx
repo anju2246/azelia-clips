@@ -78,7 +78,7 @@ export const LoginForm: React.FC = () => {
             <div className="bg-zinc-950/80 backdrop-blur-2xl border border-white/10 p-8 rounded-[2rem] shadow-2xl relative">
                 <div className="text-center mb-8">
                     <div className="w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 flex items-center justify-center mx-auto mb-6">
-                        <span className="text-3xl font-bold text-brand-400">C</span>
+                        <span className="text-3xl font-bold text-brand-400">Az</span>
                     </div>
                     <h1 className="text-2xl font-bold text-white mb-2">
                         {isSignUp ? 'Create an Account' : 'Welcome Back'}
