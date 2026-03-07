@@ -364,15 +364,15 @@ def from_supabase(
 def start(
     port: Annotated[int, typer.Option("--port", "-p", help="Server port")] = 8000,
     host: Annotated[str, typer.Option("--host", help="Server host")] = "0.0.0.0",
-    build: Annotated[bool, typer.Option("--build", "-b", help="Build Astro frontend before starting")] = False,
+    no_build: Annotated[bool, typer.Option("--no-build", help="Skip building Astro frontend before starting")] = False,
     dev: Annotated[bool, typer.Option("--dev", help="Run in dev mode (Astro dev server + FastAPI with reload)")] = False,
 ):
     """
     🚀 Start the Azelia Clips server
 
     Production:
-        azelia start --build        # Build frontend + start server
-        azelia start                # Start server (uses existing build)
+        azelia start                # Build frontend + start server (Default)
+        azelia start --no-build     # Start server only (skips build, uses existing)
 
     Development:
         azelia start --dev          # Start with hot-reload (Astro + FastAPI)
@@ -408,7 +408,7 @@ def start(
         return
 
     # Production mode
-    if build:
+    if not no_build:
         console.print("[bold blue]🎬 Azelia Clips[/bold blue] — Building frontend...\n")
         result = subprocess.run(
             ["npm", "run", "build"],
@@ -421,11 +421,11 @@ def start(
             raise typer.Exit(1)
         console.print("[green]✓[/green] Frontend built successfully\n")
 
-    # Check if build exists
+    # Check if build exists (mandatory before starting)
     dist_dir = web_dir / "dist"
     if not (dist_dir / "index.html").exists():
-        console.print("[yellow]⚠[/yellow] No frontend build found. Run with --build flag first:")
-        console.print("[dim]  azelia start --build[/dim]")
+        console.print("[yellow]⚠[/yellow] No frontend build found. Run without --no-build flag first:")
+        console.print("[dim]  azelia start[/dim]")
         raise typer.Exit(1)
 
     console.print(f"[bold blue]🎬 Azelia Clips[/bold blue] — Server running at http://{host}:{port}\n")
