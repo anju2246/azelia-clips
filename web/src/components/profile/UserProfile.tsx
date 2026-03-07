@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Camera, Shield, HardDrive, Film, BarChart3, Calendar, ExternalLink, Loader2 } from 'lucide-react';
+import { User, Mail, Camera, Shield, HardDrive, Film, BarChart3, Calendar, ExternalLink, Loader2, LogOut, CreditCard, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 
@@ -63,6 +63,15 @@ export const UserProfile: React.FC = () => {
             toast.error(err.message || 'Failed to update profile');
         } finally {
             setIsSaving(false);
+        }
+    };
+
+    const handleSignOut = async () => {
+        try {
+            await supabase.auth.signOut();
+            window.location.href = '/login';
+        } catch (error) {
+            toast.error('Failed to log out');
         }
     };
 
@@ -162,15 +171,44 @@ export const UserProfile: React.FC = () => {
                 </div>
             </section>
 
-            {/* Pipeline Stats — placeholder until real data exists */}
-            <section className="mb-6">
-                <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">Pipeline Activity</h3>
-                <div className="bg-zinc-900/40 border border-white/5 rounded-2xl p-8 text-center">
-                    <Film className="w-10 h-10 text-zinc-700 mx-auto mb-3" />
-                    <p className="text-zinc-400 text-sm">Pipeline stats will appear here once you process your first episode.</p>
-                    <a href="/dashboard" className="inline-block mt-4 text-brand-400 text-sm hover:text-brand-300 transition-colors">
-                        Go to Dashboard →
-                    </a>
+            {/* Current Plan */}
+            <section className="mb-8">
+                <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">Subscription Plan</h3>
+                <div className="bg-gradient-to-br from-brand-900/40 to-emerald-900/10 border border-brand-500/20 rounded-2xl p-6 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/10 blur-[80px] rounded-full pointer-events-none" />
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+                        <div className="flex items-start gap-4">
+                            <div className="w-12 h-12 bg-brand-500/20 rounded-xl flex items-center justify-center shrink-0">
+                                <Sparkles className="w-6 h-6 text-brand-400" />
+                            </div>
+                            <div>
+                                <div className="flex items-center gap-3 mb-1">
+                                    <h4 className="text-xl font-bold text-white">Founder Edition</h4>
+                                    <span className="px-2.5 py-0.5 bg-brand-500 text-black text-xs font-bold rounded-full uppercase tracking-wider">Active</span>
+                                </div>
+                                <p className="text-zinc-400 text-sm">Unlimited access during MVP phase.</p>
+                            </div>
+                        </div>
+                        <div className="text-left sm:text-right">
+                            <p className="text-2xl font-bold text-white mb-1">$0<span className="text-sm font-normal text-zinc-500"> /mo</span></p>
+                            <p className="text-xs text-brand-400">Early Access Granted</p>
+                        </div>
+                    </div>
+
+                    <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="flex flex-col gap-1">
+                            <span className="text-zinc-400 text-xs uppercase tracking-wider">Storage</span>
+                            <span className="text-white font-medium text-sm">Unlimited raw processing</span>
+                        </div>
+                        <div className="flex flex-col gap-1">
+                            <span className="text-zinc-400 text-xs uppercase tracking-wider">Intelligence</span>
+                            <span className="text-white font-medium text-sm">Full Collective API Access</span>
+                        </div>
+                        <div className="flex flex-col gap-1 sm:text-right">
+                            <span className="text-zinc-400 text-xs uppercase tracking-wider">Support</span>
+                            <span className="text-white font-medium text-sm">Priority Lane</span>
+                        </div>
+                    </div>
                 </div>
             </section>
 
@@ -233,15 +271,40 @@ export const UserProfile: React.FC = () => {
 
             {/* Danger Zone */}
             <section>
-                <h3 className="text-sm font-medium text-red-400/60 uppercase tracking-widest mb-4 ml-1">Danger Zone</h3>
-                <div className="bg-zinc-900/40 border border-red-500/10 rounded-2xl p-5 flex items-center justify-between">
-                    <div>
-                        <p className="text-white font-medium text-sm">Clear All Generated Data</p>
-                        <p className="text-xs text-zinc-500">Removes all clips, jobs, and intelligence data. This cannot be undone.</p>
+                <h3 className="text-sm font-medium text-red-400/60 uppercase tracking-widest mb-4 ml-1">Account Actions</h3>
+                <div className="bg-zinc-900/40 border border-red-500/10 rounded-2xl divide-y divide-red-500/5">
+                    <div className="p-5 flex items-center justify-between hover:bg-white/[0.02] transition-colors">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-white/5 rounded-xl flex items-center justify-center">
+                                <LogOut className="w-5 h-5 text-zinc-300" />
+                            </div>
+                            <div>
+                                <p className="text-white font-medium text-sm">Sign Out</p>
+                                <p className="text-xs text-zinc-500">Log out of this browser session</p>
+                            </div>
+                        </div>
+                        <button
+                            onClick={handleSignOut}
+                            className="px-5 py-2 bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl text-sm text-white font-medium transition-colors whitespace-nowrap"
+                        >
+                            Sign Out
+                        </button>
                     </div>
-                    <button className="px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-xs text-red-400 font-medium transition-colors whitespace-nowrap">
-                        Clear Data
-                    </button>
+
+                    <div className="p-5 flex items-center justify-between hover:bg-red-500/[0.02] transition-colors">
+                        <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-red-500/10 rounded-xl flex items-center justify-center">
+                                <HardDrive className="w-5 h-5 text-red-500" />
+                            </div>
+                            <div>
+                                <p className="text-red-400 font-medium text-sm">Clear All Generated Data</p>
+                                <p className="text-xs text-red-400/60">Removes all clips, jobs, and intelligence data. This cannot be undone.</p>
+                            </div>
+                        </div>
+                        <button className="px-5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-sm text-red-400 font-medium transition-colors whitespace-nowrap">
+                            Clear Data
+                        </button>
+                    </div>
                 </div>
             </section>
         </div>
