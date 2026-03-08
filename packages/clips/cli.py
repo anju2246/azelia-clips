@@ -377,24 +377,21 @@ def start(
     Development:
         azelia start --dev          # Start with hot-reload (Astro + FastAPI)
     """
+    from rich.panel import Panel
     import subprocess
-    ASCII_LOGO = """
-[dim yellow]                      \\  |  / [/dim yellow]
-[dim green]                       . /\\ .
-                      /  \\ 
-                     /    \\ 
-       \\|/          /      \\ 
-        |          /        \\ 
-        |         /          \\          \\|/
-        |        /            \\          | 
-        | \\|/   /              \\         | 
-        |  |   /                \\  \\|/   |[/dim green]
-[bold white]                 a z e l i a[/bold white][bold #3e8e63] .[/bold #3e8e63]
-[dim green]        |  | _/                  \\_ |    | 
-        |  |/                      \\    |[/dim green]
-[bold #3e8e63]   ____/|//|/______________________\\|/__|/____ [/bold #3e8e63]
+    
+    AZELIA_ART = """
+  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
+ ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
+ ███████║  ███╔╝ █████╗  ██║     ██║███████║    ██║     ██║     ██║██████╔╝███████╗
+ ██╔══██║ ███╔╝  ██╔══╝  ██║     ██║██╔══██║    ██║     ██║     ██║██╔═══╝ ╚════██║
+ ██║  ██║███████╗███████╗███████╗██║██║  ██║    ╚██████╗███████╗██║██║     ███████║
+ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝     ╚═════╝╚══════╝╚═╝╚═╝     ╚══════╝
 """
-    console.print(ASCII_LOGO)
+    brand_color = "#3e8e63"
+    console.print(Panel(AZELIA_ART.strip("\n"), style=brand_color, expand=False))
+    console.print(f"[{brand_color}]●[/] [bold white]Azelia Clips[/] | [italic]AI Video Toolkit[/]", justify="center")
+    console.print("[grey50]Login successful. Starting Azelia engine...[/]\n", justify="center")
 
     project_root = Path(__file__).resolve().parent.parent.parent
     web_dir = project_root / "web"
