@@ -56,6 +56,7 @@ class BatchProcessor:
         clip_id: int | None = None,  # NEW: Specify a single clip to re-process (1-indexed)
         transcription_config: dict | None = None, # NEW: Configuration for transcription source
         auth_token: str | None = None, # NEW: User token for community data sync
+        user_id: str | None = None, # NEW: User ID for telemetry reporting
     ):
         from packages.core.config import settings
         self.base_path = Path(external_drive_path) if external_drive_path else settings.podcast_dir
@@ -66,6 +67,7 @@ class BatchProcessor:
         self.use_supabase = use_supabase
         self.target_clip_id = clip_id
         self.auth_token = auth_token
+        self.user_id = user_id or "anonymous"
         
         # Initialize Transcription Driver
         from packages.clips.transcription.driver import TranscriptionDriver
@@ -170,6 +172,7 @@ class BatchProcessor:
         from packages.clips.curation.pipeline import CurationPipeline
         from packages.clips.vision.reframer import reframe_video
         from packages.clips.subtitles.generator import SubtitleGenerator
+        from packages.core.services.telemetry import telemetry
         
         console.print(f"\n[bold blue]Processing EP{episode.episode_number:03d}[/bold blue]")
         if store and job_id:
@@ -296,6 +299,20 @@ class BatchProcessor:
         # Sort by score (best first) for processing order
         valid_clips.sort(key=lambda c: c.virality_score.total, reverse=True)
         console.print(f"[green]✓[/green] Processing {len(valid_clips)} clips that meet quality criteria (score >= {self.min_score})")
+        
+        # Track curation metrics using telemetry
+        try:
+            avg_score = sum(c.virality_score.total for c in valid_clips) / len(valid_clips) if valid_clips else 0.0
+            categories = list({c.category for c in valid_clips if hasattr(c, 'category')})
+            telemetry.track_curation_metrics(
+                user_id=self.user_id,
+                num_clips_found=len(valid_clips),
+                avg_virality_score=avg_score,
+                top_topics=categories,
+                duration_seconds=getattr(transcript, 'duration', None),
+            )
+        except Exception as e:
+            console.print(f"[dim]Telemetry tracking warning: {e}[/dim]")
         
         # Clip ID filtering (for re-processing)
         target_clip_id = getattr(self, 'target_clip_id', None)
@@ -432,6 +449,18 @@ class BatchProcessor:
                             self.analytics_sync.sync_clip(clip_data)
                         except Exception as e:
                             console.print(f"[yellow]   ⚠️ Sync warning: {e}[/yellow]")
+                            
+                    # 3h. Telemetry: Send anonymous clip signals
+                    try:
+                        telemetry.track_clip_performance(
+                            user_id=self.user_id,
+                            predicted_score=clip.virality_score.total,
+                            hook_type=getattr(clip, 'category', None),
+                            duration_seconds=clip.duration,
+                            word_count=len(clip_transcript.text.split()) if clip_transcript else None
+                        )
+                    except Exception as e:
+                        pass
                     
                     # Update job progress (for pause/resume)
                     if store and job_id:
