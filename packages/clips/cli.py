@@ -381,21 +381,15 @@ def start(
     from rich.text import Text
     import subprocess
     
-    AZELIA_ART = """
-     [dim]<>[/dim]                                                       [bold #3e8e63]}[/bold #3e8e63]
-          █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
- [bold white]{[/bold white]       ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
-         ███████║  ███╔╝ █████╗  ██║     ██║███████║    ██║     ██║     ██║██████╔╝███████╗    [dim]~[/dim]
-  [dim]()[/dim]     ██╔══██║ ███╔╝  ██╔══╝  ██║     ██║██╔══██║    ██║     ██║     ██║██╔═══╝ ╚════██║
-         ██║  ██║███████╗███████╗███████╗██║██║  ██║    ╚██████╗███████╗██║██║     ███████║  [bold white]\\[/bold white]
-         ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝     ╚═════╝╚══════╝╚═╝╚═╝     ╚══════╝
-    [bold #3e8e63];[/bold #3e8e63]                                                                           [dim]/>[/dim]
-"""
+    AZELIA_ART = """  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
+ ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
+ ███████║  ███╔╝ █████╗  ██║     ██║███████║    ██║     ██║     ██║██████╔╝███████╗
+ ██╔══██║ ███╔╝  ██╔══╝  ██║     ██║██╔══██║    ██║     ██║     ██║██╔═══╝ ╚════██║
+ ██║  ██║███████╗███████╗███████╗██║██║  ██║    ╚██████╗███████╗██║██║     ███████║
+ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝     ╚═════╝╚══════╝╚═╝╚═╝     ╚══════╝"""
     
     brand_color = "#3e8e63"
-    art_text = Text.from_markup(AZELIA_ART.strip("\n"), justify="center")
-    art_text.no_wrap = True
-    art_text.overflow = "crop"
+    art_text = Text(AZELIA_ART, style=brand_color, justify="center", no_wrap=True, overflow="crop")
     console.print(Panel(art_text, border_style=brand_color, expand=False))
     console.print(f"[{brand_color}]●[/] [bold white]Azelia Clips[/] | [italic]AI Video Toolkit[/]", justify="center")
     console.print("[grey50]Login successful. Starting Azelia engine...[/]\n", justify="center")
