@@ -378,16 +378,17 @@ def start(
         azelia start --dev          # Start with hot-reload (Astro + FastAPI)
     """
     import subprocess
-    import sys
-    import os
-
-    ASCII_LOGO = """[bold magenta]
-    _              _ _       
-   / \\   ____ ___ | (_) __ _ 
-  / _ \\ |_  // _ \\| | |/ _` |
- / ___ \\ / /|  __/| | | (_| |
-/_/   \\_\\___|\\___||_|_|\\__,_|
-[/bold magenta][bold white]       C L I P S    [/bold white]
+    ASCII_LOGO = """
+[bold magenta]         , - ~ ~ ~ - ,
+     , '               ' ,
+   ,                       ,
+  ,      [bold white]A Z E L I A[/bold white]        ,
+ ,       [bold white]C L I P S[/bold white]         ,
+ ,                           ,
+ , _ _ _ _ _ _ _ _ _ _ _ _ _ ,[/bold magenta]
+[bold cyan]  \\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_/[/bold cyan]
+[bold blue]    \\_\\_\\_\\_\\_\\_\\_\\_\\_\\_\\_/[/bold blue]
+[dim blue]      \\_\\_\\_\\_\\_\\_\\_\\_\\_/[/dim blue]
 """
     console.print(ASCII_LOGO)
 
