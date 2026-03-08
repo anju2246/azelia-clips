@@ -381,6 +381,16 @@ def start(
     import sys
     import os
 
+    ASCII_LOGO = """[bold magenta]
+    _              _ _       
+   / \\   ____ ___ | (_) __ _ 
+  / _ \\ |_  // _ \\| | |/ _` |
+ / ___ \\ / /|  __/| | | (_| |
+/_/   \\_\\___|\\___||_|_|\\__,_|
+[/bold magenta][bold white]       C L I P S    [/bold white]
+"""
+    console.print(ASCII_LOGO)
+
     project_root = Path(__file__).resolve().parent.parent.parent
     web_dir = project_root / "web"
 
