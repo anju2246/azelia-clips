@@ -378,18 +378,19 @@ def start(
         azelia start --dev          # Start with hot-reload (Astro + FastAPI)
     """
     from rich.panel import Panel
+    from rich.text import Text
     import subprocess
     
-    AZELIA_ART = """
-  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
+    AZELIA_ART = """  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
  ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
  ███████║  ███╔╝ █████╗  ██║     ██║███████║    ██║     ██║     ██║██████╔╝███████╗
  ██╔══██║ ███╔╝  ██╔══╝  ██║     ██║██╔══██║    ██║     ██║     ██║██╔═══╝ ╚════██║
  ██║  ██║███████╗███████╗███████╗██║██║  ██║    ╚██████╗███████╗██║██║     ███████║
- ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝     ╚═════╝╚══════╝╚═╝╚═╝     ╚══════╝
-"""
+ ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝     ╚═════╝╚══════╝╚═╝╚═╝     ╚══════╝"""
+    
     brand_color = "#3e8e63"
-    console.print(Panel(AZELIA_ART.strip("\n"), style=brand_color, expand=False))
+    art_text = Text(AZELIA_ART, style=brand_color, justify="center", no_wrap=True, overflow="crop")
+    console.print(Panel(art_text, border_style=brand_color, expand=False))
     console.print(f"[{brand_color}]●[/] [bold white]Azelia Clips[/] | [italic]AI Video Toolkit[/]", justify="center")
     console.print("[grey50]Login successful. Starting Azelia engine...[/]\n", justify="center")
 
