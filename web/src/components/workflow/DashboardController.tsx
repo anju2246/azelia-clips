@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { UploadZone } from './UploadZone';
 import { LibraryView } from './LibraryView';
 import { LiveProcessingWidget } from './LiveProcessingWidget';
+import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
-import { ClipsApi } from '../../lib/api';
+import { ClipsApi, SettingsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
 const JOB_STORAGE_KEY = 'celia_active_job_id';
@@ -16,6 +17,32 @@ export const DashboardController: React.FC = () => {
         }
         return null;
     });
+
+    // API key guard state
+    const [showApiKeyModal, setShowApiKeyModal] = useState(false);
+    const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
+    const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+    // Check if user has any API key configured
+    useEffect(() => {
+        const checkKeys = async () => {
+            try {
+                const settings = await SettingsApi.getSettings();
+                const keys = [
+                    settings.groq_api_key,
+                    settings.openai_api_key,
+                    settings.anthropic_api_key,
+                    settings.gcp_project_id,
+                ];
+                // A real key won't contain "..." (masked keys do)
+                const hasReal = keys.some(k => typeof k === 'string' && k.length >= 8 && !k.includes('...'));
+                setHasApiKey(hasReal);
+            } catch {
+                setHasApiKey(false);
+            }
+        };
+        checkKeys();
+    }, []);
 
     // Check if recovered job is still active
     useEffect(() => {
@@ -53,22 +80,38 @@ export const DashboardController: React.FC = () => {
         localStorage.removeItem(JOB_STORAGE_KEY);
     };
 
-    const handleProcessEpisode = async (episodeNum: number) => {
-        const loadingToast = toast.loading('Starting episode processing...');
-        try {
-            const response = await ClipsApi.processEpisode(episodeNum, {
-                min_duration: 30,
-                max_duration: 90,
-                min_score: 70,
-                subtitle_style: 'highlight',
-                transcription_source: 'local_whisper'
-            });
-            toast.success('Episode processing started!', { id: loadingToast });
-            setAndPersistJobId(response.id);
-        } catch (error: any) {
-            console.error(error);
-            toast.error(error.message || 'Failed to process episode', { id: loadingToast });
+    // Guard wrapper: checks for API key before running the action
+    const guardWithApiKey = (action: () => void) => {
+        if (hasApiKey === false) {
+            setPendingAction(() => action);
+            setShowApiKeyModal(true);
+        } else {
+            action();
         }
+    };
+
+    const handleProcessEpisode = async (episodeNum: number) => {
+        guardWithApiKey(async () => {
+            const loadingToast = toast.loading('Starting episode processing...');
+            try {
+                const response = await ClipsApi.processEpisode(episodeNum, {
+                    min_duration: 30,
+                    max_duration: 90,
+                    min_score: 70,
+                    subtitle_style: 'highlight',
+                    transcription_source: 'local_whisper'
+                });
+                toast.success('Episode processing started!', { id: loadingToast });
+                setAndPersistJobId(response.id);
+            } catch (error: any) {
+                console.error(error);
+                toast.error(error.message || 'Failed to process episode', { id: loadingToast });
+            }
+        });
+    };
+
+    const handleUploadProcess = (jobId: string) => {
+        setAndPersistJobId(jobId);
     };
 
     // If a job is active, show the live processing widget
@@ -99,7 +142,31 @@ export const DashboardController: React.FC = () => {
             </div>
 
             <UploadZone
-                onJobStarted={(jobId) => setAndPersistJobId(jobId)}
+                onJobStarted={handleUploadProcess}
+                requireApiKey={() => {
+                    if (hasApiKey === false) {
+                        setShowApiKeyModal(true);
+                        return false;
+                    }
+                    return true;
+                }}
+            />
+
+            <MissingApiKeyModal
+                isOpen={showApiKeyModal}
+                onClose={() => {
+                    setShowApiKeyModal(false);
+                    setPendingAction(null);
+                }}
+                onKeySaved={() => {
+                    setShowApiKeyModal(false);
+                    setHasApiKey(true);
+                    // Run the pending action if any
+                    if (pendingAction) {
+                        pendingAction();
+                        setPendingAction(null);
+                    }
+                }}
             />
         </div>
     );

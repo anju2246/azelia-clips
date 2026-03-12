@@ -6,9 +6,10 @@ import { FilePicker } from './FilePicker';
 
 interface UploadZoneProps {
     onJobStarted: (jobId: string) => void;
+    requireApiKey?: () => boolean;
 }
 
-export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted }) => {
+export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApiKey }) => {
     const [file, setFile] = useState<File | null>(null);
     const [localVideoPath, setLocalVideoPath] = useState<string | null>(null);
     const [localVideoName, setLocalVideoName] = useState<string | null>(null);
@@ -44,6 +45,8 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted }) => {
     const handleProcess = async () => {
         if (!file && !localVideoPath) return;
 
+        // Check for API key before processing
+        if (requireApiKey && !requireApiKey()) return;
         setIsProcessing(true);
         const loadingToast = toast.loading(file ? 'Uploading file to local engine (this may take a moment)...' : 'Starting local process...');
 

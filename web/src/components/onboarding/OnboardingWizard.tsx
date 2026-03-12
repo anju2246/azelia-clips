@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SettingsApi, type UpdateSettingsRequest } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { DirectoryPicker } from '../settings/DirectoryPicker';
@@ -30,6 +30,7 @@ export const OnboardingWizard: React.FC = () => {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showDirPicker, setShowDirPicker] = useState(false);
+    const boxRef = useRef<HTMLDivElement>(null);
 
     // Core settings
     const [formData, setFormData] = useState<Partial<UpdateSettingsRequest>>({});
@@ -201,6 +202,10 @@ export const OnboardingWizard: React.FC = () => {
         }
     }, [step, profile, telemetry, formData]);
 
+    useEffect(() => {
+        boxRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    }, [step]);
+
     const handleUpdate = (updates: Partial<UpdateSettingsRequest>) => {
         setFormData(prev => ({ ...prev, ...updates }));
     };
@@ -355,7 +360,7 @@ export const OnboardingWizard: React.FC = () => {
     };
 
     const hasAnyKey = [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.gcp_project_id].some(
-        key => typeof key === 'string' && key.trim().length >= 20
+        key => typeof key === 'string' && key.trim().length >= 20 && !key.includes('...')
     );
 
     if (loading) return (
@@ -363,7 +368,7 @@ export const OnboardingWizard: React.FC = () => {
     );
 
     return (
-        <div className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl relative overflow-hidden transition-all duration-500">
+        <div ref={boxRef} className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl relative transition-all duration-500 h-[75vh] overflow-y-auto">
             {/* Progress indicator */}
             <div className="flex items-center gap-2 mb-8">
                 {[1, 2, 3, 4].map((i) => (

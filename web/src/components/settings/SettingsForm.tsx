@@ -73,7 +73,7 @@ export const SettingsForm: React.FC = () => {
                 if (payload.openai_api_key === '********' || !payload.openai_api_key) delete payload.openai_api_key;
                 if (payload.anthropic_api_key === '********' || !payload.anthropic_api_key) delete payload.anthropic_api_key;
                 if (payload.gcp_project_id === 'e.g. ce-video-engine' || !payload.gcp_project_id) delete payload.gcp_project_id;
-                if (payload.supabase_key === '********' || !payload.supabase_key) delete payload.supabase_key;
+                if (payload.transcript_supabase_key === '********' || !payload.transcript_supabase_key) delete payload.transcript_supabase_key;
                 const updated = await SettingsApi.updateSettings(payload);
                 setSettings(updated);
                 setSaveStatus('saved');
@@ -149,7 +149,7 @@ export const SettingsForm: React.FC = () => {
             if (payload.openai_api_key === '********' || !payload.openai_api_key) delete payload.openai_api_key;
             if (payload.anthropic_api_key === '********' || !payload.anthropic_api_key) delete payload.anthropic_api_key;
             if (payload.gcp_project_id === 'e.g. ce-video-engine' || !payload.gcp_project_id) delete payload.gcp_project_id;
-            if (payload.supabase_key === '********' || !payload.supabase_key) delete payload.supabase_key;
+            if (payload.transcript_supabase_key === '********' || !payload.transcript_supabase_key) delete payload.transcript_supabase_key;
             const updated = await SettingsApi.updateSettings(payload);
             setSettings(updated);
             setSaveStatus('saved');
@@ -368,28 +368,33 @@ export const SettingsForm: React.FC = () => {
                     </div>
                 </section>
 
-                {/* Supabase Core */}
+                {/* Transcript Source (User's own Supabase — optional) */}
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center gap-2">
                         <Database className="w-5 h-5 text-emerald-400" />
-                        <h3 className="font-semibold text-white">Database & Sync (Supabase)</h3>
+                        <h3 className="font-semibold text-white">Transcript Source (Supabase)</h3>
+                        <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-widest border border-zinc-700 ml-auto">Optional</span>
                     </div>
                     <div className="p-6 space-y-6">
+                        <p className="text-sm text-zinc-400 leading-relaxed -mt-2">
+                            If you store your episode transcripts in Supabase, connect your database here so the pipeline can pull from it.
+                        </p>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">Supabase URL</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">Supabase Project URL</label>
                             <input
                                 type="text"
-                                value={formData.supabase_url ?? settings?.supabase_url ?? ''}
-                                onChange={(e) => { setFormData(prev => ({ ...prev, supabase_url: e.target.value })); }}
+                                value={formData.transcript_supabase_url ?? settings?.transcript_supabase_url ?? ''}
+                                onChange={(e) => { setFormData(prev => ({ ...prev, transcript_supabase_url: e.target.value })); }}
                                 className="w-full px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white font-mono text-sm"
+                                placeholder="https://your-project.supabase.co"
                             />
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-zinc-300 mb-2">Supabase Service Key</label>
                             <input
                                 type="password"
-                                placeholder={settings?.supabase_key ? '********' : 'Enter Service Role Key'}
-                                onChange={(e) => { setFormData(prev => ({ ...prev, supabase_key: e.target.value })); }}
+                                placeholder={settings?.transcript_supabase_key ? '********' : 'Enter Service Role Key'}
+                                onChange={(e) => { setFormData(prev => ({ ...prev, transcript_supabase_key: e.target.value })); }}
                                 className="w-full px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white font-mono"
                             />
                         </div>

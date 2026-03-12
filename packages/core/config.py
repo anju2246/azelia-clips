@@ -32,14 +32,24 @@ class Settings(BaseSettings):
     gcp_location: str = Field(default="us-central1", alias="GCP_LOCATION", description="GCP region")
     vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas", description="Selected Vertex AI model")
 
-    # Supabase (Auth — Azelia Central)
-    supabase_url: str = Field(default="", description="Supabase project URL")
-    supabase_key: str = Field(default="", description="Supabase anon/service key")
-    supabase_jwt_secret: str = Field(default="", description="Supabase JWT secret for validating user tokens")
+    # ── Azelia Central DB (Supabase) ──────────────────────────────────────
+    # ⚠️ DO NOT expose in Settings UI. These power telemetry, auth, and IC.
+    # The anon key is public by Supabase design (RLS protects data).
+    # Auth tokens are validated via Supabase API (no JWT secret needed).
+    supabase_url: str = Field(
+        default="https://REDACTED-OLD-SUPABASE-PROJECT.supabase.co",
+        description="Azelia Central Supabase URL (telemetry, auth, IC)"
+    )
+    supabase_key: str = Field(
+        default="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.REDACTED-OLD-ANON-JWT-PAYLOAD.0Y2f5rmMw-jLa17d3XPjmdtQvbXO7dI0AUONzvalLBU",
+        description="Azelia Central Supabase anon key (public by design)"
+    )
 
-    # Supabase (Transcripts — User's own DB)
-    transcript_supabase_url: str = Field(default="", description="User's Supabase URL for transcripts")
-    transcript_supabase_key: str = Field(default="", description="User's Supabase service key for transcripts")
+    # ── User Transcript DB (Supabase, optional) ─────────────────────────
+    # Podcasters can connect their own Supabase if they store transcripts there.
+    # Configured via Settings UI.
+    transcript_supabase_url: str = Field(default="", description="User's own Supabase URL for transcript ingestion")
+    transcript_supabase_key: str = Field(default="", description="User's own Supabase service key for transcripts")
     
     # Security / API
     allowed_cors_origins: str = Field(
