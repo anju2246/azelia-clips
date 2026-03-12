@@ -23,11 +23,10 @@ class MockTranscript:
     source_file: str = "mock.mp4"
 
 @pytest.fixture
-@patch('packages.clips.curation.agents.finder.get_llm')
-@patch('packages.clips.curation.agents.critic.get_llm')
 @patch('packages.clips.curation.agents.ranker.get_llm')
-def pipeline(mock_ranker, mock_critic, mock_finder):
-    # Instantiate without external API calls by mocking them later
+@patch('packages.clips.curation.agents.critic.get_llm')
+@patch('packages.clips.curation.agents.finder.get_llm')
+def pipeline(mock_finder, mock_critic, mock_ranker):
     mock_finder.return_value = MagicMock()
     mock_critic.return_value = MagicMock()
     mock_ranker.return_value = MagicMock()

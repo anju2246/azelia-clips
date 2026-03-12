@@ -43,8 +43,20 @@ import { OnboardingWizard } from "../components/onboarding/OnboardingWizard";
                             data.anthropic_api_key ||
                             data.gcp_project_id
                         );
-                        if (hasKey) {
-                            window.location.replace("/dashboard");
+                        // Check local storage to see if they are actively in the middle of the wizard
+                        const isComplete = localStorage.getItem(
+                            "az_onboarding_complete",
+                        );
+                        const activeStep =
+                            localStorage.getItem("az_onboard_step");
+
+                        if (
+                            hasKey &&
+                            !window.location.search.includes("code=")
+                        ) {
+                            if (isComplete === "true" || !activeStep) {
+                                window.location.replace("/dashboard");
+                            }
                         }
                     }
                 } catch (e) {

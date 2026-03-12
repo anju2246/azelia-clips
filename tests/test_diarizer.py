@@ -14,10 +14,8 @@ def test_speaker_diarizer_availability():
         assert "HuggingFace token required" in str(excinfo.value)
         
     # 2. Token provided via arg
-    with patch('packages.clips.transcription.diarizer.SpeakerDiarizer.is_available', new_callable=pytest.MonkeyPatch) as mock_avail:
-        diarizer2 = SpeakerDiarizer(hf_token="fake_token")
-        # Just testing the init accepted it
-        assert diarizer2.hf_token == "fake_token"
+    diarizer2 = SpeakerDiarizer(hf_token="fake_token")
+    assert diarizer2.hf_token == "fake_token"
 
 def test_speaker_diarizer_env_var():
     with patch.dict(os.environ, {"HF_TOKEN": "env_fake_token"}):

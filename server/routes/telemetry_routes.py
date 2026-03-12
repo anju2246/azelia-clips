@@ -56,7 +56,7 @@ async def toggle_telemetry_consent(
 ):
     """
     Toggle telemetry consent. Persists to .env file so it survives restarts.
-    Also updates user_profiles in Supabase with consent timestamp.
+    Also updates profiles in Supabase with consent timestamp.
     """
     env_path = Path(".env")
 
@@ -134,7 +134,7 @@ async def get_telemetry_stats(user: User = Depends(require_super_admin)):
 
         # Users with telemetry consent
         consent_resp = (
-            telemetry.supabase.table("user_profiles")
+            telemetry.supabase.table("profiles")
             .select("id", count="exact")
             .eq("telemetry_consent", True)
             .execute()

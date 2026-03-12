@@ -21,9 +21,11 @@ def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) 
 def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
     """
     Auth dependency that is truly optional for local-first usage.
-    - If credentials are provided, validates the JWT.
-    - If no credentials are provided, returns a dev user (local mode).
+    - If credentials are provided, validates the JWT (throws 401 if invalid).
+    - If no credentials are provided, returns a dev user (local mode fallback).
     """
     if credentials is None:
         return User(id="dev-user", email="dev@local", role="authenticated")
+    
+    # If the frontend bothered to send a token, it MUST be valid. No silent fallback.
     return verify_supabase_jwt(credentials.credentials)

@@ -10,10 +10,16 @@ Rules:
 """
 
 import threading
+from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from supabase import create_client, Client
 from pydantic import BaseModel
 from packages.core.config import settings
+
+
+def _utc_now_iso() -> str:
+    """Return current UTC timestamp as ISO string (Supabase-compatible)."""
+    return datetime.now(timezone.utc).isoformat()
 
 
 class TelemetryEvent(BaseModel):
@@ -59,6 +65,63 @@ class TelemetryService:
             except Exception:
                 self.enabled = False
 
+    # ── Normalization helpers (align with IC Signal Contract) ────────────
+
+    @staticmethod
+    def _normalize_hook_type(raw: Optional[str]) -> Optional[str]:
+        """Map free-form hook type to canonical values from ic_contract."""
+        if not raw:
+            return None
+        from packages.core.ic_contract import VALID_HOOK_TYPES
+        raw_lower = raw.lower().strip().replace(" ", "_").replace("-", "_")
+        # Direct match
+        if raw_lower in VALID_HOOK_TYPES:
+            return raw_lower
+        # Fuzzy mapping
+        HOOK_ALIASES = {
+            "pregunta": "question", "interrogative": "question",
+            "dato_sorprendente": "surprising_fact", "surprising": "surprising_fact", "fact": "surprising_fact",
+            "controversial": "controversial_statement", "polemico": "controversial_statement", "bold_claim": "controversial_statement",
+            "story": "storytelling", "narrative": "storytelling", "anecdote": "storytelling", "historia": "storytelling",
+            "negative": "negative_frame", "negativo": "negative_frame", "pain_point": "negative_frame",
+            "how_to": "tutorial", "instructional": "tutorial", "educational": "tutorial",
+            "debil": "weak", "generic": "weak", "none": "weak",
+        }
+        return HOOK_ALIASES.get(raw_lower, raw_lower if raw_lower in VALID_HOOK_TYPES else "weak")
+
+    @staticmethod
+    def _normalize_emotional_charge(raw: Optional[str]) -> Optional[str]:
+        """Map free-form emotional charge to canonical values."""
+        if not raw:
+            return None
+        from packages.core.ic_contract import VALID_EMOTIONAL_CHARGES
+        raw_lower = raw.lower().strip().replace(" ", "_").replace("-", "_")
+        if raw_lower in VALID_EMOTIONAL_CHARGES:
+            return raw_lower
+        EMOTION_ALIASES = {
+            "inspirador": "inspirational", "motivational": "inspirational",
+            "urgente": "urgent", "alarming": "urgent",
+            "comedia": "comedic", "humor": "comedic", "funny": "comedic",
+            "indignacion": "outrage", "anger": "outrage", "rage": "outrage",
+            "educativo": "educational", "informative": "educational",
+            "empatico": "empathetic", "emotional": "empathetic", "vulnerable": "empathetic",
+        }
+        return EMOTION_ALIASES.get(raw_lower, raw_lower if raw_lower in VALID_EMOTIONAL_CHARGES else None)
+
+    @staticmethod
+    def _compute_duration_bucket(seconds: Optional[float]) -> Optional[str]:
+        """Map duration to canonical bucket."""
+        if seconds is None:
+            return None
+        if seconds <= 15:
+            return "0-15"
+        elif seconds <= 30:
+            return "15-30"
+        elif seconds <= 45:
+            return "30-45"
+        else:
+            return "45-60"
+
     def track_curation_metrics(
         self,
         user_id: str,
@@ -70,6 +133,8 @@ class TelemetryService:
         content_niche: Optional[str] = None,
         region: Optional[str] = None,
         language: Optional[str] = None,
+        category: Optional[str] = None,
+        episode_format: Optional[str] = None,
     ):
         """
         Records anonymized metadata about a curation run.
@@ -80,6 +145,11 @@ class TelemetryService:
         if not self.enabled or not self.supabase:
             return
 
+        # Normalize hook_types to canonical values
+        normalized_hooks = [
+            self._normalize_hook_type(h) for h in (hook_types or [])
+        ]
+
         event = TelemetryEvent(
             event_type="curation_run",
             user_id=user_id,
@@ -88,7 +158,10 @@ class TelemetryService:
                 "avg_virality_score": round(avg_virality_score, 2),
                 "topic_patterns": top_topics[:5],  # Max 5 topics, no PII
                 "duration_seconds": duration_seconds,
-                "hook_types": hook_types or [],
+                "hook_types": [h for h in normalized_hooks if h],
+                # IC Signal Contract fields
+                "category": category,
+                "episode_format": episode_format,
                 # Context segmentation for IC
                 "content_niche": content_niche,
                 "region": region,
@@ -111,7 +184,7 @@ class TelemetryService:
                     {
                         "user_id": user_id,
                         "tool": tool,
-                        "last_used_at": "now()",
+                        "last_used_at": _utc_now_iso(),
                         "usage_count": 1,  # Supabase handles increment via ON CONFLICT
                     },
                     on_conflict="user_id,tool",
@@ -131,10 +204,13 @@ class TelemetryService:
         has_cta: Optional[bool] = None,
         word_count: Optional[int] = None,
         question_density: Optional[float] = None,
+        category: Optional[str] = None,
+        episode_format: Optional[str] = None,
     ):
         """
         Records anonymized structural signals from a single clip.
         These feed IC pattern detection (hook effectiveness, duration optimization).
+        Fields normalized to IC Signal Contract canonical values.
         """
         if not self.enabled or not self.supabase:
             return
@@ -144,12 +220,16 @@ class TelemetryService:
             user_id=user_id,
             metadata={
                 "predicted_score": round(predicted_score, 2),
-                "hook_type": hook_type,
+                "hook_type": self._normalize_hook_type(hook_type),
                 "duration_seconds": duration_seconds,
-                "emotional_charge": emotional_charge,
+                "duration_bucket": self._compute_duration_bucket(duration_seconds),
+                "emotional_charge": self._normalize_emotional_charge(emotional_charge),
                 "has_cta": has_cta,
                 "word_count": word_count,
                 "question_density": round(question_density, 3) if question_density else None,
+                # IC Signal Contract fields
+                "category": category,
+                "episode_format": episode_format,
             },
         )
         self._send_event(event)
@@ -167,15 +247,90 @@ class TelemetryService:
 
         def _record():
             try:
-                # Update user_profiles with consent status
-                self.supabase.table("user_profiles").update({
+                # Update profiles with consent status
+                self.supabase.table("profiles").update({
                     "telemetry_consent": consented,
-                    "telemetry_consent_at": "now()" if consented else None,
+                    "telemetry_consent_at": _utc_now_iso() if consented else None,
                 }).eq("id", user_id).execute()
             except Exception as e:
                 print(f"[Telemetry] Failed to record consent change: {e}")
 
         threading.Thread(target=_record, daemon=True).start()
+
+    def track_youtube_performance(
+        self,
+        user_id: str,
+        youtube_id: str,
+        views: int,
+        likes: int,
+        comments: int,
+        duration_seconds: Optional[float] = None,
+        hook_type: Optional[str] = None,
+        predicted_score: Optional[float] = None,
+        title_hash: Optional[str] = None,
+        category: Optional[str] = None,
+        episode_format: Optional[str] = None,
+    ):
+        """
+        Records an aggregated snapshot of YouTube performance metrics for a clip.
+        Matches the architectural requirement for batch IC processing: one row per clip sync,
+        containing the snapshot of views and the matched contextual patterns.
+        
+        NEVER includes: video title, URL, channel name.
+        """
+        if not self.enabled or not self.supabase:
+            return
+
+        event = TelemetryEvent(
+            event_type="youtube_clip_aggregate",
+            user_id=user_id,
+            metadata={
+                "platform": "youtube",
+                "youtube_id": youtube_id,
+                "title_hash": title_hash,
+                "views_snapshot": views,
+                "likes_snapshot": likes,
+                "comments_snapshot": comments,
+                "duration_seconds": duration_seconds,
+                "hook_type": self._normalize_hook_type(hook_type),
+                "predicted_score": predicted_score,
+                "category": category,
+                "episode_format": episode_format,
+            },
+        )
+        
+        def _push_user_telemetry():
+            try:
+                # Attempt to retrieve episode_format from the user's profile if missing
+                final_format = event.metadata.get("episode_format")
+                if not final_format:
+                    res = self.supabase.table("profiles").select("preferences").eq("id", user_id).execute()
+                    if res.data and res.data[0].get("preferences"):
+                        prefs = res.data[0]["preferences"]
+                        final_format = prefs.get("episode_format")
+                    
+                    event.metadata["episode_format"] = final_format or "interview"
+
+                self.supabase.table("ic_user_telemetry").insert({
+                    "podcast_fingerprint": event.metadata.get("title_hash", "unknown_hash"),
+                    "category": event.metadata.get("category"),
+                    "episode_format": final_format or "interview",
+                    "platform": "youtube",
+                    "avg_view_duration_s": event.metadata.get("duration_seconds"),
+                    "signal_type": "youtube_clip_aggregate",
+                    "pattern_applied": {
+                        "hook_type": event.metadata.get("hook_type"),
+                        "predicted_score": event.metadata.get("predicted_score"),
+                        "views": event.metadata.get("views_snapshot"),
+                        "likes": event.metadata.get("likes_snapshot"),
+                        "comments": event.metadata.get("comments_snapshot"),
+                    },
+                    "metrics_window_days": 7
+                }).execute()
+            except Exception as e:
+                print(f"[Telemetry] Failed to record user telemetry: {e}")
+
+        threading.Thread(target=_push_user_telemetry, daemon=False).start()
 
     def _send_event(self, event: TelemetryEvent):
         """Fire-and-forget: sends event in background thread. Never blocks pipeline."""
@@ -187,9 +342,10 @@ class TelemetryService:
             except Exception as e:
                 print(f"[Telemetry] Failed to record event: {e}")
 
-        threading.Thread(target=_push, daemon=True).start()
+        # Use daemon=False to ensure the thread finishes writing to Supabase
+        # even if the main FastAPI application is shutting down.
+        threading.Thread(target=_push, daemon=False).start()
 
 
 # Global singleton
 telemetry = TelemetryService()
-

@@ -6,7 +6,7 @@ Priority order:
 3. Groq (Llama 3.3 70B) - Free fallback
 """
 
-from typing import Optional
+from typing import Any, Optional
 from rich.console import Console
 
 from packages.core.config import settings
@@ -75,18 +75,18 @@ class MultiProviderLLM:
         if vertexai_available and hasattr(settings, "gcp_project_id") and settings.gcp_project_id:
             available_configs["vertex"] = [
                 {
-                    "name": "llama-4-scout-vertexai",
-                    "model": "meta/llama-4-scout-17b-16e-instruct-maas",
-                    "type": "vertexai",
-                    "project": settings.gcp_project_id,
-                    "location": "us-east5",
-                },
-                {
                     "name": "llama-3.3-70b-vertexai",
                     "model": "meta/llama-3.3-70b-instruct-maas",
                     "type": "vertexai",
                     "project": settings.gcp_project_id,
                     "location": getattr(settings, "gcp_location", "us-central1"),
+                },
+                {
+                    "name": "llama-4-scout-vertexai",
+                    "model": "meta/llama-4-scout-17b-16e-instruct-maas",
+                    "type": "vertexai",
+                    "project": settings.gcp_project_id,
+                    "location": "us-east5",
                 }
             ]
             
@@ -114,6 +114,7 @@ class MultiProviderLLM:
         user_message: str,
         temperature: float = 0.7,
         max_retries: int = 2,
+        response_format: Any = None,
     ) -> str:
         """
         Send a chat message, with automatic fallback on failure.
