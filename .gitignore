@@ -72,3 +72,6 @@ private/
 # Server runtime data
 server/data/
 src.bak/
+
+# Scratch/test scripts (exploratory, never commit)
+_scratch/

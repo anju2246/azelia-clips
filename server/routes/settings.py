@@ -67,6 +67,11 @@ def mask_key(key: str) -> str:
     return f"{key[:4]}...{key[-4:]}"
 
 
+def _is_masked(value: str) -> bool:
+    """Check if a value is a masked placeholder (e.g. 'eyJh...lLBU') that should not be saved."""
+    return not value or '...' in value or value == '********'
+
+
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings(user: User = Depends(require_auth)):
     """Get current application settings."""
@@ -83,8 +88,6 @@ async def get_settings(user: User = Depends(require_auth)):
         anthropic_model=settings.anthropic_model,
         gcp_project_id=settings.gcp_project_id,
         vertex_model=settings.vertex_model,
-        supabase_url=settings.supabase_url,
-        supabase_key=mask_key(settings.supabase_key),
         transcript_supabase_url=settings.transcript_supabase_url,
         transcript_supabase_key=mask_key(settings.transcript_supabase_key),
         generate_teasers=settings.generate_teasers
@@ -130,7 +133,7 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         env_content["AI_PROVIDER_ORDER"] = order_str
         settings.ai_provider_order = order_str
         
-    if req.groq_api_key is not None:
+    if req.groq_api_key is not None and not _is_masked(req.groq_api_key):
         env_content["GROQ_API_KEY"] = req.groq_api_key
         settings.groq_api_key = req.groq_api_key
         
@@ -138,7 +141,7 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         env_content["GROQ_MODEL"] = req.groq_model
         settings.groq_model = req.groq_model
         
-    if req.openai_api_key is not None:
+    if req.openai_api_key is not None and not _is_masked(req.openai_api_key):
         env_content["OPENAI_API_KEY"] = req.openai_api_key
         settings.openai_api_key = req.openai_api_key
         
@@ -146,7 +149,7 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         env_content["OPENAI_MODEL"] = req.openai_model
         settings.openai_model = req.openai_model
         
-    if req.anthropic_api_key is not None:
+    if req.anthropic_api_key is not None and not _is_masked(req.anthropic_api_key):
         env_content["ANTHROPIC_API_KEY"] = req.anthropic_api_key
         settings.anthropic_api_key = req.anthropic_api_key
         
@@ -162,19 +165,11 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         env_content["VERTEX_MODEL"] = req.vertex_model
         settings.vertex_model = req.vertex_model
         
-    if req.supabase_url:
-        env_content["SUPABASE_URL"] = req.supabase_url
-        settings.supabase_url = req.supabase_url
-        
-    if req.supabase_key:
-        env_content["SUPABASE_KEY"] = req.supabase_key
-        settings.supabase_key = req.supabase_key
-        
-    if req.transcript_supabase_url is not None:
+    if req.transcript_supabase_url is not None and not _is_masked(req.transcript_supabase_url):
         env_content["TRANSCRIPT_SUPABASE_URL"] = req.transcript_supabase_url
         settings.transcript_supabase_url = req.transcript_supabase_url
 
-    if req.transcript_supabase_key is not None:
+    if req.transcript_supabase_key is not None and not _is_masked(req.transcript_supabase_key):
         env_content["TRANSCRIPT_SUPABASE_KEY"] = req.transcript_supabase_key
         settings.transcript_supabase_key = req.transcript_supabase_key
 

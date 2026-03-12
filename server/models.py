@@ -62,8 +62,6 @@ class SettingsResponse(BaseModel):
     anthropic_model: str = Field(default="claude-3-7-sonnet-20250219")
     gcp_project_id: str = Field(default="", description="Plaintext project ID")
     vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas")
-    supabase_url: str = Field(default="")
-    supabase_key: str = Field(default="", description="Masked key")
     transcript_supabase_url: str = Field(default="")
     transcript_supabase_key: str = Field(default="", description="Masked key")
     generate_teasers: bool = Field(default=False)
@@ -80,8 +78,6 @@ class UpdateSettingsRequest(BaseModel):
     anthropic_model: Optional[str] = None
     gcp_project_id: Optional[str] = None
     vertex_model: Optional[str] = None
-    supabase_url: Optional[str] = None
-    supabase_key: Optional[str] = None
     transcript_supabase_url: Optional[str] = None
     transcript_supabase_key: Optional[str] = None
     generate_teasers: Optional[bool] = None

@@ -383,6 +383,24 @@ def start(
     import webbrowser
     import threading
     import time
+    import sys
+    import os
+
+    # ── Explicitly load .env so pydantic-settings picks up all keys ───────
+    project_root = Path(__file__).resolve().parent.parent.parent
+
+    # ── Explicitly load .env so pydantic-settings picks up all keys ───────
+    try:
+        from dotenv import load_dotenv
+        env_path = project_root / ".env"
+        if env_path.exists():
+            load_dotenv(env_path, override=True)
+            # Reload settings singleton with fresh env vars
+            from packages.core.config import Settings
+            import packages.core.config as config_module
+            config_module.settings = Settings()
+    except ImportError:
+        pass  # dotenv not installed; pydantic-settings will handle it
     
     AZELIA_ART = """  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
  ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
@@ -397,7 +415,7 @@ def start(
     console.print(f"[{brand_color}]●[/] [bold white]Azelia Clips[/] | [italic]AI Video Toolkit[/]", justify="center")
     console.print("[grey50]Login successful. Starting Azelia engine...[/]\n", justify="center")
 
-    project_root = Path(__file__).resolve().parent.parent.parent
+
     web_dir = project_root / "web"
 
     if dev:

@@ -1,6 +1,5 @@
-import jwt
 import logging
-from typing import Dict, Any, Optional
+from typing import Optional
 from fastapi import HTTPException, status, Security, Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
@@ -15,68 +14,38 @@ class User(BaseModel):
 
 def verify_supabase_jwt(token: str) -> User:
     """
-    Verifies a Supabase-issued JWT and returns the parsed User model.
-    If SUPABASE_JWT_SECRET is present, it verifies locally.
-    If missing, it falls back to verifying via the Supabase Auth API.
+    Verifies a Supabase-issued JWT by calling the Supabase Auth API.
+    No local JWT secret needed — validation is always done server-side by Supabase.
+    Returns the parsed User model on success.
     """
     try:
-        header = jwt.get_unverified_header(token)
-        alg = header.get("alg", "HS256")
-        
-        if alg == "HS256" and settings.supabase_jwt_secret:
-            signing_key = settings.supabase_jwt_secret
-            payload = jwt.decode(
-                token,
-                signing_key,
-                algorithms=["HS256"],
-                options={"verify_aud": False}
+        from supabase import create_client
+
+        if not settings.supabase_url or not settings.supabase_key:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Server misconfigured: SUPABASE_URL or SUPABASE_KEY is missing."
             )
-        else:
-            # Fallback: Ask Supabase Server if the token is valid by getting the user.
-            from supabase import create_client
-            if not settings.supabase_url or not settings.supabase_key:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Server misconfigured: SUPABASE_URL or SUPABASE_KEY is missing."
-                )
-            
-            sb_client = create_client(settings.supabase_url, settings.supabase_key)
-            # This calls the Supabase Auth API, which natively verifies its own tokens
-            user_resp = sb_client.auth.get_user(token)
-            if not user_resp or not user_resp.user:
-                raise jwt.InvalidTokenError("Supabase rejected the token")
-                
-            # Construct a fake payload to match the downstream logic
-            # Extract basic info from the unverified token to populate our User model
-            payload = jwt.decode(token, options={"verify_signature": False})
-        
-        user_id = payload.get("sub")
-        if not user_id:
+
+        sb_client = create_client(settings.supabase_url, settings.supabase_key)
+        user_resp = sb_client.auth.get_user(token)
+
+        if not user_resp or not user_resp.user:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token payload missing required 'sub' claim"
+                detail="Invalid authentication token"
             )
-            
+
+        user = user_resp.user
         return User(
-            id=user_id,
-            email=payload.get("email"),
-            role=payload.get("role")
+            id=user.id,
+            email=user.email,
+            role=user.role or "authenticated"
         )
-        
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token has expired"
-        )
-    except jwt.InvalidTokenError as e:
-        logging.warning(f"JWT validation failed: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid authentication token"
-        )
+
+    except HTTPException:
+        raise
     except Exception as e:
-        # Check if it's a Supabase AuthApiError dynamically to avoid hard importing if possible,
-        # or catch it directly:
         error_type = type(e).__name__
         if error_type == 'AuthApiError':
             logging.warning(f"Supabase API rejected token: {e}")
@@ -102,8 +71,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Security(
 async def require_super_admin(user: User = Depends(get_current_user)) -> User:
     """
     FastAPI Dependency that rejects any request not from a super_admin.
-    The role comes from the JWT, which is signed by Supabase's JWT secret.
-    It cannot be forged — the profiles.role column is the source of truth.
+    The role comes from Supabase Auth — validated server-side via API.
+    The profiles.role column is the source of truth.
     
     Usage in route: async def admin_route(user: User = Depends(require_super_admin)):
     """

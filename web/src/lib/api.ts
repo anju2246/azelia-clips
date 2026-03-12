@@ -55,8 +55,8 @@ export interface SettingsResponse {
   anthropic_model?: string;
   gcp_project_id?: string;
   vertex_model?: string;
-  supabase_url?: string;
-  supabase_key?: string;
+  transcript_supabase_url?: string;
+  transcript_supabase_key?: string;
   generate_teasers?: boolean;
 }
 
@@ -72,8 +72,8 @@ export interface UpdateSettingsRequest {
   anthropic_model?: string;
   gcp_project_id?: string;
   vertex_model?: string;
-  supabase_url?: string;
-  supabase_key?: string;
+  transcript_supabase_url?: string;
+  transcript_supabase_key?: string;
   generate_teasers?: boolean;
 }
 
