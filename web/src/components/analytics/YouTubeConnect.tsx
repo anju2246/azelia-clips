@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Youtube, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
+import { RetroactiveSyncModal } from './RetroactiveSyncModal';
 
 interface YouTubeStatus {
     connected: boolean;
@@ -44,6 +45,7 @@ export const YouTubeConnect: React.FC = () => {
     const [accessToken, setAccessToken] = useState<string | null>(null);
     const [showChannelPicker, setShowChannelPicker] = useState(false);
     const [manualHandle, setManualHandle] = useState('');
+    const [showRetroactiveModal, setShowRetroactiveModal] = useState(false);
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
@@ -65,6 +67,10 @@ export const YouTubeConnect: React.FC = () => {
                 setStatus(data);
                 if (data.connected && data.total_shorts > 0) {
                     loadInsights();
+                    // NEW: Automatically sync in the background so the user doesn't have to click
+                    fetchWithAuth('/analytics/youtube/auto-sync', { method: 'POST' })
+                        .then(r => { if (r.ok) { loadInsights(); } })
+                        .catch(e => console.error("Auto-sync failed", e));
                 }
             }
         } catch (e) { /* not connected */ }
@@ -83,7 +89,9 @@ export const YouTubeConnect: React.FC = () => {
 
     const handleConnect = async () => {
         try {
-            const redirectUri = window.location.origin + '/dashboard/intelligence';
+            // Google OAuth requires exact string matching for redirect URIs, and generally prefers localhost over IPs.
+            const baseOrigin = window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost');
+            const redirectUri = baseOrigin + '/dashboard/intelligence';
             const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`);
 
             if (!res.ok) {
@@ -103,7 +111,8 @@ export const YouTubeConnect: React.FC = () => {
         const toastId = toast.loading('Connecting your YouTube channel...');
 
         try {
-            const redirectUri = window.location.origin + '/dashboard/intelligence';
+            const baseOrigin = window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost');
+            const redirectUri = baseOrigin + '/dashboard/intelligence';
             const res = await fetchWithAuth('/analytics/youtube/sync-with-code', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -141,6 +150,7 @@ export const YouTubeConnect: React.FC = () => {
                 last_synced: new Date().toISOString()
             });
             await loadInsights();
+            setTimeout(() => setShowRetroactiveModal(true), 1500);
         } catch (error: any) {
             toast.error(error.message || 'Connection failed', { id: toastId });
         } finally {
@@ -175,6 +185,7 @@ export const YouTubeConnect: React.FC = () => {
                 last_synced: new Date().toISOString()
             });
             await loadInsights();
+            setTimeout(() => setShowRetroactiveModal(true), 1500);
         } catch (error: any) {
             toast.error(error.message || 'Sync failed', { id: toastId });
         } finally {
@@ -354,6 +365,12 @@ export const YouTubeConnect: React.FC = () => {
 
             {/* Insights */}
             {insights && insights.total_shorts > 0 && <YouTubeInsightsView insights={insights} />}
+            
+            <RetroactiveSyncModal 
+                isOpen={showRetroactiveModal}
+                onClose={() => setShowRetroactiveModal(false)}
+                onSuccess={() => setShowRetroactiveModal(false)}
+            />
         </div>
     );
 };

@@ -2,8 +2,9 @@ import React, { useEffect, useState } from 'react';
 import { SettingsApi, type UpdateSettingsRequest } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import { DirectoryPicker } from '../settings/DirectoryPicker';
-import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRight, CheckCircle2, User, Target, BarChart, Youtube, Link as LinkIcon, Shield } from 'lucide-react';
+import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRight, ArrowLeft, CheckCircle2, User, Target, BarChart, Youtube, Link as LinkIcon, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { RetroactiveSyncModal } from '../analytics/RetroactiveSyncModal';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
@@ -19,24 +20,45 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 }
 
 export const OnboardingWizard: React.FC = () => {
-    const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
+    const [step, setStep] = useState<1 | 2 | 3 | 4>(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('az_onboard_step');
+            if (saved) return parseInt(saved) as 1 | 2 | 3 | 4;
+        }
+        return 1;
+    });
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [showDirPicker, setShowDirPicker] = useState(false);
 
     // Core settings
     const [formData, setFormData] = useState<Partial<UpdateSettingsRequest>>({});
-    const [expandedProvider, setExpandedProvider] = useState<string | null>('groq');
+
+    // New Model-Centric Selection
+    const [selectedModelId, setSelectedModelId] = useState<string>('');
 
     // Strategic Profiling (Step 2)
-    const [profile, setProfile] = useState({
-        content_niche: '',
-        user_role: '',
-        primary_goal: ''
+    const [profile, setProfile] = useState(() => {
+        if (typeof window !== 'undefined') {
+            const saved = localStorage.getItem('az_onboard_profile');
+            if (saved) return JSON.parse(saved);
+        }
+        return {
+            content_niche: '',
+            user_role: '',
+            primary_goal: '',
+            region: '',
+            episode_format: ''
+        };
     });
 
     // Telemetry (Step 3) - Opt-in: default OFF, user must explicitly enable
-    const [telemetry, setTelemetry] = useState(false);
+    const [telemetry, setTelemetry] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('az_onboard_telemetry') === 'true';
+        }
+        return false;
+    });
 
     // Terms & Conditions
     const [acceptedTerms, setAcceptedTerms] = useState(false);
@@ -49,44 +71,53 @@ export const OnboardingWizard: React.FC = () => {
     const [ytAccessToken, setYtAccessToken] = useState<string | null>(null);
     const [ytShowPicker, setYtShowPicker] = useState(false);
     const [ytManualHandle, setYtManualHandle] = useState('');
+    const [showRetroactiveModal, setShowRetroactiveModal] = useState(false);
 
-    const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, models: { id: string, label: string }[] }> = {
-        'groq': {
-            name: 'Groq (Llama)', desc: 'Extremely fast inference', field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...',
+    // AI Provider config — selected provider
+    const [selectedProvider, setSelectedProvider] = useState<string>('');
+
+    const PROVIDERS: Record<string, { name: string, desc: string, color: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, keyUrl: string, models: { id: string, label: string, badge?: string }[] }> = {
+        'anthropic': {
+            name: 'Anthropic (Claude)', desc: 'Excelente para curación de contenido', color: 'border-orange-500/50 bg-orange-500/10',
+            field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...',
+            keyUrl: 'https://console.anthropic.com/settings/keys',
             models: [
-                { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
-                { id: "meta-llama/llama-4-maverick-17b-128e-instruct", label: "Llama 4 Maverick 17B" },
-                { id: "llama-3.1-70b-versatile", label: "Llama 3.1 70B Versatile" },
-                { id: "deepseek-r1-distill-llama-70b", label: "DeepSeek R1 Distill 70B 💎" }
+                { id: "claude-opus-4-6-20260204", label: "Claude Opus 4.6" },
+                { id: "claude-sonnet-4-6-20250514", label: "Claude Sonnet 4.6" },
             ]
         },
         'openai': {
-            name: 'OpenAI (GPT)', desc: 'High quality reasoning', field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...',
+            name: 'OpenAI (GPT)', desc: 'Razonamiento de alta calidad', color: 'border-green-500/50 bg-green-500/10',
+            field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...',
+            keyUrl: 'https://platform.openai.com/api-keys',
             models: [
-                { id: "gpt-5.1", label: "GPT-5.1 (2026)" },
-                { id: "gpt-5-mini", label: "GPT-5 mini" },
-                { id: "gpt-4o-2025-xx-xx", label: "GPT-4o latest 2026" }
+                { id: "gpt-5.4-pro", label: "GPT-5.4 Pro" },
+                { id: "gpt-5.4", label: "GPT-5.4" },
+                { id: "gpt-5.3-chat", label: "GPT-5.3 Chat" },
             ]
         },
-        'anthropic': {
-            name: 'Anthropic (Claude)', desc: 'Excellent nuance for curation', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...',
+        'groq': {
+            name: 'Groq (Llama)', desc: 'Inferencia ultra rapida, gratis limitado', color: 'border-yellow-500/50 bg-yellow-500/10',
+            field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...',
+            keyUrl: 'https://console.groq.com/keys',
             models: [
-                { id: "claude-opus-4-6-20260204", label: "Claude Opus 4.6" },
-                { id: "claude-3.7-sonnet-20260201", label: "Claude 3.7 Sonnet" },
-                { id: "claude-3.5-haiku-latest", label: "Claude 3.5 Haiku" }
+                { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
+                { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },
             ]
         },
         'vertex': {
-            name: 'Vertex AI (GCP)', desc: 'Requires local gcloud auth', field: 'gcp_project_id', modelField: 'vertex_model', ph: 'e.g. ce-video-engine',
+            name: 'Google Cloud (Vertex AI)', desc: 'Requiere gcloud auth local', color: 'border-blue-500/50 bg-blue-500/10',
+            field: 'gcp_project_id', modelField: 'vertex_model', ph: 'mi-proyecto-gcp',
+            keyUrl: 'https://console.cloud.google.com',
             models: [
-                { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
-                { id: "gemini-3.1-flash-exp", label: "Gemini 3.1 Flash" },
-                { id: "claude-opus-4.6", label: "Claude Opus 4.6 (Vertex)" }
+                { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
+                { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite Preview" },
+                { id: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
             ]
         },
     };
 
-    const providerOrder = ['groq', 'openai', 'anthropic', 'vertex'];
+    const providerOrder = ['anthropic', 'openai', 'groq', 'vertex'];
 
     const NICHES = ['Negocios & Emprendimiento', 'Comedia', 'Educación & Ciencia', 'Tecnología', 'True Crime', 'Gaming', 'Salud & Fitness', 'Estilo de Vida'];
     const ROLES = [
@@ -100,12 +131,33 @@ export const OnboardingWizard: React.FC = () => {
         { id: 'save_time', label: 'Ahorrar Tiempo de Edición' },
         { id: 'monetize', label: 'Monetizar / Vender Productos' }
     ];
+    const REGIONS = [
+        { id: 'Mexico', label: 'México' },
+        { id: 'Colombia', label: 'Colombia' },
+        { id: 'Argentina', label: 'Argentina' },
+        { id: 'Spain', label: 'España' },
+        { id: 'USA', label: 'Estados Unidos' },
+        { id: 'Chile', label: 'Chile' },
+        { id: 'Peru', label: 'Perú' },
+    ];
+    const FORMATS = [
+        { id: 'interview', label: 'Entrevista (Host + Invitado)' },
+        { id: 'solo', label: 'Solo / Monólogo' },
+        { id: 'co_host', label: 'Co-hosts (2+ presentadores)' },
+        { id: 'panel', label: 'Panel (3+ participantes)' },
+        { id: 'narrative', label: 'Narrativo / Storytelling' },
+    ];
 
     useEffect(() => {
         const init = async () => {
             try {
                 const existing = await SettingsApi.getSettings();
-                setFormData(existing);
+                const savedForm = localStorage.getItem('az_onboard_form');
+                if (savedForm) {
+                    setFormData({ ...existing, ...JSON.parse(savedForm) });
+                } else {
+                    setFormData(existing);
+                }
             } catch (e) {
                 console.warn("Could not load existing settings", e);
             }
@@ -137,6 +189,17 @@ export const OnboardingWizard: React.FC = () => {
         };
         init();
     }, []);
+    // Save state to localStorage as it changes
+    useEffect(() => {
+        if (typeof window !== 'undefined') {
+            localStorage.setItem('az_onboard_step', String(step));
+            localStorage.setItem('az_onboard_profile', JSON.stringify(profile));
+            localStorage.setItem('az_onboard_telemetry', String(telemetry));
+            if (Object.keys(formData).length > 0) {
+                localStorage.setItem('az_onboard_form', JSON.stringify(formData));
+            }
+        }
+    }, [step, profile, telemetry, formData]);
 
     const handleUpdate = (updates: Partial<UpdateSettingsRequest>) => {
         setFormData(prev => ({ ...prev, ...updates }));
@@ -151,10 +214,14 @@ export const OnboardingWizard: React.FC = () => {
             // 1. Sync Profile to Supabase (Central DB)
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
-                await supabase.from('user_profiles').update({
+                await supabase.from('profiles').update({
                     content_niche: profile.content_niche,
                     user_role: profile.user_role,
-                    primary_goal: profile.primary_goal
+                    primary_goal: profile.primary_goal,
+                    preferences: {
+                        region: profile.region,
+                        episode_format: profile.episode_format,
+                    }
                 }).eq('id', user.id);
             }
 
@@ -169,6 +236,12 @@ export const OnboardingWizard: React.FC = () => {
                     body: JSON.stringify({ enabled: telemetry }),
                 });
             } catch { /* non-critical — telemetry preference saved on next settings visit */ }
+            // 4. Clear local storage checkpoints & mark as complete
+            localStorage.removeItem('az_onboard_step');
+            localStorage.removeItem('az_onboard_profile');
+            localStorage.removeItem('az_onboard_telemetry');
+            localStorage.removeItem('az_onboard_form');
+            localStorage.setItem('az_onboarding_complete', 'true');
 
             toast.success("¡Bienvenido a Azelia Clips!");
             setTimeout(() => {
@@ -184,7 +257,9 @@ export const OnboardingWizard: React.FC = () => {
 
     const handleYouTubeConnect = async () => {
         try {
-            const redirectUri = window.location.origin + '/onboarding';
+            // Google OAuth requires exact string matching for redirect URIs, and generally prefers localhost over IPs.
+            const baseOrigin = window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost');
+            const redirectUri = baseOrigin + '/onboarding';
             const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`);
             if (!res.ok) throw new Error('Failed to start authorization');
             const { url } = await res.json();
@@ -198,7 +273,8 @@ export const OnboardingWizard: React.FC = () => {
         setYtConnecting(true);
         const toastId = toast.loading('Connecting YouTube...');
         try {
-            const redirectUri = window.location.origin + '/onboarding';
+            const baseOrigin = window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost');
+            const redirectUri = baseOrigin + '/onboarding';
             const res = await fetchWithAuth('/analytics/youtube/sync-with-code', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -368,6 +444,7 @@ export const OnboardingWizard: React.FC = () => {
                                 onClose={() => setShowDirPicker(false)}
                             />
                         </div>
+
                     </div>
 
                     <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
@@ -431,10 +508,42 @@ export const OnboardingWizard: React.FC = () => {
                                 {NICHES.map(n => <option key={n} value={n} className="bg-zinc-900">{n}</option>)}
                             </select>
                         </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Región Principal</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                                {REGIONS.map(r => (
+                                    <button
+                                        key={r.id}
+                                        onClick={() => setProfile({ ...profile, region: r.id })}
+                                        className={`px-4 py-3 rounded-xl border text-center text-sm transition-all ${profile.region === r.id ? 'bg-brand-500/20 border-brand-500 text-white' : 'bg-black/20 border-white/5 hover:border-white/20 text-zinc-400'}`}
+                                    >
+                                        {r.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Formato de Episodio</label>
+                            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                                {FORMATS.map(f => (
+                                    <button
+                                        key={f.id}
+                                        onClick={() => setProfile({ ...profile, episode_format: f.id })}
+                                        className={`px-4 py-3 rounded-xl border text-center text-sm transition-all ${profile.episode_format === f.id ? 'bg-brand-500/20 border-brand-500 text-white' : 'bg-black/20 border-white/5 hover:border-white/20 text-zinc-400'}`}
+                                    >
+                                        {f.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
 
                     <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
-                        <button onClick={handlePrev} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">Atrás</button>
+                        <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
+                            <ArrowLeft className="w-4 h-4" /> Atrás
+                        </button>
                         <button onClick={handleNext} disabled={!profile.user_role || !profile.primary_goal || !profile.content_niche} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all disabled:opacity-50">
                             Siguiente <ArrowRight className="w-4 h-4" />
                         </button>
@@ -536,7 +645,9 @@ export const OnboardingWizard: React.FC = () => {
                     </div>
 
                     <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
-                        <button onClick={handlePrev} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">Atrás</button>
+                        <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
+                            <ArrowLeft className="w-4 h-4" /> Atrás
+                        </button>
                         <button onClick={handleNext} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all">
                             Siguiente <ArrowRight className="w-4 h-4" />
                         </button>
@@ -560,46 +671,94 @@ export const OnboardingWizard: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="space-y-3 mt-6 relative z-20">
-                        {providerOrder.map((providerId) => {
-                            const config = PROVIDERS[providerId];
-                            if (!config) return null;
-                            const isExpanded = expandedProvider === providerId;
-                            // @ts-ignore
-                            const hasValue = !!formData[config.field];
+                    <div className="space-y-4 mt-6 relative z-20">
+                        <div className="bg-black/40 border border-white/10 rounded-2xl p-6">
+                            {/* Dropdown 1: Provider */}
+                            <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 block">Proveedor de IA</label>
+                            <select
+                                value={selectedProvider}
+                                onChange={(e) => { setSelectedProvider(e.target.value); setSelectedModelId(''); }}
+                                className="w-full bg-zinc-900 border border-white/20 rounded-xl px-4 py-3 text-white appearance-none focus:border-brand-500 outline-none hover:border-white/30 transition-all font-medium text-sm"
+                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23A1A1AA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem top 50%', backgroundSize: '0.65rem auto' }}
+                            >
+                                <option value="" disabled>Selecciona un proveedor...</option>
+                                {providerOrder.map(key => (
+                                    <option key={key} value={key} className="bg-zinc-900">{PROVIDERS[key].name}</option>
+                                ))}
+                            </select>
+                            <p className="text-xs text-zinc-500 mt-1.5">{selectedProvider ? PROVIDERS[selectedProvider].desc : ''}</p>
 
-                            return (
-                                <div key={providerId} className={`border transition-all duration-300 rounded-xl overflow-hidden ${isExpanded ? 'bg-zinc-800/50 border-white/20' : 'bg-black/20 border-white/5 hover:border-white/10 cursor-pointer'}`}>
-                                    <div className="h-16 px-4 flex items-center justify-between" onClick={() => !isExpanded && setExpandedProvider(providerId)}>
-                                        <div className="flex items-center gap-3">
-                                            {isExpanded ? <ChevronDown className="w-5 h-5 text-brand-400" /> : <ChevronRight className="w-5 h-5 text-zinc-500" />}
-                                            <div>
-                                                <div className="font-medium text-white flex items-center gap-2">{config.name} {hasValue && !isExpanded && <CheckCircle2 className="w-4 h-4 text-green-500" />}</div>
-                                                <div className="text-xs text-zinc-500">{config.desc}</div>
-                                            </div>
-                                        </div>
-                                    </div>
-
-                                    {isExpanded && (
-                                        <div className="p-4 pt-0 space-y-4 border-t border-white/5 mt-2">
-                                            <div>
-                                                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider">Secret API Key</label>
-                                                <div className="relative mt-2">
-                                                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Key className="h-4 w-4 text-zinc-600" /></div>
-                                                    <input type="password" value={(formData[config.field as keyof UpdateSettingsRequest] as string) || ''} onChange={(e) => handleUpdate({ [config.field]: e.target.value })} placeholder={config.ph} className="w-full bg-black/40 border border-white/10 rounded-lg pl-10 pr-4 py-2 text-sm text-zinc-200 placeholder-zinc-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 font-mono transition-all" />
-                                                </div>
-                                            </div>
-                                            <div>
-                                                <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 block">Selecciona el Modelo</label>
-                                                <select value={(formData[config.modelField as keyof UpdateSettingsRequest] as string) || config.models[0].id} onChange={(e) => handleUpdate({ [config.modelField]: e.target.value })} className="w-full bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm text-zinc-200 focus:outline-none focus:border-brand-500 transition-all font-mono appearance-none" style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23A1A1AA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 0.7rem top 50%', backgroundSize: '0.65rem auto' }}>
-                                                    {config.models.map(model => <option key={model.id} value={model.id} className="bg-zinc-900">{model.label}</option>)}
-                                                </select>
-                                            </div>
-                                        </div>
-                                    )}
+                            {/* Dropdown 2: Model (appears after provider selection) */}
+                            {selectedProvider && (
+                                <div className="mt-5 animate-in fade-in slide-in-from-top-2 duration-300">
+                                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 block">Modelo</label>
+                                    <select
+                                        value={selectedModelId}
+                                        onChange={(e) => {
+                                            const id = e.target.value;
+                                            setSelectedModelId(id);
+                                            const p = selectedProvider;
+                                            if (p === 'openai') handleUpdate({ openai_model: id });
+                                            else if (p === 'anthropic') handleUpdate({ anthropic_model: id });
+                                            else if (p === 'vertex') handleUpdate({ vertex_model: id });
+                                            else if (p === 'groq') handleUpdate({ groq_model: id });
+                                        }}
+                                        className="w-full bg-zinc-900 border border-white/20 rounded-xl px-4 py-3 text-white appearance-none focus:border-brand-500 outline-none hover:border-white/30 transition-all font-medium text-sm"
+                                        style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23A1A1AA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem top 50%', backgroundSize: '0.65rem auto' }}
+                                    >
+                                        <option value="" disabled>Selecciona un modelo...</option>
+                                        {PROVIDERS[selectedProvider].models.map(m => (
+                                            <option key={m.id} value={m.id} className="bg-zinc-900">{m.label}</option>
+                                        ))}
+                                    </select>
                                 </div>
-                            );
-                        })}
+                            )}
+
+                            {/* API Key Input (appears after model selection) */}
+                            {selectedModelId && selectedProvider && (
+                                <div className="mt-5 pt-5 border-t border-white/10 animate-in fade-in slide-in-from-top-2">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <label className="text-xs font-semibold text-brand-300 uppercase tracking-wider">
+                                            {selectedProvider === 'vertex' ? 'GCP Project ID' : 'API Key'}
+                                        </label>
+                                        <a
+                                            href={PROVIDERS[selectedProvider].keyUrl}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                            className="text-[10px] text-zinc-500 hover:text-white underline underline-offset-2 flex items-center gap-1"
+                                        >
+                                            Obtener llave <ArrowRight className="w-3 h-3" />
+                                        </a>
+                                    </div>
+                                    <div className="relative">
+                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                                            <Key className="h-4 w-4 text-zinc-500" />
+                                        </div>
+                                        <input
+                                            type="password"
+                                            value={
+                                                (selectedProvider === 'openai' ? formData.openai_api_key :
+                                                    selectedProvider === 'anthropic' ? formData.anthropic_api_key :
+                                                        selectedProvider === 'vertex' ? formData.gcp_project_id :
+                                                            formData.groq_api_key) || ''
+                                            }
+                                            onChange={(e) => {
+                                                const val = e.target.value;
+                                                if (selectedProvider === 'openai') handleUpdate({ openai_api_key: val, ai_provider_order: ['openai', 'groq', 'anthropic', 'vertex'] });
+                                                else if (selectedProvider === 'anthropic') handleUpdate({ anthropic_api_key: val, ai_provider_order: ['anthropic', 'groq', 'openai', 'vertex'] });
+                                                else if (selectedProvider === 'vertex') handleUpdate({ gcp_project_id: val, ai_provider_order: ['vertex', 'groq', 'openai', 'anthropic'] });
+                                                else handleUpdate({ groq_api_key: val, ai_provider_order: ['groq', 'openai', 'anthropic', 'vertex'] });
+                                            }}
+                                            placeholder={PROVIDERS[selectedProvider].ph}
+                                            className="w-full bg-black/60 border border-white/10 hover:border-white/20 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-200 placeholder-zinc-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 font-mono transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]"
+                                        />
+                                    </div>
+                                    <p className="text-xs text-zinc-500 mt-3 leading-relaxed">
+                                        Se guarda en tu <code className="text-zinc-400">.env</code> local — nunca sale de tu máquina.
+                                    </p>
+                                </div>
+                            )}
+                        </div>
                     </div>
 
                     <div className="flex flex-col gap-4 pt-6 border-t border-white/10 mt-6">
@@ -621,7 +780,9 @@ export const OnboardingWizard: React.FC = () => {
                         </label>
 
                         <div className="flex items-center justify-between">
-                            <button onClick={handlePrev} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">Atrás</button>
+                            <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
+                                <ArrowLeft className="w-4 h-4" /> Atrás
+                            </button>
                             <div className="flex flex-col items-end gap-1">
                                 <button
                                     onClick={handleFinish}
@@ -640,6 +801,12 @@ export const OnboardingWizard: React.FC = () => {
                     </div>
                 </div>
             )}
+            
+            <RetroactiveSyncModal 
+                isOpen={showRetroactiveModal}
+                onClose={() => setShowRetroactiveModal(false)}
+                onSuccess={() => setShowRetroactiveModal(false)}
+            />
         </div>
     );
 };

@@ -10,6 +10,8 @@ from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 
 from packages.clips.curation.models import CuratedClip
 
+console = Console()
+
 
 @dataclass
 class ExtractedClip:

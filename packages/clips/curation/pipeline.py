@@ -3,7 +3,7 @@ from typing import List
 from rich.console import Console
 
 from packages.clips.transcription.transcriber import Transcript
-from packages.clips.curation.models import CuratedClip
+from packages.clips.curation.models import CuratedClip, CurationConfig
 from packages.clips.curation.agents.finder import FinderAgent
 from packages.clips.curation.agents.critic import CriticAgent
 from packages.clips.curation.agents.ranker import RankerAgent
@@ -93,14 +93,20 @@ class CurationPipeline:
         guest_name: str = "",
         podcast_name: str = "Podcast",
         progress_callback=None,
-        pause_callback=None
+        pause_callback=None,
+        config: CurationConfig = None,
     ) -> List[CuratedClip]:
         
         console.print(f"\n[blue]🧠[/blue] Multi-Agent Pipeline (Phase 2 Architecture)")
         
-        # 1. FINDER
+        # Build config with LI patterns if not provided
+        if config is None:
+            config = CurationConfig(podcast_name=podcast_name)
+        
+        # 1. FINDER (config carries LI intelligence_addendum)
         candidates = self.finder.find_candidates(
-            transcript, min_duration, max_duration, progress_callback, pause_callback
+            transcript, min_duration, max_duration, config=config,
+            progress_callback=progress_callback, pause_callback=pause_callback
         )
         if not candidates:
             console.print("[yellow]Phase 1 (Finder) found no candidates.[/yellow]")

@@ -1,7 +1,8 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
 import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2, BarChart3, Shield } from 'lucide-react';
 import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '../../lib/api';
 import { DirectoryPicker } from './DirectoryPicker';
+import { useAIModels } from '../../hooks/useAIModels';
 import toast, { Toaster } from 'react-hot-toast';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
@@ -22,38 +23,32 @@ export const SettingsForm: React.FC = () => {
     const [telemetryEnabled, setTelemetryEnabled] = useState(false);
     const [telemetryLoading, setTelemetryLoading] = useState(false);
 
-    const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, models: { id: string, label: string }[] }> = {
+    // OpenRouter dynamic models
+    const { groupedModels, loading: modelsLoading } = useAIModels();
+
+    const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, orProvider: 'meta' | 'openai' | 'anthropic' | 'google', fallbackModels: { id: string, label: string }[] }> = {
         'groq': {
-            name: 'Groq (Llama 3.3)', desc: 'Extremely fast inference', field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...',
-            models: [
-                { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
-                { id: "meta-llama/llama-4-maverick-17b-128e-instruct", label: "Llama 4 Maverick 17B" },
-                { id: "llama-3.1-70b-versatile", label: "Llama 3.1 70B Versatile" },
-                { id: "deepseek-r1-distill-llama-70b", label: "DeepSeek R1 Distill 70B 💎" }
+            name: 'Groq (Llama 3.3)', desc: 'Extremely fast inference', field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...', orProvider: 'meta',
+            fallbackModels: [
+                { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B Instruct" }
             ]
         },
         'openai': {
-            name: 'OpenAI (GPT-4 / 5)', desc: 'High quality reasoning', field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...',
-            models: [
-                { id: "gpt-5.1", label: "GPT-5.1 (2026)" },
-                { id: "gpt-5-mini", label: "GPT-5 mini" },
-                { id: "gpt-4o-2025-xx-xx", label: "GPT-4o latest 2026" }
+            name: 'OpenAI (GPT-4 / 5)', desc: 'High quality reasoning', field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...', orProvider: 'openai',
+            fallbackModels: [
+                { id: "openai/gpt-4o", label: "GPT-4o" }
             ]
         },
         'anthropic': {
-            name: 'Anthropic (Claude)', desc: 'Excellent nuance for curation', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...',
-            models: [
-                { id: "claude-opus-4-6-20260204", label: "Claude Opus 4.6" },
-                { id: "claude-3.7-sonnet-20260201", label: "Claude 3.7 Sonnet" },
-                { id: "claude-3.5-haiku-latest", label: "Claude 3.5 Haiku" }
+            name: 'Anthropic (Claude)', desc: 'Excellent nuance for curation', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...', orProvider: 'anthropic',
+            fallbackModels: [
+                { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet" }
             ]
         },
         'vertex': {
-            name: 'Vertex AI (GCP)', desc: 'Requires local gcloud auth', field: 'gcp_project_id', modelField: 'vertex_model', ph: 'e.g. ce-video-engine',
-            models: [
-                { id: "gemini-3.1-pro", label: "Gemini 3.1 Pro" },
-                { id: "gemini-3.1-flash-exp", label: "Gemini 3.1 Flash" },
-                { id: "claude-opus-4.6", label: "Claude Opus 4.6 (Vertex)" }
+            name: 'Vertex AI (GCP)', desc: 'Requires local gcloud auth', field: 'gcp_project_id', modelField: 'vertex_model', ph: 'e.g. ce-video-engine', orProvider: 'google',
+            fallbackModels: [
+                { id: "google/gemini-pro-1.5", label: "Gemini 1.5 Pro" }
             ]
         },
     };
@@ -285,6 +280,12 @@ export const SettingsForm: React.FC = () => {
                             // @ts-ignore
                             const hasValue = !!settings?.[config.field] || !!formData[config.field];
 
+                            // Get dynamic models from OpenRouter, fallback to hardcoded if loading fails
+                            const orGroup = groupedModels.find(g => g.provider === config.orProvider);
+                            const dynamicModels = orGroup && orGroup.models.length > 0
+                                ? orGroup.models.map(m => ({ id: m.id, label: m.name + (m.is_reasoning ? ' 🧠' : '') }))
+                                : config.fallbackModels;
+
                             return (
                                 <div key={providerId} className={`border ${isExpanded ? 'border-brand-500/50 bg-black/40' : 'border-white/5 hover:border-white/10 bg-zinc-900/20'} rounded-xl overflow-hidden transition-all duration-200`}>
                                     <div
@@ -339,21 +340,24 @@ export const SettingsForm: React.FC = () => {
                                                 />
                                             </div>
                                             <div>
-                                                <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">Select Model</label>
+                                                <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1.5 flex justify-between items-center">
+                                                    <span>Select Model</span>
+                                                    {modelsLoading && <Loader2 className="w-3 h-3 text-brand-500 animate-spin" />}
+                                                </label>
                                                 <select
                                                     // @ts-ignore
-                                                    value={formData[config.modelField] ?? settings?.[config.modelField] ?? config.models[0].id}
+                                                    value={formData[config.modelField] ?? settings?.[config.modelField] ?? dynamicModels[0].id}
                                                     // @ts-ignore
                                                     onChange={(e) => { setFormData(prev => ({ ...prev, [config.modelField]: e.target.value })); }}
                                                     className="w-full px-3 py-2 bg-black border border-brand-500/30 rounded-lg focus:outline-none focus:border-brand-500 text-white text-sm cursor-pointer hover:border-brand-500/50 transition-colors"
                                                 >
-                                                    {config.models.map(m => (
+                                                    {dynamicModels.map(m => (
                                                         <option key={m.id} value={m.id} className="bg-zinc-900 border-none">{m.label}</option>
                                                     ))}
                                                 </select>
                                                 <p className="text-[10px] text-zinc-500 mt-1.5 ml-1">
-                                                    // @ts-ignore
-                                                    {config.models.find(m => m.id === (formData[config.modelField] ?? settings?.[config.modelField] ?? config.models[0].id))?.id}
+                                                    {/* @ts-ignore */}
+                                                    {dynamicModels.find(m => m.id === (formData[config.modelField] ?? settings?.[config.modelField] ?? dynamicModels[0].id))?.id}
                                                 </p>
                                             </div>
                                         </div>

@@ -22,6 +22,7 @@ from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
 from server.middleware.auth import require_auth
+from packages.core.auth import User
 from packages.core.db.engine import engine
 from packages.core.db.models import Episode
 from packages.clips.vision.face_tracker import FaceTracker
@@ -54,7 +55,7 @@ async def process_video(
     assemblyai_key: str | None = Form(None),
     supabase_url: str | None = Form(None),
     supabase_key: str | None = Form(None),
-    user: dict = Depends(require_auth)
+    user: User = Depends(require_auth)
 ):
     """Upload a video and start processing."""
     
@@ -86,12 +87,18 @@ async def process_video(
         subtitle_style=subtitle_style
     )
     
-    # Create Transcription Config
+    # Create Transcription Config — auto-fill from settings if user has configured transcript DB
+    t_url = supabase_url or settings.transcript_supabase_url or None
+    t_key = supabase_key or settings.transcript_supabase_key or None
+    effective_source = transcription_source
+    if t_url and t_key and transcription_source == "local_whisper":
+        effective_source = "supabase_custom"
+
     transcription_config = {
-        "source_type": transcription_source,
+        "source_type": effective_source,
         "assemblyai_api_key": assemblyai_key,
-        "supabase_url": supabase_url,
-        "supabase_key": supabase_key
+        "supabase_url": t_url,
+        "supabase_key": t_key
     }
     
     # Initialize Job in Store (Legacy for UI compatibility)
@@ -140,7 +147,7 @@ async def process_video(
 async def process_local_video(
     background_tasks: BackgroundTasks,
     req: ProcessLocalRequest,
-    user: dict = Depends(require_auth)
+    user: User = Depends(require_auth)
 ):
     """Process a video directly from the local file system using the Server-Side Picker."""
     import os
@@ -170,13 +177,20 @@ async def process_local_video(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
         
+    # Auto-fill transcript DB from settings if configured
+    t_url = req.supabase_url or settings.transcript_supabase_url or None
+    t_key = req.supabase_key or settings.transcript_supabase_key or None
+    effective_source = req.transcription_source
+    if t_url and t_key and req.transcription_source == "local_whisper":
+        effective_source = "supabase_custom"
+
     transcription_config = {
-        "source_type": req.transcription_source,
+        "source_type": effective_source,
         "assemblyai_api_key": req.assemblyai_key,
-        "supabase_url": req.supabase_url,
-        "supabase_key": req.supabase_key
+        "supabase_url": t_url,
+        "supabase_key": t_key
     }
-    
+
     # Initialize Job in Store (Legacy for UI compatibility)
     store.create_job(
         job_id=job_id,
@@ -219,7 +233,7 @@ async def process_local_video(
 # ─── Job Status & Clips ─────────────────────────────────────────────────────
 
 @router.get("/jobs/{job_id}", response_model=JobResponse)
-async def get_job(job_id: str, user: dict = Depends(require_auth)):
+async def get_job(job_id: str, user: User = Depends(require_auth)):
     """Get job status."""
     job = store.get_job(job_id)
     if not job:

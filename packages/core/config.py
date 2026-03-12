@@ -32,10 +32,14 @@ class Settings(BaseSettings):
     gcp_location: str = Field(default="us-central1", alias="GCP_LOCATION", description="GCP region")
     vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas", description="Selected Vertex AI model")
 
-    # Supabase
+    # Supabase (Auth — Azelia Central)
     supabase_url: str = Field(default="", description="Supabase project URL")
     supabase_key: str = Field(default="", description="Supabase anon/service key")
     supabase_jwt_secret: str = Field(default="", description="Supabase JWT secret for validating user tokens")
+
+    # Supabase (Transcripts — User's own DB)
+    transcript_supabase_url: str = Field(default="", description="User's Supabase URL for transcripts")
+    transcript_supabase_key: str = Field(default="", description="User's Supabase service key for transcripts")
     
     # Security / API
     allowed_cors_origins: str = Field(

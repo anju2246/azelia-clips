@@ -16,18 +16,14 @@ class User(BaseModel):
 def verify_supabase_jwt(token: str) -> User:
     """
     Verifies a Supabase-issued JWT and returns the parsed User model.
+    If SUPABASE_JWT_SECRET is present, it verifies locally.
+    If missing, it falls back to verifying via the Supabase Auth API.
     """
-    if not settings.supabase_jwt_secret:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Server misconfigured: SUPABASE_JWT_SECRET is missing."
-        )
-
     try:
         header = jwt.get_unverified_header(token)
         alg = header.get("alg", "HS256")
         
-        if alg == "HS256":
+        if alg == "HS256" and settings.supabase_jwt_secret:
             signing_key = settings.supabase_jwt_secret
             payload = jwt.decode(
                 token,
@@ -36,8 +32,7 @@ def verify_supabase_jwt(token: str) -> User:
                 options={"verify_aud": False}
             )
         else:
-            # For ES256/RS256, if JWKS is not available, we can't mathematically verify the signature locally.
-            # We can however ask the Supabase Server if the token is valid by getting the user.
+            # Fallback: Ask Supabase Server if the token is valid by getting the user.
             from supabase import create_client
             if not settings.supabase_url or not settings.supabase_key:
                 raise HTTPException(
@@ -46,7 +41,7 @@ def verify_supabase_jwt(token: str) -> User:
                 )
             
             sb_client = create_client(settings.supabase_url, settings.supabase_key)
-            # This calls the Supabase Auth API, which natively verifies its own ES256 tokens
+            # This calls the Supabase Auth API, which natively verifies its own tokens
             user_resp = sb_client.auth.get_user(token)
             if not user_resp or not user_resp.user:
                 raise jwt.InvalidTokenError("Supabase rejected the token")
@@ -80,7 +75,16 @@ def verify_supabase_jwt(token: str) -> User:
             detail="Invalid authentication token"
         )
     except Exception as e:
-        logging.error(f"Auth error: {type(e).__name__}: {e}")
+        # Check if it's a Supabase AuthApiError dynamically to avoid hard importing if possible,
+        # or catch it directly:
+        error_type = type(e).__name__
+        if error_type == 'AuthApiError':
+            logging.warning(f"Supabase API rejected token: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Supabase rejected the authentication token"
+            )
+        logging.error(f"Auth error: {error_type}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal auth error"
@@ -99,7 +103,7 @@ async def require_super_admin(user: User = Depends(get_current_user)) -> User:
     """
     FastAPI Dependency that rejects any request not from a super_admin.
     The role comes from the JWT, which is signed by Supabase's JWT secret.
-    It cannot be forged — the user_profiles.role column is the source of truth.
+    It cannot be forged — the profiles.role column is the source of truth.
     
     Usage in route: async def admin_route(user: User = Depends(require_super_admin)):
     """

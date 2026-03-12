@@ -2,15 +2,63 @@
 Server Routes — Application Settings
 """
 
+import os
+import sys
 from pathlib import Path
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 
 from server.models import SettingsResponse, UpdateSettingsRequest
 from packages.core.config import settings
 from server.middleware.auth import require_auth
+from packages.core.auth import User
 
 router = APIRouter()
+
+
+def _get_allowed_roots() -> list[Path]:
+    """Platform-aware allowed roots for filesystem browsing."""
+    home = Path(os.path.expanduser("~")).resolve()
+    roots = [home]
+
+    if sys.platform == "darwin":
+        volumes = Path("/Volumes")
+        if volumes.exists():
+            roots.append(volumes.resolve())
+    elif sys.platform == "linux":
+        for mount in ["/mnt", "/media", "/run/media"]:
+            p = Path(mount)
+            if p.exists():
+                roots.append(p.resolve())
+    elif sys.platform == "win32":
+        import string
+        for letter in string.ascii_uppercase:
+            drive = Path(f"{letter}:\\")
+            if drive.exists():
+                roots.append(drive)
+
+    return roots
+
+
+API_KEY_PREFIXES = {
+    "groq_api_key": ("gsk_", "Groq keys start with 'gsk_'"),
+    "openai_api_key": ("sk-", "OpenAI keys start with 'sk-'"),
+    "anthropic_api_key": ("sk-ant-", "Anthropic keys start with 'sk-ant-'"),
+}
+
+
+def _validate_api_key(field: str, value: str) -> str | None:
+    """Validate API key format. Returns error message or None."""
+    if not value or not value.strip():
+        return None  # Empty is OK (clearing a key)
+    value = value.strip()
+    if len(value) < 10:
+        return f"API key too short (got {len(value)} chars)"
+    if field in API_KEY_PREFIXES:
+        prefix, msg = API_KEY_PREFIXES[field]
+        if not value.startswith(prefix):
+            return msg
+    return None
 
 
 def mask_key(key: str) -> str:
@@ -20,12 +68,12 @@ def mask_key(key: str) -> str:
 
 
 @router.get("/settings", response_model=SettingsResponse)
-async def get_settings(user: dict = Depends(require_auth)):
+async def get_settings(user: User = Depends(require_auth)):
     """Get current application settings."""
     provider_order = [p.strip() for p in settings.ai_provider_order.split(',')] if settings.ai_provider_order else ["groq", "openai", "anthropic", "vertex"]
     return SettingsResponse(
-        podcast_name=settings.podcast_name,
-        podcast_dir=str(settings.podcast_dir),
+        podcast_name=settings.podcast_name or "",
+        podcast_dir=str(settings.podcast_dir) if settings.podcast_dir else "",
         ai_provider_order=provider_order,
         groq_api_key=mask_key(settings.groq_api_key),
         groq_model=settings.groq_model,
@@ -37,14 +85,28 @@ async def get_settings(user: dict = Depends(require_auth)):
         vertex_model=settings.vertex_model,
         supabase_url=settings.supabase_url,
         supabase_key=mask_key(settings.supabase_key),
+        transcript_supabase_url=settings.transcript_supabase_url,
+        transcript_supabase_key=mask_key(settings.transcript_supabase_key),
         generate_teasers=settings.generate_teasers
     )
 
 @router.post("/settings", response_model=SettingsResponse)
-async def update_settings(req: UpdateSettingsRequest):
+async def update_settings(req: UpdateSettingsRequest, user: User = Depends(require_auth)):
     """Update settings in .env file."""
+    # Validate API keys before saving
+    validation_errors = []
+    for field in ["groq_api_key", "openai_api_key", "anthropic_api_key"]:
+        value = getattr(req, field, None)
+        if value is not None:
+            error = _validate_api_key(field, value)
+            if error:
+                validation_errors.append(f"{field}: {error}")
+
+    if validation_errors:
+        raise HTTPException(status_code=422, detail="; ".join(validation_errors))
+
     env_path = Path(".env")
-    
+
     # Read existing env
     env_content = {}
     if env_path.exists():
@@ -53,7 +115,7 @@ async def update_settings(req: UpdateSettingsRequest):
                 if "=" in line and not line.startswith("#"):
                     key, val = line.strip().split("=", 1)
                     env_content[key] = val
-    
+
     # Update values
     if req.podcast_name:
         env_content["PODCAST_NAME"] = req.podcast_name
@@ -108,6 +170,14 @@ async def update_settings(req: UpdateSettingsRequest):
         env_content["SUPABASE_KEY"] = req.supabase_key
         settings.supabase_key = req.supabase_key
         
+    if req.transcript_supabase_url is not None:
+        env_content["TRANSCRIPT_SUPABASE_URL"] = req.transcript_supabase_url
+        settings.transcript_supabase_url = req.transcript_supabase_url
+
+    if req.transcript_supabase_key is not None:
+        env_content["TRANSCRIPT_SUPABASE_KEY"] = req.transcript_supabase_key
+        settings.transcript_supabase_key = req.transcript_supabase_key
+
     if req.generate_teasers is not None:
         env_content["GENERATE_TEASERS"] = str(req.generate_teasers).lower()
         settings.generate_teasers = req.generate_teasers
@@ -126,14 +196,12 @@ async def browse_directory(path: str = "~"):
     Browse directories on the local filesystem.
     Used by the Settings UI to pick a podcast directory with full absolute paths.
     """
-    import os
-
     # Expand ~ and resolve
     target = Path(os.path.expanduser(path)).resolve()
 
     # Security: restrict browsing to user home and external drives
     home = Path(os.path.expanduser("~")).resolve()
-    allowed_roots = [home, Path("/Volumes").resolve()]
+    allowed_roots = _get_allowed_roots()
     if not any(target.is_relative_to(root) for root in allowed_roots):
         return {"path": str(target), "parent": str(home), "dirs": [], "error": "Access restricted to home directory and external drives"}
 
@@ -169,13 +237,11 @@ async def browse_files(path: str = "~"):
     Browse directories and video files on the local filesystem.
     Used by the Upload manual UI to pick a file without uploading.
     """
-    import os
-
     target = Path(os.path.expanduser(path)).resolve()
 
     # Security: restrict browsing to user home and external drives
     home = Path(os.path.expanduser("~")).resolve()
-    allowed_roots = [home, Path("/Volumes").resolve()]
+    allowed_roots = _get_allowed_roots()
     if not any(target.is_relative_to(root) for root in allowed_roots):
         return {"path": str(target), "parent": str(home), "entries": [], "error": "Access restricted to home directory and external drives"}
 
@@ -235,9 +301,9 @@ async def resolve_path(name: str):
         return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name"}
 
     home = Path(os.path.expanduser("~"))
-    
-    # Search locations: home tree + all mounted volumes
-    search_roots = [str(home), "/Volumes"]
+
+    # Search locations: home tree + platform-specific mount points
+    search_roots = [str(r) for r in _get_allowed_roots()]
     
     matches = []
     try:

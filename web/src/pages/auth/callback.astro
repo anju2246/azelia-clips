@@ -18,12 +18,11 @@ import "../../styles/global.css";
 
             async function handleCallback() {
                 try {
-                    // 1. Extract the code from the URL (PKCE flow)
                     const url = new URL(window.location.href);
-                    const code = url.searchParams.get("code");
 
+                    // 1a. PKCE flow: ?code= in query params (OAuth providers)
+                    const code = url.searchParams.get("code");
                     if (code) {
-                        // Exchange the code for a session
                         const { error } =
                             await supabase.auth.exchangeCodeForSession(code);
                         if (error) {
@@ -34,6 +33,23 @@ import "../../styles/global.css";
                             window.location.replace("/login");
                             return;
                         }
+                    }
+
+                    // 1b. Implicit/token flow: #access_token= in hash (email verification)
+                    // Supabase JS client auto-detects hash fragments, but we need to
+                    // give it a moment to process them before checking the session.
+                    if (window.location.hash && window.location.hash.includes("access_token")) {
+                        // Wait for supabase-js to pick up the hash tokens
+                        await new Promise((resolve) => {
+                            const { data: { subscription } } = supabase.auth.onAuthStateChange((event) => {
+                                if (event === "SIGNED_IN" || event === "TOKEN_REFRESHED") {
+                                    subscription.unsubscribe();
+                                    resolve(undefined);
+                                }
+                            });
+                            // Timeout fallback in case the event already fired
+                            setTimeout(() => { subscription.unsubscribe(); resolve(undefined); }, 3000);
+                        });
                     }
 
                     // 2. Check if session is now valid

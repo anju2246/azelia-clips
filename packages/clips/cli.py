@@ -380,6 +380,9 @@ def start(
     from rich.panel import Panel
     from rich.text import Text
     import subprocess
+    import webbrowser
+    import threading
+    import time
     
     AZELIA_ART = """  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
  ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
@@ -423,6 +426,9 @@ def start(
     # Production mode
     if not no_build:
         console.print("[bold blue]🎬 Azelia Clips[/bold blue] — Building frontend...\n")
+        if not (web_dir / "node_modules").exists():
+            console.print("[dim]Installing frontend dependencies...[/dim]")
+            subprocess.run(["npm", "install"], cwd=str(web_dir), capture_output=True, text=True)
         result = subprocess.run(
             ["npm", "run", "build"],
             cwd=str(web_dir),
@@ -441,15 +447,28 @@ def start(
         console.print("[dim]  azelia start[/dim]")
         raise typer.Exit(1)
 
-    console.print(f"[bold blue]🎬 Azelia Clips[/bold blue] — Server running at http://{host}:{port}\n")
+    # Use localhost for clickable link instead of 0.0.0.0
+    display_host = "localhost" if host == "0.0.0.0" else host
+    console.print(f"[bold blue]🎬 Azelia Clips[/bold blue] — Server running at [link=http://{display_host}:{port}]http://{display_host}:{port}[/link]\n")
     console.print("[dim]Press Ctrl+C to stop.[/dim]")
+
+    def open_browser():
+        import urllib.request
+        for _ in range(30):  # Up to 15 seconds
+            time.sleep(0.5)
+            try:
+                urllib.request.urlopen(f"http://localhost:{port}/api/health", timeout=2)
+                webbrowser.open(f"http://{display_host}:{port}")
+                return
+            except Exception:
+                continue
+
+    threading.Thread(target=open_browser, daemon=True).start()
 
     import uvicorn
     uvicorn.run("server.app:app", host=host, port=port)
 
 
-if __name__ == "__main__":
-    app()
 @app.command(name="upload-transcript")
 def upload_transcript_cmd(
     target: Annotated[Path, typer.Argument(help="Transcript JSON file or Episode Folder")],
@@ -511,4 +530,8 @@ def upload_transcript_cmd(
     
     if not success:
         raise typer.Exit(1)
+
+
+if __name__ == "__main__":
+    app()
 

@@ -4,11 +4,16 @@ Reads episodes from external drive, processes through full pipeline,
 and saves clips directly to external drive in organized structure.
 """
 
+from __future__ import annotations
+
 import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from packages.clips.transcription.transcriber import Transcript
 
 from rich.console import Console
 from rich.table import Table
@@ -261,6 +266,18 @@ class BatchProcessor:
             
             curator = CurationPipeline()
             from packages.core.config import settings
+            
+            # Local Intelligence: Fetch user's personalized patterns (ephemeral, in-memory only)
+            from packages.core.services.local_intelligence import local_intelligence
+            from packages.clips.curation.models import CurationConfig
+            li_patterns = local_intelligence.get_user_patterns(self.user_id)
+            
+            curation_config = CurationConfig(
+                podcast_name=settings.podcast_name,
+                high_retention_patterns=li_patterns.get("high_retention_patterns", []),
+                preferred_clip_formats=li_patterns.get("preferred_clip_formats", []),
+            )
+            
             curated_clips = curator.curate(
                 transcript,
                 top_n=None,  # Get ALL clips, not limited to clips_per_episode
@@ -269,7 +286,8 @@ class BatchProcessor:
                 episode_number=episode.episode_number,
                 podcast_name=settings.podcast_name,
                 progress_callback=curation_progress,
-                pause_callback=check_pause
+                pause_callback=check_pause,
+                config=curation_config,
             )
             
             # Save curation results for future re-processing
