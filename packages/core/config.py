@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     groq_api_key_2: str = Field(default="", description="Secondary Groq API key (fallback)")
     hf_token: str = Field(default="", alias="HF_TOKEN", description="HuggingFace token for Pyannote")
     anthropic_api_key: str = Field(default="", description="Anthropic API key for Claude")
-    anthropic_model: str = Field(default="claude-3-7-sonnet-20250219", description="Selected Anthropic model")
+    anthropic_model: str = Field(default="claude-sonnet-4-6", description="Selected Anthropic model")
     openai_api_key: str = Field(default="", description="OpenAI API key for ChatGPT")
     openai_model: str = Field(default="gpt-4o", description="Selected OpenAI model")
 

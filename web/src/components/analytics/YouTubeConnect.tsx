@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Youtube, CheckCircle2, AlertCircle, RefreshCw, Loader2 } from 'lucide-react';
+import { Youtube, CheckCircle2, AlertCircle, RefreshCw, Loader2, Sparkles } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 import { RetroactiveSyncModal } from './RetroactiveSyncModal';
+import { SyncProgressBubble } from './SyncProgressBubble';
 
 interface YouTubeStatus {
     connected: boolean;
@@ -46,13 +47,23 @@ export const YouTubeConnect: React.FC = () => {
     const [showChannelPicker, setShowChannelPicker] = useState(false);
     const [manualHandle, setManualHandle] = useState('');
     const [showRetroactiveModal, setShowRetroactiveModal] = useState(false);
+    const [activeJobId, setActiveJobId] = useState<string | null>(null);
+    const [hasSyncedHistorical, setHasSyncedHistorical] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('az_historical_synced') === 'true';
+        }
+        return false;
+    });
 
     useEffect(() => {
         const urlParams = new URLSearchParams(window.location.search);
         const code = urlParams.get('code');
 
         if (code) {
-            window.history.replaceState({}, '', window.location.pathname);
+            // Remove code from URL to prevent re-triggering on refresh
+            const newUrl = window.location.protocol + "//" + window.location.host + window.location.pathname;
+            window.history.replaceState({ path: newUrl }, '', newUrl);
+            
             handleOAuthCallback(code);
         } else {
             checkStatus();
@@ -67,10 +78,6 @@ export const YouTubeConnect: React.FC = () => {
                 setStatus(data);
                 if (data.connected && data.total_shorts > 0) {
                     loadInsights();
-                    // NEW: Automatically sync in the background so the user doesn't have to click
-                    fetchWithAuth('/analytics/youtube/auto-sync', { method: 'POST' })
-                        .then(r => { if (r.ok) { loadInsights(); } })
-                        .catch(e => console.error("Auto-sync failed", e));
                 }
             }
         } catch (e) { /* not connected */ }
@@ -342,16 +349,30 @@ export const YouTubeConnect: React.FC = () => {
                     </div>
                 </div>
 
-                <div className="z-10 flex gap-3 w-full md:w-auto">
+                <div className="z-10 flex flex-wrap gap-3 w-full md:w-auto justify-end">
                     {status.connected ? (
-                        <button
-                            onClick={handleResync}
-                            disabled={isSyncing}
-                            className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
-                        >
-                            <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
-                            {isSyncing ? 'Syncing...' : 'Re-sync'}
-                        </button>
+                        <div className="flex gap-2 w-full justify-end flex-wrap">
+                            {!hasSyncedHistorical ? (
+                                <button
+                                    onClick={() => setShowRetroactiveModal(true)}
+                                    className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/50 text-brand-300 rounded-xl font-medium transition-colors shadow-lg shadow-brand-500/10 cursor-pointer"
+                                >
+                                    <Sparkles className="w-4 h-4" /> Sync Histórico
+                                </button>
+                            ) : (
+                                <div className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-zinc-800/50 border border-white/10 text-zinc-400 rounded-xl font-medium">
+                                    <CheckCircle2 className="w-4 h-4 text-brand-500" /> Historial Procesado
+                                </div>
+                            )}
+                            <button
+                                onClick={handleResync}
+                                disabled={isSyncing}
+                                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-white rounded-xl font-medium transition-colors disabled:opacity-50"
+                            >
+                                <RefreshCw className={`w-4 h-4 ${isSyncing ? 'animate-spin' : ''}`} />
+                                {isSyncing ? 'Syncing...' : 'Re-sync'}
+                            </button>
+                        </div>
                     ) : (
                         <button
                             onClick={() => { console.log('YT CLICK'); handleConnect(); }}
@@ -369,8 +390,24 @@ export const YouTubeConnect: React.FC = () => {
             <RetroactiveSyncModal 
                 isOpen={showRetroactiveModal}
                 onClose={() => setShowRetroactiveModal(false)}
-                onSuccess={() => setShowRetroactiveModal(false)}
+                onSuccess={(jobId: string) => {
+                    setActiveJobId(jobId);
+                    setHasSyncedHistorical(true);
+                    localStorage.setItem('az_historical_synced', 'true');
+                    setShowRetroactiveModal(false);
+                }}
             />
+
+            {activeJobId && (
+                <SyncProgressBubble
+                    jobId={activeJobId}
+                    onDismiss={() => setActiveJobId(null)}
+                    onComplete={() => {
+                        // Refresh insights when done
+                        loadInsights();
+                    }}
+                />
+            )}
         </div>
     );
 };

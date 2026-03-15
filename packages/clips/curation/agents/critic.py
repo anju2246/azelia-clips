@@ -53,8 +53,13 @@ class CriticAgent:
         )
         
         try:
+            formatted_system_prompt = CRITIC_SYSTEM.format(
+                min_duration=min_duration,
+                max_duration=max_duration
+            )
+            
             response_raw = self._llm.chat(
-                system_prompt=CRITIC_SYSTEM,
+                system_prompt=formatted_system_prompt,
                 user_message=critic_prompt,
                 temperature=self.temperature,
                 response_format=CriticResponse

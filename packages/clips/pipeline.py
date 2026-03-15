@@ -290,10 +290,14 @@ class BatchProcessor:
                 config=curation_config,
             )
             
-            # Save curation results for future re-processing
-            with open(curation_path, "w") as f:
-                json.dump([c.model_dump() for c in curated_clips], f, indent=2, ensure_ascii=False)
-            console.print(f"[dim]   Curation saved to {curation_path.name}[/dim]")
+            # Save curation results for future re-processing ONLY if we found clips
+            # This prevents caching a complete API failure (which returns 0 clips)
+            if curated_clips:
+                with open(curation_path, "w") as f:
+                    json.dump([c.model_dump() for c in curated_clips], f, indent=2, ensure_ascii=False)
+                console.print(f"[dim]   Curation saved to {curation_path.name}[/dim]")
+            else:
+                console.print(f"[yellow]   No clips found, skipping cache save.[/yellow]")
         
         if not curated_clips:
             console.print(f"[yellow]   No clips found for EP{episode.episode_number}[/yellow]")

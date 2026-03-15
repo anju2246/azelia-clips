@@ -5,15 +5,14 @@ import { supabase } from '../../lib/supabase';
 interface RetroactiveSyncModalProps {
     isOpen: boolean;
     onClose: () => void;
-    onSuccess?: () => void;
+    onSuccess?: (jobId: string) => void;
 }
 
-export function RetroactiveSyncModal({ isOpen, onClose, onSuccess }: RetroactiveSyncModalProps) {
+export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOpen, onClose, onSuccess }) => {
     const [loading, setLoading] = useState(false);
     const [estimate, setEstimate] = useState<any>(null);
     const [error, setError] = useState('');
     const [syncing, setSyncing] = useState(false);
-    const [success, setSuccess] = useState(false);
 
     useEffect(() => {
         if (isOpen) {
@@ -59,11 +58,15 @@ export function RetroactiveSyncModal({ isOpen, onClose, onSuccess }: Retroactive
                 }
             });
             
-            if (!res.ok) throw new Error('Fallo la sincronización histórica');
+            if (!res.ok) throw new Error('Falló la sincronización histórica');
             
-            setSuccess(true);
-            if (onSuccess) {
-                setTimeout(onSuccess, 3000); // 3 seconds to read success
+            const data = await res.json();
+            const jobId = data.job_id;
+            
+            // Close modal immediately — progress will be tracked by the bubble
+            onClose();
+            if (onSuccess && jobId) {
+                onSuccess(jobId);
             }
         } catch (err: any) {
             setError(err.message || 'Error procesando videos');
@@ -83,27 +86,12 @@ export function RetroactiveSyncModal({ isOpen, onClose, onSuccess }: Retroactive
                 
                 <div className="p-8 relative">
                     <div className="w-12 h-12 bg-brand-500/20 text-brand-400 rounded-xl flex items-center justify-center mb-6 border border-brand-500/30">
-                        {success ? <CheckCircle2 className="w-7 h-7" /> : <BrainCircuit className="w-7 h-7" />}
+                        <BrainCircuit className="w-7 h-7" />
                     </div>
 
-                    {success ? (
-                        <div className="space-y-4 animate-in fade-in">
-                            <h2 className="text-2xl font-bold text-white">¡Histórico Analizado!</h2>
-                            <p className="text-zinc-400">
-                                Tu Dashboard de Inteligencia ha sido nutrido con los patrones de tus videos pasados. Azelia ahora sabe cuál es tu "Línea Base" de éxito.
-                            </p>
-                            <button
-                                onClick={() => { onClose(); if (onSuccess) onSuccess(); }}
-                                className="w-full mt-4 bg-white text-black font-semibold py-3 rounded-xl hover:bg-zinc-200 transition-colors"
-                            >
-                                Continuar
-                            </button>
-                        </div>
-                    ) : (
-                        <>
-                            <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent mb-3">
-                                Nutrir Inteligencia desde el Día 1
-                            </h2>
+                    <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent mb-3">
+                        Nutrir Inteligencia desde el Día 1
+                    </h2>
                             <p className="text-zinc-400 text-sm leading-relaxed mb-6">
                                 Azelia ha detectado tus videos pasados en YouTube. Analicemos tus Shorts anteriores usando <strong>{estimate?.model || 'tu IA'}</strong> para entender inmediatamente qué <em>Hooks</em> y formatos resuenan con tu audiencia.
                             </p>
@@ -131,7 +119,7 @@ export function RetroactiveSyncModal({ isOpen, onClose, onSuccess }: Retroactive
                                     <div className="p-4 bg-black/40 border border-white/5 rounded-xl">
                                         <div className="flex justify-between items-center mb-1">
                                             <span className="text-sm text-zinc-400">Costo Estimado LLM:</span>
-                                            <span className="text-lg font-mono text-emerald-400">${estimate?.estimated_cost_usd?.toFixed(4)} USD</span>
+                                            <span className="text-lg font-mono text-emerald-400">${estimate?.estimated_cost_usd < 0.01 ? '< 0,01' : estimate?.estimated_cost_usd?.toFixed(2).replace('.', ',')} USD</span>
                                         </div>
                                         <div className="text-[10px] text-zinc-600 flex justify-between">
                                             <span>Modelo: {estimate?.model}</span>
@@ -173,8 +161,6 @@ export function RetroactiveSyncModal({ isOpen, onClose, onSuccess }: Retroactive
                                     )}
                                 </div>
                             )}
-                        </>
-                    )}
                 </div>
             </div>
         </div>

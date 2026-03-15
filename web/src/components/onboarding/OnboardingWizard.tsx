@@ -5,6 +5,7 @@ import { DirectoryPicker } from '../settings/DirectoryPicker';
 import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRight, ArrowLeft, CheckCircle2, User, Target, BarChart, Youtube, Link as LinkIcon, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { RetroactiveSyncModal } from '../analytics/RetroactiveSyncModal';
+import { useAIModels } from '../../hooks/useAIModels';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
@@ -73,48 +74,41 @@ export const OnboardingWizard: React.FC = () => {
     const [ytShowPicker, setYtShowPicker] = useState(false);
     const [ytManualHandle, setYtManualHandle] = useState('');
     const [showRetroactiveModal, setShowRetroactiveModal] = useState(false);
+    const [hasSyncedHistorical, setHasSyncedHistorical] = useState(() => {
+        if (typeof window !== 'undefined') {
+            return localStorage.getItem('az_historical_synced') === 'true';
+        }
+        return false;
+    });
 
     // AI Provider config — selected provider
     const [selectedProvider, setSelectedProvider] = useState<string>('');
+    const { groupedModels } = useAIModels();
 
     const PROVIDERS: Record<string, { name: string, desc: string, color: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, keyUrl: string, models: { id: string, label: string, badge?: string }[] }> = {
         'anthropic': {
             name: 'Anthropic (Claude)', desc: 'Excelente para curación de contenido', color: 'border-orange-500/50 bg-orange-500/10',
             field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...',
             keyUrl: 'https://console.anthropic.com/settings/keys',
-            models: [
-                { id: "claude-opus-4-6-20260204", label: "Claude Opus 4.6" },
-                { id: "claude-sonnet-4-6-20250514", label: "Claude Sonnet 4.6" },
-            ]
+            models: groupedModels.find(g => g.provider === 'anthropic')?.models.map(m => ({ id: m.id, label: m.name })) || []
         },
         'openai': {
             name: 'OpenAI (GPT)', desc: 'Razonamiento de alta calidad', color: 'border-green-500/50 bg-green-500/10',
             field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...',
             keyUrl: 'https://platform.openai.com/api-keys',
-            models: [
-                { id: "gpt-5.4-pro", label: "GPT-5.4 Pro" },
-                { id: "gpt-5.4", label: "GPT-5.4" },
-                { id: "gpt-5.3-chat", label: "GPT-5.3 Chat" },
-            ]
+            models: groupedModels.find(g => g.provider === 'openai')?.models.map(m => ({ id: m.id, label: m.name })) || []
         },
         'groq': {
             name: 'Groq (Llama)', desc: 'Inferencia ultra rapida, gratis limitado', color: 'border-yellow-500/50 bg-yellow-500/10',
             field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...',
             keyUrl: 'https://console.groq.com/keys',
-            models: [
-                { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B Versatile" },
-                { id: "llama-3.1-8b-instant", label: "Llama 3.1 8B Instant" },
-            ]
+            models: groupedModels.find(g => g.provider === 'groq')?.models.map(m => ({ id: m.id, label: m.name })) || []
         },
         'vertex': {
-            name: 'Google Cloud (Vertex AI)', desc: 'Requiere gcloud auth local', color: 'border-blue-500/50 bg-blue-500/10',
+            name: 'Google (Vertex AI)', desc: 'Requiere gcloud auth local', color: 'border-blue-500/50 bg-blue-500/10',
             field: 'gcp_project_id', modelField: 'vertex_model', ph: 'mi-proyecto-gcp',
             keyUrl: 'https://console.cloud.google.com',
-            models: [
-                { id: "gemini-3.1-pro-preview", label: "Gemini 3.1 Pro Preview" },
-                { id: "gemini-3.1-flash-lite-preview", label: "Gemini 3.1 Flash Lite Preview" },
-                { id: "gemini-3-flash-preview", label: "Gemini 3 Flash Preview" },
-            ]
+            models: groupedModels.find(g => g.provider === 'vertex')?.models.map(m => ({ id: m.id, label: m.name })) || []
         },
     };
 
@@ -196,6 +190,7 @@ export const OnboardingWizard: React.FC = () => {
             localStorage.setItem('az_onboard_step', String(step));
             localStorage.setItem('az_onboard_profile', JSON.stringify(profile));
             localStorage.setItem('az_onboard_telemetry', String(telemetry));
+            localStorage.setItem('az_historical_synced', String(hasSyncedHistorical));
             if (Object.keys(formData).length > 0) {
                 localStorage.setItem('az_onboard_form', JSON.stringify(formData));
             }
@@ -295,9 +290,12 @@ export const OnboardingWizard: React.FC = () => {
                 setYtShowPicker(true);
                 toast.success(`Found ${result.channels?.length || 0} channel(s). Pick the one to sync.`, { icon: '📺' });
             } else {
-                toast.success(`Synced ${result.total_shorts} videos from ${result.channel_name}!`, { id: toastId, icon: '🎬' });
+                toast.success(`Connected! Synced ${result.total_shorts} videos from ${result.channel_name}.`, { id: toastId, icon: '🔗' });
                 setYtConnected(true);
                 setYtChannelName(result.channel_name);
+                if (!hasSyncedHistorical) {
+                    setTimeout(() => setShowRetroactiveModal(true), 1500);
+                }
             }
         } catch (error: any) {
             toast.error(error.message || 'Connection failed', { id: toastId });
@@ -322,6 +320,9 @@ export const OnboardingWizard: React.FC = () => {
             setYtConnected(true);
             setYtChannelName(result.channel_name);
             setYtShowPicker(false);
+            if (!hasSyncedHistorical) {
+                setTimeout(() => setShowRetroactiveModal(true), 1500);
+            }
         } catch (error: any) {
             toast.error(error.message || 'Sync failed', { id: toastId });
         } finally {
@@ -594,12 +595,28 @@ export const OnboardingWizard: React.FC = () => {
                             <div className="space-y-3">
                                 {/* YouTube Button */}
                                 {ytConnected ? (
-                                    <div className="flex items-center gap-3 p-4 rounded-xl bg-green-500/10 border border-green-500/30 text-left">
-                                        <CheckCircle2 className="w-6 h-6 text-green-500" />
-                                        <div>
-                                            <div className="text-white font-medium text-sm">YouTube Connected</div>
-                                            <div className="text-green-400 text-xs mt-0.5">{ytChannelName}</div>
+                                    <div className="p-4 rounded-xl bg-green-500/10 border border-green-500/30 flex items-center justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <CheckCircle2 className="w-6 h-6 text-green-500" />
+                                            <div>
+                                                <div className="text-white font-medium text-sm">YouTube Connected</div>
+                                                <div className="text-green-400 text-xs mt-0.5">{ytChannelName}</div>
+                                            </div>
                                         </div>
+                                        {!hasSyncedHistorical ? (
+                                            <button 
+                                                onClick={() => setShowRetroactiveModal(true)}
+                                                className="px-3 py-1.5 bg-brand-500/20 hover:bg-brand-500/40 border border-brand-500/50 text-brand-300 text-xs rounded-lg transition-colors flex items-center gap-1.5 font-medium"
+                                            >
+                                                <Sparkles className="w-3.5 h-3.5" />
+                                                Sync Histórico
+                                            </button>
+                                        ) : (
+                                            <div className="px-3 py-1.5 bg-zinc-800/50 border border-white/10 text-zinc-400 text-xs rounded-lg flex items-center gap-1.5 font-medium">
+                                                <Sparkles className="w-3.5 h-3.5 text-brand-500" />
+                                                Historial Procesado
+                                            </div>
+                                        )}
                                     </div>
                                 ) : ytShowPicker ? (
                                     <div className="p-4 rounded-xl bg-black/20 border border-red-500/20 space-y-3">
@@ -810,7 +827,10 @@ export const OnboardingWizard: React.FC = () => {
             <RetroactiveSyncModal 
                 isOpen={showRetroactiveModal}
                 onClose={() => setShowRetroactiveModal(false)}
-                onSuccess={() => setShowRetroactiveModal(false)}
+                onSuccess={() => {
+                    setHasSyncedHistorical(true);
+                    setShowRetroactiveModal(false);
+                }}
             />
         </div>
     );

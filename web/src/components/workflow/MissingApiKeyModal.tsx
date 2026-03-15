@@ -10,8 +10,8 @@ interface MissingApiKeyModalProps {
 }
 
 const PROVIDERS = [
-    { id: 'anthropic', name: 'Anthropic (Claude)', field: 'anthropic_api_key' as const, ph: 'sk-ant-...', url: 'https://console.anthropic.com/settings/keys', modelField: 'anthropic_model' as const, defaultModel: 'claude-sonnet-4-6-20250514' },
-    { id: 'openai', name: 'OpenAI (GPT)', field: 'openai_api_key' as const, ph: 'sk-...', url: 'https://platform.openai.com/api-keys', modelField: 'openai_model' as const, defaultModel: 'gpt-5.4-pro' },
+    { id: 'anthropic', name: 'Anthropic (Claude)', field: 'anthropic_api_key' as const, ph: 'sk-ant-...', url: 'https://console.anthropic.com/settings/keys', modelField: 'anthropic_model' as const, defaultModel: 'claude-3.7-sonnet' },
+    { id: 'openai', name: 'OpenAI (GPT)', field: 'openai_api_key' as const, ph: 'sk-...', url: 'https://platform.openai.com/api-keys', modelField: 'openai_model' as const, defaultModel: 'gpt-4o' },
     { id: 'groq', name: 'Groq (Llama)', field: 'groq_api_key' as const, ph: 'gsk_...', url: 'https://console.groq.com/keys', modelField: 'groq_model' as const, defaultModel: 'llama-3.3-70b-versatile' },
 ];
 
