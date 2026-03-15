@@ -178,7 +178,9 @@ class FinderAgent:
             
             system_prompt = FINDER_SYSTEM.format(
                 podcast_name=config.podcast_name,
-                intelligence_addendum=config.get_intelligence_prompt_addendum()
+                intelligence_addendum=config.get_intelligence_prompt_addendum(),
+                min_duration=min_duration,
+                max_duration=max_duration
             )
             
             finder_template = self.prompt_manager.get_finder_prompt()
@@ -192,6 +194,7 @@ class FinderAgent:
             
             # Using LLM provider's response_format capability for Pydantic validation
             try:
+                console.print(f"[dim]   📡 Calling LLM for chunk {i+1}/{len(chunks)}...[/dim]")
                 response = self._llm.chat(
                     system_prompt=system_prompt,
                     user_message=finder_prompt,
@@ -199,20 +202,32 @@ class FinderAgent:
                     response_format=FinderResponse
                 )
                 
+                console.print(f"[dim]   ✓ LLM responded ({len(str(response))} chars)[/dim]")
+                
                 if isinstance(response, str):
                     # Provider didn't natively support structure, parse manually (fallback)
-                    # We should parse JSON manually and construct the Pydantic object
                     import re
                     json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", response)
                     raw_json = json_match.group(1).strip() if json_match else response.strip()
+                    
+                    # Debug: show first 300 chars of raw response
+                    console.print(f"[dim]   Raw LLM response (first 300 chars): {response[:300]}[/dim]")
+                    
                     parsed_dict = json.loads(raw_json)
                     response_obj = FinderResponse(**parsed_dict)
                 else:
                     # Depending on instructor/llm_provider implementation, it might directly return the object
                     response_obj = response if isinstance(response, FinderResponse) else FinderResponse(**json.loads(response.model_dump_json()))
 
+                console.print(f"[green]   ✓ Chunk {i+1}: Found {len(response_obj.candidates)} candidates[/green]")
                 all_candidates.extend(response_obj.candidates)
             except Exception as e:
                 console.print(f"[red]Failed to process chunk {i+1} with Finder: {e}[/red]")
+                # Show any partial response available for debugging
+                try:
+                    console.print(f"[red]   Raw response type: {type(response).__name__}[/red]")
+                    console.print(f"[red]   Raw response preview: {str(response)[:500]}[/red]")
+                except:
+                    pass
                 
         return self._deduplicate_candidates(all_candidates)

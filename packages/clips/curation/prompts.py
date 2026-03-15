@@ -82,8 +82,9 @@ USA estas señales como guía, pero también identifica momentos que el análisi
     {{
       "start_time": 125.5,
       "end_time": 165.0,
-      "reason": "Por qué este momento es interesante",
-      "signal_match": ["hook", "storytelling"]
+      "title": "Título viral llamativo del clip",
+      "summary": "Una línea describiendo de qué trata el clip",
+      "reasoning": "Por qué este momento es interesante y viral"
     }}
   ]
 }}
@@ -373,7 +374,7 @@ Sé GENEROSO (CRITIC filtrará después).
 
 ## JSON:
 ```json
-{{"candidates":[{{"start_time":X,"end_time":Y,"reason":"...","signal_match":["hook","storytelling"]}}]}}
+{{"candidates":[{{"start_time":X,"end_time":Y,"title":"Título viral","summary":"Una línea sobre el clip","reasoning":"Por qué es viral"}}]}}
 ```
 
 Mínimo 15 candidatos."""

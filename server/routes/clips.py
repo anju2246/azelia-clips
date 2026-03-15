@@ -3,6 +3,7 @@ Server Routes — Clip Processing, Jobs, Faces, Episodes, WebSocket
 """
 
 import shutil
+import hashlib
 import uuid
 import json
 import asyncio
@@ -166,16 +167,20 @@ async def process_local_video(
     if not filename.lower().endswith(('.mp4', '.mov', '.mkv')):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP4, MOV, MKV supported.")
         
-    job_id = str(uuid.uuid4())
+    # Create stable Job ID from file path
+    job_id = hashlib.md5(str(file_path_obj).encode()).hexdigest()
     job_dir = DATA_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
     
     # Symlink the file instantly instead of copying gigabytes
     target_link = job_dir / "source.mp4"
-    try:
-        os.symlink(file_path_obj, target_link)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
+    if not target_link.exists():
+        try:
+            os.symlink(file_path_obj, target_link)
+        except FileExistsError:
+            pass  # Already linked from a previous run
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
         
     # Auto-fill transcript DB from settings if configured
     t_url = req.supabase_url or settings.transcript_supabase_url or None
@@ -190,6 +195,18 @@ async def process_local_video(
         "supabase_url": t_url,
         "supabase_key": t_key
     }
+
+    # If job is already running, just return it
+    existing = store.get_job(job_id)
+    if existing and existing.status in ["processing", "pending", "resuming"]:
+        return JobResponse(
+            id=existing.job_id,
+            status=JobStatus(existing.status),
+            filename=filename,
+            created_at=existing.created_at,
+            progress=existing.progress,
+            message=existing.message
+        )
 
     # Initialize Job in Store (Legacy for UI compatibility)
     store.create_job(
@@ -430,8 +447,21 @@ async def process_episode_endpoint(
     from server.processor import BatchProcessor
     
     # Create Job ID
-    job_id = str(uuid.uuid4())
+    # Create Stable Job ID for library episodes
+    job_id = f"EP{episode_number:03d}-process"
     
+    # If job is already running, just return it
+    existing = store.get_job(job_id)
+    if existing and existing.status in ["processing", "pending", "resuming"]:
+        return JobResponse(
+            id=existing.job_id,
+            status=JobStatus(existing.status),
+            filename=f"EP{episode_number:03d}",
+            created_at=existing.created_at,
+            progress=existing.progress,
+            message=existing.message
+        )
+
     # Initialize Job
     store.create_job(
         job_id=job_id,

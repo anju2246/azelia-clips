@@ -105,7 +105,7 @@ from pathlib import Path
 YT_DB_PATH = Path(__file__).parent.parent / "data" / "youtube_shorts.db"
 
 def _get_yt_db():
-    """Get or create the YouTube shorts database."""
+    """Get or create the YouTube shorts database with multi-user support."""
     YT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(YT_DB_PATH))
     conn.execute("""
@@ -130,6 +130,36 @@ def _get_yt_db():
     except sqlite3.OperationalError:
         pass  # Column already exists
 
+    # ── New analytics columns for Local Intelligence ──
+    _new_columns = [
+        ("average_view_duration", "REAL"),
+        ("average_view_percentage", "REAL"),
+        ("shares_count", "INTEGER DEFAULT 0"),
+        ("subscribers_gained", "INTEGER DEFAULT 0"),
+        ("subscribers_lost", "INTEGER DEFAULT 0"),
+        ("estimated_minutes_watched", "REAL"),
+        ("hook_type", "TEXT"),
+        ("emotional_charge", "TEXT"),
+        ("core_topics", "TEXT"),
+        ("llm_analysis", "TEXT"),
+    ]
+    for col_name, col_type in _new_columns:
+        try:
+            conn.execute(f"ALTER TABLE youtube_shorts ADD COLUMN {col_name} {col_type}")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+
+    # ── Multi-user connection store (replaces old youtube_sync_meta) ──
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS youtube_connections (
+            user_id TEXT PRIMARY KEY,
+            channel_id TEXT,
+            channel_name TEXT,
+            refresh_token TEXT,
+            last_synced TEXT
+        )
+    """)
+    # Keep legacy table alive for backward compat but don't use it
     conn.execute("""
         CREATE TABLE IF NOT EXISTS youtube_sync_meta (
             key TEXT PRIMARY KEY,
@@ -140,33 +170,54 @@ def _get_yt_db():
     return conn
 
 
+def _get_user_id_from_auth(authorization: str) -> str | None:
+    """Extract user_id from a Supabase JWT Authorization header."""
+    if not authorization:
+        return None
+    try:
+        import json, base64
+        token = authorization.replace("Bearer ", "").strip()
+        payload = token.split(".")[1]
+        payload += "=" * (4 - len(payload) % 4)
+        decoded = json.loads(base64.b64decode(payload))
+        return decoded.get("sub")
+    except Exception:
+        return None
+
+
 @router.get("/analytics/youtube/status")
-async def get_youtube_status(request: Request):
-    """Check if YouTube shorts have been synced."""
+async def get_youtube_status(request: Request, authorization: str = Header(None)):
+    """Check if YouTube shorts have been synced (user-scoped)."""
     try:
         user = getattr(request.state, "user", None)
+        user_id = user["id"] if user else _get_user_id_from_auth(authorization)
         conn = _get_yt_db()
         
         query = "SELECT COUNT(*) FROM youtube_shorts"
         params = ()
-        if user:
-            query += " WHERE user_id = ? OR user_id IS NULL"
-            params = (user["id"],)
+        if user_id:
+            query += " WHERE user_id = ?"
+            params = (user_id,)
             
         cursor = conn.execute(query, params)
         count = cursor.fetchone()[0]
         
-        cursor2 = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'channel_name'")
-        row = cursor2.fetchone()
-        channel_name = row[0] if row else None
-        
-        cursor3 = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'last_synced'")
-        row3 = cursor3.fetchone()
-        last_synced = row3[0] if row3 else None
+        # Read from youtube_connections (user-scoped)
+        channel_name = None
+        last_synced = None
+        if user_id:
+            cursor2 = conn.execute(
+                "SELECT channel_name, last_synced FROM youtube_connections WHERE user_id = ?",
+                (user_id,)
+            )
+            row2 = cursor2.fetchone()
+            if row2:
+                channel_name = row2[0]
+                last_synced = row2[1]
         
         conn.close()
         return {
-            "connected": count > 0,
+            "connected": count > 0 or channel_name is not None,
             "channel_name": channel_name,
             "total_shorts": count,
             "last_synced": last_synced,
@@ -291,9 +342,12 @@ async def sync_youtube_shorts(body: dict = Body(...)):
         ))
     
     # Save sync metadata
-    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_name', ?)", (channel_name,))
-    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_id', ?)", (channel_id,))
-    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('last_synced', ?)", (now,))
+    # Legacy sync endpoint — store in youtube_connections if user_id available
+    # (This endpoint doesn't have user context, so we use a fallback)
+    conn.execute("""
+        INSERT OR REPLACE INTO youtube_connections (user_id, channel_id, channel_name, last_synced)
+        VALUES (?, ?, ?, ?)
+    """, ('__legacy__', channel_id, channel_name, now))
     conn.commit()
     conn.close()
     
@@ -314,175 +368,204 @@ async def sync_youtube_with_code(
     Returns the token + list of channels so the user can pick which to sync.
     If channel_id is provided, skip channel selection and sync directly.
     """
-    code = body.get("code")
-    redirect_uri = body.get("redirect_uri")
-    channel_id = body.get("channel_id")  # Optional: skip picker and sync this channel
-    access_token = body.get("access_token")  # Optional: reuse existing token
+    try:
+        code = body.get("code")
+        redirect_uri = body.get("redirect_uri")
+        channel_id = body.get("channel_id")  # Optional: skip picker and sync this channel
+        access_token = body.get("access_token")  # Optional: reuse existing token
     
-    import requests as http_requests
-    import json
+        import requests as http_requests
+        import json
     
-    # If no token yet, exchange the code
-    if not access_token:
-        if not code:
-            raise HTTPException(status_code=400, detail="Missing authorization code")
-        if not redirect_uri:
-            raise HTTPException(status_code=400, detail="Missing redirect_uri")
+        # If no token yet, exchange the code
+        if not access_token:
+            if not code:
+                raise HTTPException(status_code=400, detail="Missing authorization code")
+            if not redirect_uri:
+                raise HTTPException(status_code=400, detail="Missing redirect_uri")
         
+            secrets_path = _find_client_secrets()
+            with open(secrets_path) as f:
+                secrets_data = json.load(f)
+        
+            client_info = secrets_data.get("web") or secrets_data.get("installed", {})
+            client_id = client_info.get("client_id")
+            client_secret = client_info.get("client_secret")
+            token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
+        
+            if not client_id or not client_secret:
+                raise HTTPException(status_code=500, detail="Invalid client_secrets.json")
+        
+            token_res = http_requests.post(token_uri, data={
+                "code": code,
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+                "grant_type": "authorization_code",
+            })
+        
+            if token_res.status_code != 200:
+                import logging
+                logging.error(f"YouTube token exchange failed: {token_res.text}")
+                error_msg = token_res.json().get("error_description", "Token exchange failed")
+                raise HTTPException(status_code=400, detail=f"Failed to exchange code: {error_msg}")
+        
+            access_token = token_res.json().get("access_token")
+            refresh_token = token_res.json().get("refresh_token")
+            if not access_token:
+                raise HTTPException(status_code=400, detail="No access token received")
+            
+            if refresh_token:
+                conn_db = _get_yt_db()
+                # Store refresh_token scoped to user_id via youtube_connections
+                _uid = _get_user_id_from_auth(authorization) or '__legacy__'
+                conn_db.execute("""
+                    INSERT INTO youtube_connections (user_id, refresh_token)
+                    VALUES (?, ?)
+                    ON CONFLICT(user_id) DO UPDATE SET refresh_token = excluded.refresh_token
+                """, (_uid, refresh_token))
+                conn_db.commit()
+                conn_db.close()
+    
+        headers = {"Authorization": f"Bearer {access_token}"}
+        YT_API = "https://www.googleapis.com/youtube/v3"
+    
+        # Authenticate to get user_id & AnalyticsSync
+        from server.services.analytics import AnalyticsSync
+        user_id = None
+        analytics = None
+        if authorization:
+            try:
+                token = authorization.replace("Bearer ", "").strip()
+                analytics = AnalyticsSync(auth_token=token)
+                import json, base64
+                payload = token.split(".")[1]
+                payload += "=" * (4 - len(payload) % 4)
+                decoded = json.loads(base64.b64decode(payload))
+                user_id = decoded.get("sub")
+            except Exception as e:
+                print(f"Auth parsing failed: {e}")
+
+        # If channel_id provided, sync directly
+        if channel_id:
+            result = await _sync_channel(access_token, channel_id, user_id=user_id, analytics=analytics)
+            return result
+    
+        # Otherwise, list all accessible channels for the user to pick
+        # 1. Get the default "mine" channel
+        channels = []
+        mine_res = http_requests.get(f"{YT_API}/channels", params={
+            "part": "snippet,statistics,contentDetails",
+            "mine": "true"
+        }, headers=headers)
+    
+        if mine_res.status_code == 200:
+            for ch in mine_res.json().get("items", []):
+                thumb = ch["snippet"].get("thumbnails", {}).get("default", {}).get("url", "")
+                channels.append({
+                    "id": ch["id"],
+                    "title": ch["snippet"]["title"],
+                    "handle": ch["snippet"].get("customUrl", ""),
+                    "subscribers": ch["statistics"].get("subscriberCount", "0"),
+                    "video_count": ch["statistics"].get("videoCount", "0"),
+                    "thumbnail": thumb,
+                })
+    
+        # If only 1 channel, sync it automatically
+        if len(channels) == 1:
+            result = await _sync_channel(access_token, channels[0]["id"], user_id=user_id, analytics=analytics)
+            return result
+    
+        # Multiple channels or none: return them for selection
+        return {
+            "needs_channel_selection": True,
+            "access_token": access_token,
+            "channels": channels,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        trace = traceback.format_exc()
+        try:
+            with open("/tmp/azelia_sync_error.txt", "w") as f:
+                f.write(trace)
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"Sync crash: {str(e)} \nTrace: {trace}")
+
+@router.post("/analytics/youtube/auto-sync")
+async def auto_sync_youtube(authorization: str = Header(None)):
+    """Automatically fetch latest YouTube stats using stored refresh_token (user-scoped)."""
+    try:
+        user_id = _get_user_id_from_auth(authorization) or '__legacy__'
+        conn = _get_yt_db()
+        cursor = conn.execute(
+            "SELECT refresh_token, channel_id FROM youtube_connections WHERE user_id = ?",
+            (user_id,)
+        )
+        row = cursor.fetchone()
+        conn.close()
+    
+        if not row or not row[0] or not row[1]:
+            raise HTTPException(status_code=400, detail="No refresh token or channel ID found. Please connect manually.")
+        
+        refresh_token = row[0]
+        channel_id = row[1]
+    
+        import json
+        import requests as http_requests
+    
         secrets_path = _find_client_secrets()
         with open(secrets_path) as f:
             secrets_data = json.load(f)
-        
+    
         client_info = secrets_data.get("web") or secrets_data.get("installed", {})
         client_id = client_info.get("client_id")
         client_secret = client_info.get("client_secret")
         token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
-        
-        if not client_id or not client_secret:
-            raise HTTPException(status_code=500, detail="Invalid client_secrets.json")
-        
+    
         token_res = http_requests.post(token_uri, data={
-            "code": code,
             "client_id": client_id,
             "client_secret": client_secret,
-            "redirect_uri": redirect_uri,
-            "grant_type": "authorization_code",
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token",
         })
-        
+    
         if token_res.status_code != 200:
-            import logging
-            logging.error(f"YouTube token exchange failed: {token_res.text}")
-            error_msg = token_res.json().get("error_description", "Token exchange failed")
-            raise HTTPException(status_code=400, detail=f"Failed to exchange code: {error_msg}")
+            raise HTTPException(status_code=400, detail="Failed to refresh token")
         
         access_token = token_res.json().get("access_token")
-        refresh_token = token_res.json().get("refresh_token")
-        if not access_token:
-            raise HTTPException(status_code=400, detail="No access token received")
+    
+        # Authenticate for telemetry
+        from server.services.analytics import AnalyticsSync
+        user_id = None
+        analytics = None
+        if authorization:
+            try:
+                token = authorization.replace("Bearer ", "").strip()
+                analytics = AnalyticsSync(auth_token=token)
+                import base64
+                payload = token.split(".")[1]
+                payload += "=" * (4 - len(payload) % 4)
+                decoded = json.loads(base64.b64decode(payload))
+                user_id = decoded.get("sub")
+            except Exception:
+                pass
             
-        if refresh_token:
-            conn_db = _get_yt_db()
-            conn_db.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('refresh_token', ?)", (refresh_token,))
-            conn_db.commit()
-            conn_db.close()
-    
-    headers = {"Authorization": f"Bearer {access_token}"}
-    YT_API = "https://www.googleapis.com/youtube/v3"
-    
-    # Authenticate to get user_id & AnalyticsSync
-    from server.services.analytics import AnalyticsSync
-    user_id = None
-    analytics = None
-    if authorization:
-        try:
-            token = authorization.replace("Bearer ", "").strip()
-            analytics = AnalyticsSync(auth_token=token)
-            import json, base64
-            payload = token.split(".")[1]
-            payload += "=" * (4 - len(payload) % 4)
-            decoded = json.loads(base64.b64decode(payload))
-            user_id = decoded.get("sub")
-        except Exception as e:
-            print(f"Auth parsing failed: {e}")
-
-    # If channel_id provided, sync directly
-    if channel_id:
         result = await _sync_channel(access_token, channel_id, user_id=user_id, analytics=analytics)
         return result
-    
-    # Otherwise, list all accessible channels for the user to pick
-    # 1. Get the default "mine" channel
-    channels = []
-    mine_res = http_requests.get(f"{YT_API}/channels", params={
-        "part": "snippet,statistics,contentDetails",
-        "mine": "true"
-    }, headers=headers)
-    
-    if mine_res.status_code == 200:
-        for ch in mine_res.json().get("items", []):
-            thumb = ch["snippet"].get("thumbnails", {}).get("default", {}).get("url", "")
-            channels.append({
-                "id": ch["id"],
-                "title": ch["snippet"]["title"],
-                "handle": ch["snippet"].get("customUrl", ""),
-                "subscribers": ch["statistics"].get("subscriberCount", "0"),
-                "video_count": ch["statistics"].get("videoCount", "0"),
-                "thumbnail": thumb,
-            })
-    
-    # If only 1 channel, sync it automatically
-    if len(channels) == 1:
-        result = await _sync_channel(access_token, channels[0]["id"], user_id=user_id, analytics=analytics)
-        return result
-    
-    # Multiple channels or none: return them for selection
-    return {
-        "needs_channel_selection": True,
-        "access_token": access_token,
-        "channels": channels,
-    }
-
-
-@router.post("/analytics/youtube/auto-sync")
-async def auto_sync_youtube(authorization: str = Header(None)):
-    """Automatically fetch latest YouTube stats using stored refresh_token."""
-    conn = _get_yt_db()
-    cursor = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'refresh_token'")
-    row = cursor.fetchone()
-    
-    cursor_ch = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'channel_id'")
-    row_ch = cursor_ch.fetchone()
-    conn.close()
-    
-    if not row or not row_ch:
-        raise HTTPException(status_code=400, detail="No refresh token or channel ID found. Please connect manually.")
-        
-    refresh_token = row[0]
-    channel_id = row_ch[0]
-    
-    import json
-    import requests as http_requests
-    
-    secrets_path = _find_client_secrets()
-    with open(secrets_path) as f:
-        secrets_data = json.load(f)
-    
-    client_info = secrets_data.get("web") or secrets_data.get("installed", {})
-    client_id = client_info.get("client_id")
-    client_secret = client_info.get("client_secret")
-    token_uri = client_info.get("token_uri", "https://oauth2.googleapis.com/token")
-    
-    token_res = http_requests.post(token_uri, data={
-        "client_id": client_id,
-        "client_secret": client_secret,
-        "refresh_token": refresh_token,
-        "grant_type": "refresh_token",
-    })
-    
-    if token_res.status_code != 200:
-        raise HTTPException(status_code=400, detail="Failed to refresh token")
-        
-    access_token = token_res.json().get("access_token")
-    
-    # Authenticate for telemetry
-    from server.services.analytics import AnalyticsSync
-    user_id = None
-    analytics = None
-    if authorization:
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        trace = traceback.format_exc()
         try:
-            token = authorization.replace("Bearer ", "").strip()
-            analytics = AnalyticsSync(auth_token=token)
-            import base64
-            payload = token.split(".")[1]
-            payload += "=" * (4 - len(payload) % 4)
-            decoded = json.loads(base64.b64decode(payload))
-            user_id = decoded.get("sub")
-        except Exception:
+            with open("/tmp/azelia_auto_sync_error.txt", "w") as f:
+                f.write(trace)
+        except:
             pass
-            
-    result = await _sync_channel(access_token, channel_id, user_id=user_id, analytics=analytics)
-    return result
-
+        raise HTTPException(status_code=500, detail=f"Auto-sync crash: {str(e)} \nTrace: {trace}")
 
 async def _sync_channel(access_token: str, channel_id: str, user_id: str = None, analytics = None):
     """Sync all videos from a specific channel by ID."""
@@ -561,24 +644,30 @@ async def _sync_channel(access_token: str, channel_id: str, user_id: str = None,
     conn = _get_yt_db()
     now = datetime.now().isoformat()
     
-    # Clear ALL old data — only one channel at a time
-    conn.execute("DELETE FROM youtube_shorts")
-    conn.execute("DELETE FROM youtube_sync_meta")
-    
-    # Get User ID from arguments to associate local data
-    # (user_id is already passed correctly to _sync_channel)
+    # Clear old data for THIS user only (multi-user safe)
+    if user_id:
+        conn.execute("DELETE FROM youtube_shorts WHERE user_id = ?", (user_id,))
+    else:
+        conn.execute("DELETE FROM youtube_shorts WHERE user_id IS NULL")
     
     for s in shorts:
         conn.execute("""
             INSERT OR REPLACE INTO youtube_shorts 
-            (video_id, user_id, title, published_at, duration_seconds, view_count, like_count, comment_count, channel_name, channel_id, thumbnail_url)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (video_id, user_id, title, published_at, duration_seconds, view_count, like_count, comment_count, channel_name, channel_id, thumbnail_url, synced_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (s["video_id"], user_id, s["title"], s["published_at"], s["duration_seconds"],
-              s["view_count"], s["like_count"], s["comment_count"], s["channel_name"], s["channel_id"], s["thumbnail_url"]))
+              s["view_count"], s["like_count"], s["comment_count"], s["channel_name"], s["channel_id"], s["thumbnail_url"], now))
     
-    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_name', ?)", (channel_name,))
-    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('last_synced', ?)", (now,))
-    conn.execute("INSERT OR REPLACE INTO youtube_sync_meta (key, value) VALUES ('channel_id', ?)", (channel_id,))
+    # Save connection metadata (user-scoped)
+    _uid = user_id or '__legacy__'
+    conn.execute("""
+        INSERT INTO youtube_connections (user_id, channel_id, channel_name, last_synced)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            channel_id = excluded.channel_id,
+            channel_name = excluded.channel_name,
+            last_synced = excluded.last_synced
+    """, (_uid, channel_id, channel_name, now))
     conn.commit()
     conn.close()
     
@@ -598,9 +687,9 @@ async def _sync_channel(access_token: str, channel_id: str, user_id: str = None,
                 "last_updated": "now()"
             }
             
-            # Update Supabase and get the clip's hook type etc.
+            # We only select here since performance_metrics column doesn't exist
             res = analytics.client.table("clips_metadata")\
-                .update({"performance_metrics": metrics})\
+                .select("hook_type, sentiment_score")\
                 .eq("video_title", s["title"])\
                 .execute()
                 
@@ -652,13 +741,30 @@ async def estimate_historical_cost(request: Request, authorization: str = Header
     if total_shorts == 0:
         return {"total_shorts": 0, "estimated_cost_usd": 0.0, "model": "none"}
         
-    # Determine which model is active
-    active_model = None
-    if settings.openai_model: active_model = settings.openai_model
-    elif settings.anthropic_model: active_model = settings.anthropic_model
-    elif settings.groq_model: active_model = settings.groq_model
-    elif settings.vertex_model: active_model = settings.vertex_model
-    else: active_model = "meta-llama/llama-3.3-70b-instruct" # default fallback
+    # Determine which model is active by checking available API keys in order
+    active_model = "meta-llama/llama-3.3-70b-instruct" # default fallback
+    
+    provider_order = getattr(settings, "ai_provider_order", "groq,openai,anthropic,vertex")
+    if isinstance(provider_order, str):
+        order_list = [p.strip().lower() for p in provider_order.split(",") if p.strip()]
+    elif isinstance(provider_order, list):
+        order_list = [p.strip().lower() for p in provider_order if isinstance(p, str) and p.strip()]
+    else:
+        order_list = ["groq", "openai", "anthropic", "vertex"]
+        
+    for provider in order_list:
+        if provider == "anthropic" and getattr(settings, "anthropic_api_key", ""):
+            active_model = settings.anthropic_model
+            break
+        elif provider == "openai" and getattr(settings, "openai_api_key", ""):
+            active_model = settings.openai_model
+            break
+        elif provider == "groq" and getattr(settings, "groq_api_key", ""):
+            active_model = settings.groq_model
+            break
+        elif provider == "vertex" and getattr(settings, "gcp_project_id", ""):
+            active_model = settings.vertex_model
+            break
     
     # Prefix mapping for OpenRouter if needed
     or_model_id = active_model
@@ -700,27 +806,28 @@ async def estimate_historical_cost(request: Request, authorization: str = Header
 @router.post("/analytics/youtube/historical/sync")
 async def sync_historical_data(request: Request, authorization: str = Header(None)):
     """
-    Triggers the YouTubeHistoricalExtractor to fetch transcripts and analyze
-    them with the LLM, sinking them to Collective Intelligence.
+    Triggers the YouTubeHistoricalExtractor as a BACKGROUND JOB.
+    Returns immediately with a job_id for polling progress.
     """
-    from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
-    from packages.core.services.telemetry import TelemetryService
+    import asyncio
+    from server.workers.job_store import get_job_store
     from packages.core.config import settings
     
-    # Need youtube access token from sqlite metadata
+    # Need youtube access token from sqlite metadata (user-scoped)
+    user_id = _get_user_id_from_auth(authorization) or 'default_user'
     conn = _get_yt_db()
-    cursor = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'refresh_token'")
+    cursor = conn.execute(
+        "SELECT refresh_token, channel_id FROM youtube_connections WHERE user_id = ?",
+        (user_id,)
+    )
     row = cursor.fetchone()
-    
-    cursor_ch = conn.execute("SELECT value FROM youtube_sync_meta WHERE key = 'channel_id'")
-    row_ch = cursor_ch.fetchone()
     conn.close()
     
-    if not row or not row_ch:
-        raise HTTPException(status_code=400, detail="YouTube not connected. Connect first.")
+    if not row or not row[0] or not row[1]:
+        raise HTTPException(status_code=400, detail="YouTube no conectado. Conéctalo primero.")
         
     refresh_token = row[0]
-    channel_id = row_ch[0]
+    channel_id = row[1]
     
     # Refresh the access token
     import json
@@ -744,77 +851,128 @@ async def sync_historical_data(request: Request, authorization: str = Header(Non
         
     access_token = token_res.json().get("access_token")
     
-    # Get user_id from auth header
-    user_id = "default_user"
-    if authorization:
+    # Create a background job
+    store = get_job_store()
+    import uuid
+    job_id = f"historical_{uuid.uuid4().hex[:8]}"
+    store.create_job(job_id, episode_id=f"yt_historical_{user_id}", total_clips=0)
+    store.update_progress(job_id, 0, "🔍 Preparando análisis histórico...")
+    
+    async def _run_historical_sync():
+        """Background worker for historical sync."""
         try:
-            import base64
-            token = authorization.replace("Bearer ", "").strip()
-            payload = token.split(".")[1]
-            payload += "=" * (4 - len(payload) % 4)
-            decoded = json.loads(base64.b64decode(payload))
-            user_id = decoded.get("sub", user_id)
-        except:
-            pass
+            from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
+            from packages.core.services.telemetry import TelemetryService
             
-    # Init Extractor and run
-    telemetry_svc = TelemetryService()
-    extractor = YouTubeHistoricalExtractor(telemetry_svc)
+            telemetry_svc = TelemetryService()
+            extractor = YouTubeHistoricalExtractor(telemetry_svc)
+            
+            result = await extractor.process_historical_shorts(
+                user_id=user_id,
+                channel_id=channel_id,
+                access_token=access_token,
+                max_videos=100,
+                job_id=job_id,
+            )
+            
+            store.complete_job(
+                job_id,
+                clips_generated=result.get("processed", 0),
+                message=f"✅ {result.get('processed', 0)} videos analizados"
+            )
+        except Exception as e:
+            import traceback
+            import logging as _logging
+            _logging.error("Historical sync failed: %s\n%s", e, traceback.format_exc())
+            store.fail_job(job_id, str(e))
     
-    result = await extractor.process_historical_shorts(
-        user_id=user_id,
-        channel_id=channel_id,
-        access_token=access_token,
-        max_videos=100
-    )
+    # Fire and forget
+    asyncio.create_task(_run_historical_sync())
     
-    return result
+    return {"job_id": job_id, "status": "started", "message": "Análisis histórico iniciado en segundo plano."}
+
+
+@router.get("/analytics/youtube/historical/status/{job_id}")
+async def get_historical_sync_status(job_id: str):
+    """Poll the status of a historical sync background job."""
+    from server.workers.job_store import get_job_store
+    
+    store = get_job_store()
+    job = store.get_job(job_id)
+    
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    
+    return {
+        "job_id": job.job_id,
+        "status": job.status,
+        "progress": job.progress,
+        "message": job.message,
+        "error": job.error,
+    }
 
 
 @router.get("/analytics/youtube/insights")
-async def get_youtube_insights(request: Request):
-    """Aggregate insights from synced YouTube Shorts data."""
+async def get_youtube_insights(request: Request, authorization: str = Header(None)):
+    """Aggregate insights from synced YouTube Shorts data (Local Intelligence)."""
     try:
         user = getattr(request.state, "user", None)
+        user_id = user["id"] if user else _get_user_id_from_auth(authorization)
         conn = _get_yt_db()
         
         base_where = "WHERE 1=1"
         params_base = []
-        if user:
-            base_where = "WHERE (user_id = ? OR user_id IS NULL)"
-            params_base = [user["id"]]
+        if user_id:
+            base_where = "WHERE user_id = ?"
+            params_base = [user_id]
             
-        # Basic totals
+        # Basic totals + retention averages
         cursor = conn.execute(f"""
             SELECT 
                 COUNT(*) as total,
                 COALESCE(SUM(view_count), 0) as total_views,
                 COALESCE(SUM(like_count), 0) as total_likes,
                 COALESCE(AVG(view_count), 0) as avg_views,
-                COALESCE(AVG(duration_seconds), 0) as avg_duration
+                COALESCE(AVG(duration_seconds), 0) as avg_duration,
+                COALESCE(AVG(average_view_percentage), 0) as avg_retention,
+                COALESCE(AVG(average_view_duration), 0) as avg_view_dur,
+                COALESCE(SUM(shares_count), 0) as total_shares,
+                COALESCE(SUM(subscribers_gained), 0) as total_subs_gained,
+                COALESCE(SUM(subscribers_lost), 0) as total_subs_lost,
+                COUNT(hook_type) as analyzed_count
             FROM youtube_shorts
             {base_where}
         """, params_base)
         row = cursor.fetchone()
         total = row[0]; total_views = row[1]; total_likes = row[2]
         avg_views = row[3]; avg_duration = row[4]
+        avg_retention = row[5]; avg_view_dur = row[6]
+        total_shares = row[7]; total_subs_gained = row[8]
+        total_subs_lost = row[9]; analyzed_count = row[10]
         
         if total == 0:
             conn.close()
             return {"total_shorts": 0, "total_views": 0, "total_likes": 0,
                     "avg_views": 0, "avg_duration": 0, "best_performing": [],
-                    "duration_breakdown": []}
+                    "duration_breakdown": [], "hook_type_breakdown": [],
+                    "emotional_charge_breakdown": [], "top_topics": [],
+                    "retention": {}}
         
-        # Top 10 performing shorts
+        # Top 10 performing shorts (enriched with retention if available)
         best_cursor = conn.execute(f"""
-            SELECT title, view_count, video_id
+            SELECT title, view_count, video_id, average_view_percentage, hook_type
             FROM youtube_shorts
             {base_where}
             ORDER BY view_count DESC
             LIMIT 10
         """, params_base)
         best_performing = [
-            {"title": r[0], "views": r[1], "url": f"https://youtube.com/shorts/{r[2]}"}
+            {
+                "title": r[0], "views": r[1],
+                "url": f"https://youtube.com/shorts/{r[2]}",
+                "retention_pct": round(r[3], 1) if r[3] else None,
+                "hook_type": r[4],
+            }
             for r in best_cursor.fetchall()
         ]
         
@@ -830,7 +988,7 @@ async def get_youtube_insights(request: Request):
         for label, lo, hi in ranges:
             params_range = params_base + [lo, hi]
             dc = conn.execute(f"""
-                SELECT COUNT(*), COALESCE(AVG(view_count), 0)
+                SELECT COUNT(*), COALESCE(AVG(view_count), 0), COALESCE(AVG(average_view_percentage), 0)
                 FROM youtube_shorts
                 {base_where} AND duration_seconds >= ? AND duration_seconds <= ?
             """, params_range)
@@ -839,8 +997,53 @@ async def get_youtube_insights(request: Request):
                 duration_breakdown.append({
                     "range": label,
                     "count": dr[0],
-                    "avg_views": int(dr[1])
+                    "avg_views": int(dr[1]),
+                    "avg_retention": round(dr[2], 1) if dr[2] else None,
                 })
+        
+        # ─── Local Intelligence: Hook Type Distribution ───
+        hook_cursor = conn.execute(f"""
+            SELECT hook_type, COUNT(*) as cnt, 
+                   COALESCE(AVG(view_count), 0), COALESCE(AVG(average_view_percentage), 0)
+            FROM youtube_shorts
+            {base_where} AND hook_type IS NOT NULL
+            GROUP BY hook_type ORDER BY cnt DESC
+        """, params_base)
+        hook_type_breakdown = [
+            {"hook_type": r[0], "count": r[1], "avg_views": int(r[2]),
+             "avg_retention": round(r[3], 1) if r[3] else None}
+            for r in hook_cursor.fetchall()
+        ]
+        
+        # ─── Local Intelligence: Emotional Charge Distribution ───
+        emotion_cursor = conn.execute(f"""
+            SELECT emotional_charge, COUNT(*) as cnt, 
+                   COALESCE(AVG(view_count), 0), COALESCE(AVG(average_view_percentage), 0)
+            FROM youtube_shorts
+            {base_where} AND emotional_charge IS NOT NULL
+            GROUP BY emotional_charge ORDER BY cnt DESC
+        """, params_base)
+        emotional_charge_breakdown = [
+            {"emotion": r[0], "count": r[1], "avg_views": int(r[2]),
+             "avg_retention": round(r[3], 1) if r[3] else None}
+            for r in emotion_cursor.fetchall()
+        ]
+        
+        # ─── Local Intelligence: Top Topics ───
+        import json as _json
+        topics_cursor = conn.execute(f"""
+            SELECT core_topics FROM youtube_shorts
+            {base_where} AND core_topics IS NOT NULL
+        """, params_base)
+        topic_counter = {}
+        for (topics_str,) in topics_cursor.fetchall():
+            try:
+                topics = _json.loads(topics_str)
+                for t in topics:
+                    topic_counter[t] = topic_counter.get(t, 0) + 1
+            except Exception:
+                pass
+        top_topics = sorted(topic_counter.items(), key=lambda x: x[1], reverse=True)[:15]
         
         conn.close()
         
@@ -848,15 +1051,30 @@ async def get_youtube_insights(request: Request):
             "total_shorts": total,
             "total_views": int(total_views),
             "total_likes": int(total_likes),
+            "total_shares": int(total_shares),
             "avg_views": int(avg_views),
             "avg_duration": round(avg_duration, 1),
             "best_performing": best_performing,
             "duration_breakdown": duration_breakdown,
+            # ─── Local Intelligence Fields ───
+            "analyzed_count": analyzed_count,
+            "retention": {
+                "avg_view_percentage": round(avg_retention, 1) if avg_retention else None,
+                "avg_view_duration_seconds": round(avg_view_dur, 1) if avg_view_dur else None,
+                "subscribers_gained": int(total_subs_gained),
+                "subscribers_lost": int(total_subs_lost),
+                "net_subscribers": int(total_subs_gained) - int(total_subs_lost),
+            },
+            "hook_type_breakdown": hook_type_breakdown,
+            "emotional_charge_breakdown": emotional_charge_breakdown,
+            "top_topics": [{"topic": t, "count": c} for t, c in top_topics],
         }
     except Exception:
         return {"total_shorts": 0, "total_views": 0, "total_likes": 0,
                 "avg_views": 0, "avg_duration": 0, "best_performing": [],
-                "duration_breakdown": []}
+                "duration_breakdown": [], "hook_type_breakdown": [],
+                "emotional_charge_breakdown": [], "top_topics": [],
+                "retention": {}}
 
 
 def _parse_iso_duration(duration: str) -> int:
@@ -1144,7 +1362,7 @@ async def authorize_youtube(
             "response_type": "code",
             "scope": "https://www.googleapis.com/auth/youtube.readonly https://www.googleapis.com/auth/yt-analytics.readonly",
             "access_type": "offline",
-            "prompt": "consent select_account",
+            "prompt": "consent",
         }
         
         authorization_url = f"{auth_uri}?{urlencode(params)}"
@@ -1153,6 +1371,9 @@ async def authorize_youtube(
     except HTTPException:
         raise
     except Exception as e:
+        import traceback
+        print("SYNC WITH CODE ERROR:")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from server.models import SettingsResponse, UpdateSettingsRequest
 from packages.core.config import settings
+from packages.core.services.model_registry import model_registry
 from server.middleware.auth import require_auth
 from packages.core.auth import User
 
@@ -184,6 +185,13 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
             
     return await get_settings()
 
+@router.get("/models")
+async def get_available_models(user: User = Depends(require_auth)):
+    """
+    Dynamically discover and return available AI models via native SDKs.
+    """
+    models = await model_registry.get_all_models()
+    return {"data": [m.dict() for m in models]}
 
 @router.get("/browse")
 async def browse_directory(path: str = "~"):

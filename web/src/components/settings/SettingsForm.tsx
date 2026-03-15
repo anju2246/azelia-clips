@@ -28,27 +28,33 @@ export const SettingsForm: React.FC = () => {
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, orProvider: 'meta' | 'openai' | 'anthropic' | 'google', fallbackModels: { id: string, label: string }[] }> = {
         'groq': {
-            name: 'Groq (Llama 3.3)', desc: 'Extremely fast inference', field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...', orProvider: 'meta',
+            name: 'Groq (Llama)', desc: 'Extremely fast inference', field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...', orProvider: 'meta' as any,
             fallbackModels: [
-                { id: "meta-llama/llama-3.3-70b-instruct", label: "Llama 3.3 70B Instruct" }
+                { id: "llama-3.3-70b-versatile", label: "Llama 3.3 70B" },
+                { id: "llama-3.1-70b-versatile", label: "Llama 3.1 70B" },
             ]
         },
         'openai': {
-            name: 'OpenAI (GPT-4 / 5)', desc: 'High quality reasoning', field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...', orProvider: 'openai',
+            name: 'OpenAI (GPT / o-series)', desc: 'High quality reasoning', field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...', orProvider: 'openai' as any,
             fallbackModels: [
-                { id: "openai/gpt-4o", label: "GPT-4o" }
+                { id: "gpt-4o", label: "GPT-4o" },
+                { id: "gpt-4o-mini", label: "GPT-4o Mini" },
             ]
         },
         'anthropic': {
-            name: 'Anthropic (Claude)', desc: 'Excellent nuance for curation', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...', orProvider: 'anthropic',
+            name: 'Anthropic (Claude)', desc: 'Excellent nuance for curation', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...', orProvider: 'anthropic' as any,
             fallbackModels: [
-                { id: "anthropic/claude-3.5-sonnet", label: "Claude 3.5 Sonnet" }
+                { id: "claude-opus-4-6", label: "Claude Opus 4.6" },
+                { id: "claude-sonnet-4-6", label: "Claude Sonnet 4.6" },
+                { id: "claude-haiku-3-5", label: "Claude Haiku 3.5" },
             ]
         },
         'vertex': {
-            name: 'Vertex AI (GCP)', desc: 'Requires local gcloud auth', field: 'gcp_project_id', modelField: 'vertex_model', ph: 'e.g. ce-video-engine', orProvider: 'google',
+            name: 'Vertex AI (GCP)', desc: 'Requires local gcloud auth', field: 'gcp_project_id', modelField: 'vertex_model', ph: 'e.g. ce-video-engine', orProvider: 'vertex' as any,
             fallbackModels: [
-                { id: "google/gemini-pro-1.5", label: "Gemini 1.5 Pro" }
+                { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+                { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+                { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
             ]
         },
     };
@@ -280,11 +286,43 @@ export const SettingsForm: React.FC = () => {
                             // @ts-ignore
                             const hasValue = !!settings?.[config.field] || !!formData[config.field];
 
-                            // Get dynamic models from OpenRouter, fallback to hardcoded if loading fails
+                            // Get dynamic models from the native model registry, fallback to hardcoded if loading fails
                             const orGroup = groupedModels.find(g => g.provider === config.orProvider);
                             const dynamicModels = orGroup && orGroup.models.length > 0
                                 ? orGroup.models.map(m => ({ id: m.id, label: m.name + (m.is_reasoning ? ' 🧠' : '') }))
                                 : config.fallbackModels;
+
+                            // Group models by version family for <optgroup> rendering
+                            // e.g. claude-opus-4-6 and claude-sonnet-4-6 → "Claude 4.6"
+                            //      gpt-4o and gpt-4o-mini → "GPT-4o"
+                            //      llama-3.3-70b and llama-3.1-70b → "Llama 3.3" / "Llama 3.1"
+                            const groupModelsByFamily = (models: {id: string, label: string}[]) => {
+                                const groups: Record<string, {id: string, label: string}[]> = {};
+                                for (const m of models) {
+                                    const id = m.id.toLowerCase();
+                                    let familyKey = 'Other';
+                                    // Anthropic: claude-opus-4-6, claude-sonnet-4-6 → "Claude 4.6"
+                                    const claudeVer = id.match(/claude-\w+-?(\d+)-(\d+)/);
+                                    if (claudeVer) { familyKey = `Claude ${claudeVer[1]}.${claudeVer[2]}`; }
+                                    // OpenAI: gpt-4o variants → "GPT-4o", o3/o1 → "o3" / "o1"
+                                    else if (id.startsWith('gpt-4o')) { familyKey = 'GPT-4o'; }
+                                    else if (id.startsWith('o3')) { familyKey = 'o3'; }
+                                    else if (id.startsWith('o1')) { familyKey = 'o1'; }
+                                    else if (id.startsWith('gpt-4')) { familyKey = 'GPT-4'; }
+                                    // Groq / Llama: llama-3.3-70b → "Llama 3.3", llama-3.1 → "Llama 3.1"
+                                    else if (id.includes('llama-3.3')) { familyKey = 'Llama 3.3'; }
+                                    else if (id.includes('llama-3.1')) { familyKey = 'Llama 3.1'; }
+                                    else if (id.includes('llama-3')) { familyKey = 'Llama 3'; }
+                                    // Vertex / Gemini: gemini-2.5-pro → "Gemini 2.5", gemini-2.0 → "Gemini 2.0"
+                                    else if (id.includes('gemini-2.5')) { familyKey = 'Gemini 2.5'; }
+                                    else if (id.includes('gemini-2.0')) { familyKey = 'Gemini 2.0'; }
+                                    else if (id.includes('gemini-1.5')) { familyKey = 'Gemini 1.5'; }
+                                    if (!groups[familyKey]) groups[familyKey] = [];
+                                    groups[familyKey].push(m);
+                                }
+                                return Object.entries(groups);
+                            };
+                            const modelFamilies = groupModelsByFamily(dynamicModels);
 
                             return (
                                 <div key={providerId} className={`border ${isExpanded ? 'border-brand-500/50 bg-black/40' : 'border-white/5 hover:border-white/10 bg-zinc-900/20'} rounded-xl overflow-hidden transition-all duration-200`}>
@@ -346,18 +384,27 @@ export const SettingsForm: React.FC = () => {
                                                 </label>
                                                 <select
                                                     // @ts-ignore
-                                                    value={formData[config.modelField] ?? settings?.[config.modelField] ?? dynamicModels[0].id}
+                                                    value={formData[config.modelField] ?? settings?.[config.modelField] ?? dynamicModels[0]?.id}
                                                     // @ts-ignore
                                                     onChange={(e) => { setFormData(prev => ({ ...prev, [config.modelField]: e.target.value })); }}
                                                     className="w-full px-3 py-2 bg-black border border-brand-500/30 rounded-lg focus:outline-none focus:border-brand-500 text-white text-sm cursor-pointer hover:border-brand-500/50 transition-colors"
                                                 >
-                                                    {dynamicModels.map(m => (
-                                                        <option key={m.id} value={m.id} className="bg-zinc-900 border-none">{m.label}</option>
-                                                    ))}
+                                                    {modelFamilies.length > 1
+                                                        ? modelFamilies.map(([family, members]) => (
+                                                            <optgroup key={family} label={`── ${family} ──`}>
+                                                                {members.map(m => (
+                                                                    <option key={m.id} value={m.id} className="bg-zinc-900">{m.label}</option>
+                                                                ))}
+                                                            </optgroup>
+                                                        ))
+                                                        : dynamicModels.map(m => (
+                                                            <option key={m.id} value={m.id} className="bg-zinc-900 border-none">{m.label}</option>
+                                                        ))
+                                                    }
                                                 </select>
                                                 <p className="text-[10px] text-zinc-500 mt-1.5 ml-1">
                                                     {/* @ts-ignore */}
-                                                    {dynamicModels.find(m => m.id === (formData[config.modelField] ?? settings?.[config.modelField] ?? dynamicModels[0].id))?.id}
+                                                    {dynamicModels.find(m => m.id === (formData[config.modelField] ?? settings?.[config.modelField] ?? dynamicModels[0]?.id))?.id}
                                                 </p>
                                             </div>
                                         </div>

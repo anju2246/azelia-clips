@@ -37,29 +37,44 @@ class MultiProviderLLM:
         # Build a dictionary of available valid provider configs
         available_configs = {}
 
-        # 1. Anthropic (Claude 3.5 Sonnet)
+        # 1. Anthropic
         if hasattr(settings, "anthropic_api_key") and settings.anthropic_api_key:
+            # Use the model the user explicitly selected in the UI.
+            # Strip any legacy OpenRouter provider prefix (e.g. "anthropic/claude-...") 
+            # since the native Anthropic SDK doesn't use that format.
+            model_name = getattr(settings, "anthropic_model", "claude-sonnet-4-6")
+            if model_name.startswith("anthropic/"):
+                model_name = model_name.replace("anthropic/", "")
+            
             available_configs["anthropic"] = [{
-                "name": "claude-3-5-sonnet",
-                "model": "claude-3-5-sonnet-20241022",
+                "name": model_name,
+                "model": model_name,
                 "type": "anthropic",
                 "api_key": settings.anthropic_api_key,
             }]
 
-        # 2. OpenAI (GPT-4o)
+        # 2. OpenAI
         if hasattr(settings, "openai_api_key") and settings.openai_api_key:
+            model_name = getattr(settings, "openai_model", "gpt-4o")
+                
             available_configs["openai"] = [{
-                "name": "gpt-4o",
-                "model": "gpt-4o",
+                "name": model_name,
+                "model": model_name,
                 "type": "openai",
                 "api_key": settings.openai_api_key,
             }]
             
-        # 3. Groq (Llama 3.3 70B)
+        # 3. Groq (Llama 3.3 70B fallback or custom)
         if hasattr(settings, "groq_api_key") and settings.groq_api_key:
+            model_name = getattr(settings, "groq_model", getattr(settings, "llm_model", "llama-3.3-70b-versatile"))
+            if model_name.startswith("meta/"):
+                model_name = model_name.replace("meta/", "")
+            elif model_name.startswith("meta-llama/"):
+                model_name = model_name.replace("meta-llama/", "")
+                
             available_configs["groq"] = [{
-                "name": "llama-3.3-70b-groq",
-                "model": getattr(settings, "llm_model", "llama-3.3-70b-versatile"),
+                "name": model_name,
+                "model": model_name,
                 "type": "groq",
                 "api_key": settings.groq_api_key,
             }]

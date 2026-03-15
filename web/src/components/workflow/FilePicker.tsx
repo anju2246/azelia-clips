@@ -77,18 +77,49 @@ export const FilePicker: React.FC<FilePickerProps> = ({ isOpen, currentPath, onS
                 </div>
 
                 {/* Current Path Bar */}
-                <div className="px-5 py-3 bg-black/30 border-b border-white/5 flex items-center gap-2">
-                    {parentPath && (
+                <div className="px-5 py-3 bg-black/30 border-b border-white/5">
+                    {/* Quick Access Buttons */}
+                    <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs text-zinc-500 mr-1">Go to:</span>
                         <button
-                            onClick={() => loadDirectory(parentPath)}
-                            className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white cursor-pointer"
-                            title="Go up"
+                            onClick={() => loadDirectory('~')}
+                            className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
                         >
-                            <ArrowUp className="w-4 h-4" />
+                            🏠 Home
                         </button>
-                    )}
-                    <div className="flex-1 overflow-x-auto no-scrollbar">
-                        <code className="text-sm text-brand-400 font-mono whitespace-nowrap">{resolvedPath}</code>
+                        <button
+                            onClick={() => loadDirectory('/Volumes')}
+                            className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                            💾 External Drives
+                        </button>
+                        <button
+                            onClick={() => loadDirectory('~/Desktop')}
+                            className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                            🖥️ Desktop
+                        </button>
+                        <button
+                            onClick={() => loadDirectory('~/Downloads')}
+                            className="text-xs px-2.5 py-1 rounded-lg bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white transition-colors cursor-pointer"
+                        >
+                            📥 Downloads
+                        </button>
+                    </div>
+                    {/* Current Path */}
+                    <div className="flex items-center gap-2">
+                        {parentPath && (
+                            <button
+                                onClick={() => loadDirectory(parentPath)}
+                                className="p-1.5 hover:bg-white/10 rounded-lg transition-colors text-zinc-400 hover:text-white cursor-pointer"
+                                title="Go up"
+                            >
+                                <ArrowUp className="w-4 h-4" />
+                            </button>
+                        )}
+                        <div className="flex-1 overflow-x-auto no-scrollbar">
+                            <code className="text-sm text-brand-400 font-mono whitespace-nowrap">{resolvedPath}</code>
+                        </div>
                     </div>
                 </div>
 

@@ -1,5 +1,5 @@
 from typing import List, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # ==========================================
 # Configuration Models (Personal Intelligence / IC)
@@ -110,9 +110,26 @@ class FinderCandidate(BaseModel):
     """Single candidate clip proposed by the Finder agent."""
     start_time: float = Field(..., description="Start timestamp of the clip in seconds")
     end_time: float = Field(..., description="End timestamp of the clip in seconds")
-    title: str = Field(..., description="Catchy working title for the clip")
-    summary: str = Field(..., description="Brief one-sentence summary of what the clip is about")
-    reasoning: str = Field(..., description="Why this makes a good clip (the hook, the value, etc.)")
+    title: Optional[str] = Field(default=None, description="Catchy working title for the clip")
+    summary: Optional[str] = Field(default=None, description="Brief one-sentence summary of what the clip is about")
+    reasoning: Optional[str] = Field(default=None, description="Why this makes a good clip")
+
+    # Support older LLM responses that use 'reason' instead of 'reasoning'
+    @model_validator(mode='before')
+    @classmethod
+    def coerce_legacy_fields(cls, data):
+        if isinstance(data, dict):
+            # Map 'reason' -> 'reasoning' if reasoning is missing
+            if not data.get('reasoning') and data.get('reason'):
+                data['reasoning'] = data.pop('reason')
+            # Auto-generate title from reasoning if missing
+            if not data.get('title'):
+                reason = data.get('reasoning') or data.get('reason', '')
+                data['title'] = (reason[:60].strip() + '...') if len(reason) > 60 else reason
+            # Auto-generate summary from reasoning if missing
+            if not data.get('summary'):
+                data['summary'] = data.get('reasoning', '')
+        return data
 
 class FinderResponse(BaseModel):
     """Structured response expected from the Finder agent."""

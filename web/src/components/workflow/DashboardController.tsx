@@ -34,8 +34,9 @@ export const DashboardController: React.FC = () => {
                     settings.anthropic_api_key,
                     settings.gcp_project_id,
                 ];
-                // A real key won't contain "..." (masked keys do)
-                const hasReal = keys.some(k => typeof k === 'string' && k.length >= 8 && !k.includes('...'));
+                // A key exists if it's long enough. It may be masked (contains '...') if it was loaded from the server's .env.
+                // If it's empty, then no key is set.
+                const hasReal = keys.some(k => typeof k === 'string' && k.trim().length >= 8);
                 setHasApiKey(hasReal);
             } catch {
                 setHasApiKey(false);

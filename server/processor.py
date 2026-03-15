@@ -39,11 +39,14 @@ class SingleVideoProcessor(BatchProcessor):
         # We treat the job folder as the "episode folder"
         episode_folder = video_path.parent
         
+        # Auto-detect existing transcript in the same folder
+        transcript_path = video_path.parent / "transcript.json"
+        
         config = EpisodeConfig(
             episode_number=0, # Dummy number
             episode_folder=episode_folder,
             video_path=video_path,
-            transcript_path=None
+            transcript_path=transcript_path if transcript_path.exists() else None
         )
         
         console.print(f"[bold green]🚀 Starting single file processing for Job {job_id}[/bold green]")
