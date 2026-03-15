@@ -654,7 +654,15 @@ class FaceTracker:
         duration = total_frames / fps if fps > 0 else 0
         if end_time is None:
             end_time = duration
-            
+
+        # Normalize: accept both dicts and dataclass/object segments
+        def _seg(s, key):
+            return s[key] if isinstance(s, dict) else getattr(s, key)
+        speaker_segments = [
+            {"start": _seg(s, "start"), "end": _seg(s, "end"), "speaker": _seg(s, "speaker")}
+            for s in speaker_segments
+        ]
+
         # Get Pyannote speakers
         pyannote_speakers = list(set([s["speaker"] for s in speaker_segments]))
         if not pyannote_speakers:
@@ -783,6 +791,15 @@ class FaceTracker:
             return self.get_smooth_crop_trajectory(
                 detections, video_width, video_height, target_aspect
             )
+
+        # Normalize: accept both dicts and dataclass/object segments
+        def _as_dict(s):
+            if isinstance(s, dict):
+                return s
+            return {"start": getattr(s, "start", 0), "end": getattr(s, "end", 0), "speaker": getattr(s, "speaker", "")}
+        speaker_segments = [_as_dict(s) for s in speaker_segments]
+        # Filter out segments with no speaker label (transcript segments)
+        speaker_segments = [s for s in speaker_segments if s["speaker"]]
 
         # Get active speaker mapping via mouth motion
         speaker_face_map = self.map_speakers_via_mouth_motion(
