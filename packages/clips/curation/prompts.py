@@ -148,19 +148,22 @@ Esto es NO NEGOCIABLE. Los clips muy cortos NO funcionan en redes sociales.
 ## Formato de Respuesta (JSON)
 ```json
 {{
-  "approved": [
+  "approved_clips": [
     {{
       "start_time": 125.5,
       "end_time": 165.0,
-      "approval_reason": "Por qué este clip es bueno",
-      "improvement_notes": "Sugerencias opcionales de ajuste de tiempos"
-    }}
-  ],
-  "rejected": [
+      "title": "Título del clip",
+      "summary": "Breve resumen del clip",
+      "reasoning": "Por qué este clip funciona en redes sociales",
+      "approved": true
+    }},
     {{
       "start_time": 200.0,
       "end_time": 230.0,
-      "rejection_reason": "Por qué se elimina"
+      "title": "Título del clip rechazado",
+      "summary": "Breve resumen",
+      "reasoning": "Por qué se elimina este clip",
+      "approved": false
     }}
   ]
 }}
@@ -412,7 +415,7 @@ CRITIC_SYSTEM_COMPACT = """Eres CRITIC: evalúa clips candidatos. Sé JUSTO pero
 
 ## JSON:
 ```json
-{{"approved":[{{"start_time":X,"end_time":Y,"approval_reason":"..."}}],"rejected":[{{"start_time":X,"end_time":Y,"rejection_reason":"..."}}]}}
+{{"approved_clips":[{{"start_time":X,"end_time":Y,"title":"Título","summary":"Resumen","reasoning":"Razón","approved":true}}]}}
 ```"""
 
 
