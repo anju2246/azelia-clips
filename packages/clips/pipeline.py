@@ -533,16 +533,30 @@ class BatchProcessor:
         run_ffmpeg(cmd, timeout=300)  # 5 min max for clip extraction
     
     def _burn_subtitles(self, video: Path, subs: Path, output: Path) -> None:
-        """Burn subtitles into video using FFmpeg."""
-        cmd = [
-            "ffmpeg", "-y",
-            "-i", str(video),
-            "-vf", f"ass={subs}",
-            "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-            "-c:a", "aac", "-b:a", "128k",
-            str(output)
-        ]
-        run_ffmpeg(cmd, timeout=300)  # 5 min max for subtitle burning
+        """Burn subtitles into video using FFmpeg.
+        
+        The FFmpeg ass= filter breaks on macOS temp paths containing colons
+        or other special characters (exit 234). Solution: copy the .ass file
+        to a safe flat path next to the video before running ffmpeg.
+        """
+        import shutil, tempfile
+        # Copy subtitle to a safe temp path (no special chars in filename)
+        safe_subs = Path(tempfile.mktemp(suffix=".ass", dir=output.parent))
+        shutil.copy2(str(subs), str(safe_subs))
+        try:
+            # Escape path for FFmpeg filter syntax (colons must be \:)
+            safe_subs_str = str(safe_subs).replace("\\", "/").replace(":", "\\:")
+            cmd = [
+                "ffmpeg", "-y",
+                "-i", str(video),
+                "-vf", f"ass={safe_subs_str}",
+                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
+                "-c:a", "aac", "-b:a", "128k",
+                str(output)
+            ]
+            run_ffmpeg(cmd, timeout=300)  # 5 min max for subtitle burning
+        finally:
+            safe_subs.unlink(missing_ok=True)
     
     def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
         """Transcribe using the configured driver (Local, AssemblyAI, or Supabase)."""
