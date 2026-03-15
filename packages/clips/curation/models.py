@@ -139,14 +139,50 @@ class CriticClip(BaseModel):
     """Critic's assessment of a candidate clip."""
     start_time: float = Field(..., description="Start timestamp")
     end_time: float = Field(..., description="End timestamp")
-    title: str = Field(..., description="Catchy title")
-    summary: str = Field(..., description="Brief summary")
-    reasoning: str = Field(..., description="Why it was approved or rejected")
+    title: Optional[str] = Field(default=None, description="Catchy title")
+    summary: Optional[str] = Field(default=None, description="Brief summary")
+    reasoning: Optional[str] = Field(default=None, description="Why it was approved or rejected")
     approved: bool = Field(..., description="True if the clip is good enough to proceed")
-    
+
+    @model_validator(mode='before')
+    @classmethod
+    def coerce_legacy_fields(cls, data):
+        if isinstance(data, dict):
+            # Map approval_reason / rejection_reason -> reasoning
+            if not data.get('reasoning'):
+                data['reasoning'] = data.get('approval_reason') or data.get('rejection_reason', '')
+            # Infer approved from which key is present if missing
+            if 'approved' not in data:
+                data['approved'] = bool(data.get('approval_reason'))
+            # Auto-fill title/summary if missing
+            if not data.get('title'):
+                r = data.get('reasoning', '')
+                data['title'] = (r[:60].strip() + '...') if len(r) > 60 else r
+            if not data.get('summary'):
+                data['summary'] = data.get('reasoning', '')
+        return data
+
 class CriticResponse(BaseModel):
     """Structured response expected from the Critic agent."""
-    approved_clips: List[CriticClip] = Field(..., description="All evaluated clips, marked approved or not")
+    approved_clips: List[CriticClip] = Field(default_factory=list)
+
+    @model_validator(mode='before')
+    @classmethod
+    def coerce_legacy_format(cls, data):
+        """Map old {approved:[...], rejected:[...]} -> {approved_clips:[...]}"""
+        if isinstance(data, dict) and 'approved_clips' not in data:
+            approved = data.get('approved', [])
+            rejected = data.get('rejected', [])
+            if approved or rejected:
+                clips = []
+                for c in approved:
+                    c['approved'] = True
+                    clips.append(c)
+                for c in rejected:
+                    c['approved'] = False
+                    clips.append(c)
+                data['approved_clips'] = clips
+        return data
 
     @property
     def approved_only(self) -> List[CriticClip]:
