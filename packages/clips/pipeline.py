@@ -532,31 +532,62 @@ class BatchProcessor:
         ]
         run_ffmpeg(cmd, timeout=300)  # 5 min max for clip extraction
     
+    @staticmethod
+    def _has_libass() -> bool:
+        """Check if the installed FFmpeg binary supports the ass/subtitles filter."""
+        import subprocess
+        try:
+            result = subprocess.run(
+                ["ffmpeg", "-filters"],
+                capture_output=True, text=True, timeout=10
+            )
+            return "subtitles" in result.stdout or "ass" in result.stdout
+        except Exception:
+            return False
+
     def _burn_subtitles(self, video: Path, subs: Path, output: Path) -> None:
         """Burn subtitles into video using FFmpeg.
         
-        The FFmpeg ass= filter breaks on macOS temp paths containing colons
-        or other special characters (exit 234). Solution: copy the .ass file
-        to a safe flat path next to the video before running ffmpeg.
+        Falls back to copying the video if FFmpeg was compiled without libass
+        (common with the default Homebrew FFmpeg build). The .ass file is saved
+        alongside the output so it can be used by media players that support
+        external subtitle tracks.
         """
-        import shutil, tempfile
-        # Copy subtitle to a safe temp path (no special chars in filename)
-        safe_subs = Path(tempfile.mktemp(suffix=".ass", dir=output.parent))
-        shutil.copy2(str(subs), str(safe_subs))
+        import shutil, os
+
+        if not self._has_libass():
+            # libass not available — copy video as-is and save .ass next to it
+            console.print(
+                "[yellow]⚠ FFmpeg missing libass — subtitles not burned. "
+                "Saving .ass file alongside clip.[/yellow]"
+            )
+            shutil.copy2(str(video), str(output))
+            ass_out = output.with_suffix(".ass")
+            shutil.copy2(str(subs), str(ass_out))
+            return
+
+        # libass available: burn subtitles
+        # Copy the .ass to /tmp with a safe name to avoid path-escaping issues
+        import tempfile
+        fd, safe_subs_str = tempfile.mkstemp(suffix=".ass", dir="/tmp")
+        os.close(fd)
+        shutil.copy2(str(subs), safe_subs_str)
         try:
-            # Escape path for FFmpeg filter syntax (colons must be \:)
-            safe_subs_str = str(safe_subs).replace("\\", "/").replace(":", "\\:")
             cmd = [
                 "ffmpeg", "-y",
                 "-i", str(video),
-                "-vf", f"ass={safe_subs_str}",
+                "-vf", f"ass=filename={safe_subs_str}",
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac", "-b:a", "128k",
                 str(output)
             ]
-            run_ffmpeg(cmd, timeout=300)  # 5 min max for subtitle burning
+            run_ffmpeg(cmd, timeout=300)
         finally:
-            safe_subs.unlink(missing_ok=True)
+            try:
+                os.unlink(safe_subs_str)
+            except Exception:
+                pass
+
     
     def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
         """Transcribe using the configured driver (Local, AssemblyAI, or Supabase)."""
