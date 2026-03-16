@@ -249,6 +249,39 @@ async def process_local_video(
 
 # ─── Job Status & Clips ─────────────────────────────────────────────────────
 
+@router.get("/jobs/history")
+async def get_jobs_history(user: User = Depends(require_auth)):
+    """Get a unified history of all processing jobs (both episodes and ad-hoc)."""
+    jobs = store.get_latest_jobs_per_episode()
+    history = []
+    
+    # Sort by created_at descending
+    sorted_jobs = sorted(jobs.values(), key=lambda j: j.created_at, reverse=True)
+    
+    for job in sorted_jobs:
+        # Check if clips actually exist before counting as processed
+        clips_dir = DATA_DIR / job.job_id / "clips"
+        has_approved = (clips_dir / "approved").exists() and any((clips_dir / "approved").iterdir())
+        has_review = (clips_dir / "review").exists() and any((clips_dir / "review").iterdir())
+        
+        # Determine format
+        is_episode = job.episode_id.startswith("EP") and len(job.episode_id) == 5
+        
+        history.append({
+            "id": job.job_id,
+            "filename": job.episode_id,
+            "status": job.status,
+            "created_at": job.created_at,
+            "clips_generated": job.clips_generated,
+            "has_clips": has_approved or has_review,
+            "type": "episode" if is_episode else "adhoc",
+            # Include standard episode properties for frontend compatibility
+            "number": int(job.episode_id[2:]) if is_episode and job.episode_id[2:].isdigit() else 0,
+            "title": job.episode_id
+        })
+        
+    return history
+
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str, user: User = Depends(require_auth)):
     """Get job status."""
@@ -275,6 +308,23 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
                     title=f"Clip {i+1}",
                     summary="Generated clip",
                     status="approved",
+                    download_url=f"/api/clips/{job_id}/{clip_file.name}"
+                ))
+        
+        # Scan review folder
+        if (clips_dir / "review").exists():
+            base_id = len(clips)
+            for i, clip_file in enumerate(sorted((clips_dir / "review").glob("*.mp4"))):
+                clips.append(Clip(
+                    id=base_id+i+1,
+                    filename=clip_file.name,
+                    start_time=0, 
+                    end_time=0,
+                    duration=0,
+                    virality_score=75,
+                    title=f"Clip {base_id+i+1}",
+                    summary="Needs review",
+                    status="review",
                     download_url=f"/api/clips/{job_id}/{clip_file.name}"
                 ))
     
@@ -429,7 +479,7 @@ async def list_episodes():
                 title=ep.episode_folder.name,
                 has_video=ep.video_path.exists(),
                 has_transcript=True if ep.transcript_path else False,
-                is_processed=(ep.clips_folder / "approved").exists(),
+                is_processed=((ep.clips_folder / "approved").exists() or (ep.clips_folder / "review").exists()),
                 path=str(ep.episode_folder)
             ) for ep in episodes
         ]
