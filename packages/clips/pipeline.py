@@ -533,50 +533,38 @@ class BatchProcessor:
         run_ffmpeg(cmd, timeout=300)  # 5 min max for clip extraction
     
     @staticmethod
-    def _has_libass() -> bool:
-        """Check if the installed FFmpeg binary supports the ass/subtitles filter."""
-        import subprocess
+    def _get_ffmpeg_exe() -> str:
+        """Return the best available FFmpeg binary.
+        
+        Prefers the imageio-ffmpeg bundled binary (compiled with libass)
+        over the system FFmpeg (Homebrew default lacks libass).
+        """
         try:
-            result = subprocess.run(
-                ["ffmpeg", "-filters"],
-                capture_output=True, text=True, timeout=10
-            )
-            return "subtitles" in result.stdout or "ass" in result.stdout
-        except Exception:
-            return False
+            import imageio_ffmpeg
+            return imageio_ffmpeg.get_ffmpeg_exe()
+        except ImportError:
+            return "ffmpeg"
 
     def _burn_subtitles(self, video: Path, subs: Path, output: Path) -> None:
-        """Burn subtitles into video using FFmpeg.
+        """Burn subtitles into video using FFmpeg with libass.
         
-        Falls back to copying the video if FFmpeg was compiled without libass
-        (common with the default Homebrew FFmpeg build). The .ass file is saved
-        alongside the output so it can be used by media players that support
-        external subtitle tracks.
+        Uses the imageio-ffmpeg bundled binary from the venv (compiled with
+        libass) to avoid issues with the default Homebrew FFmpeg which lacks
+        the ass/subtitles filters.
         """
-        import shutil, os
+        import shutil, os, tempfile
 
-        if not self._has_libass():
-            # libass not available — copy video as-is and save .ass next to it
-            console.print(
-                "[yellow]⚠ FFmpeg missing libass — subtitles not burned. "
-                "Saving .ass file alongside clip.[/yellow]"
-            )
-            shutil.copy2(str(video), str(output))
-            ass_out = output.with_suffix(".ass")
-            shutil.copy2(str(subs), str(ass_out))
-            return
+        ffmpeg_exe = self._get_ffmpeg_exe()
 
-        # libass available: burn subtitles
-        # Copy the .ass to /tmp with a safe name to avoid path-escaping issues
-        import tempfile
+        # Copy the .ass to /tmp with a safe name to avoid AVFilter path-escaping issues
         fd, safe_subs_str = tempfile.mkstemp(suffix=".ass", dir="/tmp")
         os.close(fd)
         shutil.copy2(str(subs), safe_subs_str)
         try:
             cmd = [
-                "ffmpeg", "-y",
+                ffmpeg_exe, "-y",
                 "-i", str(video),
-                "-vf", f"ass=filename={safe_subs_str}",
+                "-vf", f"ass={safe_subs_str}",
                 "-c:v", "libx264", "-preset", "fast", "-crf", "23",
                 "-c:a", "aac", "-b:a", "128k",
                 str(output)
@@ -588,7 +576,7 @@ class BatchProcessor:
             except Exception:
                 pass
 
-    
+
     def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
         """Transcribe using the configured driver (Local, AssemblyAI, or Supabase)."""
         from packages.clips.transcription.supabase import SupabaseSource
