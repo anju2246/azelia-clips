@@ -36,10 +36,23 @@ class SingleVideoProcessor(BatchProcessor):
     def process_single(self, video_path: Path, job_id: str) -> int:
         """Process a single video file."""
         # Create a dummy EpisodeConfig
-        # We treat the job folder as the "episode folder"
-        episode_folder = video_path.parent
+        # First try to use the original file's directory if it is a symlink (which means it's a local file upload)
+        # If it's a symlink, os.path.realpath resolves to original location
+        try:
+            original_path = Path(os.path.realpath(video_path))
+            original_dir = original_path.parent
+            # Check if we have write access by testing with a fast creation access check
+            if os.access(original_dir, os.W_OK):
+                episode_folder = original_dir
+                console.print(f"[green]✓ Local write access confirmed -> Exporting clips to {episode_folder}/clips[/green]")
+            else:
+                episode_folder = video_path.parent
+                console.print(f"[yellow]⚠️ No write access to {original_dir} -> Using job folder {episode_folder}[/yellow]")
+        except Exception as e:
+            episode_folder = video_path.parent
+            console.print(f"[yellow]⚠️ Could not resolve original path -> Using job folder {episode_folder}[/yellow]")
         
-        # Auto-detect existing transcript in the same folder
+        # Auto-detect existing transcript in the same folder as the video (or job folder as fallback)
         transcript_path = video_path.parent / "transcript.json"
         
         config = EpisodeConfig(

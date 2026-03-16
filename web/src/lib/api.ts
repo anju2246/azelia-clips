@@ -141,8 +141,9 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 // --- CLIPS & EPISODES API ---
 
 export const ClipsApi = {
-  // Episodes
+  // Episodes / History
   getEpisodes: () => fetchApi<EpisodeResponse[]>('/episodes'),
+  getHistory: () => fetchApi<any[]>('/jobs/history'),
 
   processEpisode: (episodeNum: number, req: ProcessRequest = {}) =>
     fetchApi<JobResponse>(`/episodes/${episodeNum}/process`, {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { ClipReviewCard } from './ClipReviewCard';
-import { ClipsApi, type JobResponse, type Clip } from '../../lib/api';
+import { ClipsApi, type JobResponse, type Clip, type EpisodeResponse } from '../../lib/api';
 import { ArrowLeft, Loader2, VideoOff } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -8,6 +8,8 @@ export const ClipReviewList: React.FC = () => {
     const [job, setJob] = useState<JobResponse | null>(null);
     const [loading, setLoading] = useState(true);
     const [jobId, setJobId] = useState<string | null>(null);
+    const [history, setHistory] = useState<any[]>([]);
+    const [loadingHistory, setLoadingHistory] = useState(false);
 
     useEffect(() => {
         // Parse jobId from URL query parameters (e.g., ?job=12345)
@@ -20,7 +22,22 @@ export const ClipReviewList: React.FC = () => {
         } else {
             setLoading(false);
         }
+        
+        loadHistory();
     }, []);
+
+    const loadHistory = async () => {
+        setLoadingHistory(true);
+        try {
+            const data = await ClipsApi.getHistory();
+            // Only show history items that actually have clips generated
+            setHistory(data.filter(item => item.has_clips));
+        } catch (error) {
+            console.error('Failed to load history', error);
+        } finally {
+            setLoadingHistory(false);
+        }
+    };
 
     const loadJob = async (id: string) => {
         setLoading(true);
@@ -73,58 +90,109 @@ export const ClipReviewList: React.FC = () => {
             </div>
         );
     }
-
-    if (!jobId) {
-        return (
-            <div className="text-center py-20 bg-zinc-900/40 border border-white/5 rounded-2xl max-w-2xl mx-auto mt-10">
-                <VideoOff className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-                <h3 className="text-lg font-medium text-zinc-300">No Job Selected</h3>
-                <p className="text-sm text-zinc-500 mt-2">
-                    Please process an episode from the Dashboard first to review clips.
-                </p>
-                <a
-                    href="/dashboard"
-                    className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-colors mt-6"
-                >
-                    <ArrowLeft className="w-4 h-4" /> Return to Dashboard
-                </a>
-            </div>
-        );
-    }
-
     const clips = job?.clips || [];
 
     return (
         <div className="w-full">
-            <div className="flex items-center justify-between mb-8">
-                <div>
-                    <a href="/dashboard" className="text-brand-400 text-sm flex items-center gap-1 hover:text-brand-300 mb-2 w-max transition-colors">
-                        <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-                    </a>
-                    <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
-                        Review Clips
-                    </h2>
-                    <p className="text-zinc-500 mt-1">
-                        Job ID: <span className="font-mono">{jobId}</span> • {clips.length} clips generated
-                    </p>
-                </div>
-            </div>
+            {jobId && (
+                <>
+                    <div className="flex items-center justify-between mb-8">
+                        <div>
+                            <a href="/dashboard" className="text-brand-400 text-sm flex items-center gap-1 hover:text-brand-300 mb-2 w-max transition-colors">
+                                <ArrowLeft className="w-4 h-4" /> Back to Dashboard
+                            </a>
+                            <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
+                                Review Clips
+                            </h2>
+                            <p className="text-zinc-500 mt-1">
+                                Job ID: <span className="font-mono">{jobId}</span> • {clips.length} clips generated
+                            </p>
+                        </div>
+                    </div>
 
-            {clips.length === 0 ? (
-                <div className="text-center py-20 bg-zinc-900/40 border border-white/5 rounded-2xl">
-                    <p className="text-zinc-400">No clips found for this job. It might have failed or not generated any results.</p>
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                    {clips.map(clip => (
-                        <ClipReviewCard
-                            key={clip.id}
-                            clip={clip}
-                            jobId={jobId}
-                            onApprove={handleApprove}
-                            onReject={handleReject}
-                        />
-                    ))}
+                    {clips.length === 0 ? (
+                        <div className="text-center py-20 bg-zinc-900/40 border border-white/5 rounded-2xl">
+                            <p className="text-zinc-400">No clips found for this job. It might have failed or not generated any results.</p>
+                        </div>
+                    ) : (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            {clips.map(clip => (
+                                <ClipReviewCard
+                                    key={clip.id}
+                                    clip={clip}
+                                    jobId={jobId}
+                                    onApprove={handleApprove}
+                                    onReject={handleReject}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </>
+            )}
+
+            {/* History Section */}
+            {(!jobId || history.length > 0) && (
+                <div className={jobId ? "mt-16 pt-8 border-t border-white/5" : ""}>
+                    <h3 className="text-xl font-bold text-white mb-6">Historial de Clips</h3>
+                    
+                    {loadingHistory ? (
+                        <div className="flex justify-center items-center h-32">
+                            <Loader2 className="w-6 h-6 text-brand-500 animate-spin" />
+                        </div>
+                    ) : history.length > 0 ? (
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            {history.map((item) => (
+                                <div
+                                    key={item.id}
+                                    onClick={() => {
+                                        // The job ID is the unique ID for the processing job
+                                        const url = new URL(window.location.href);
+                                        url.searchParams.set('job', item.id);
+                                        window.history.pushState({}, '', url.toString());
+                                        setJobId(item.id);
+                                        loadJob(item.id);
+                                    }}
+                                    className="group cursor-pointer glass-card rounded-2xl p-5 border border-white/5 bg-zinc-900/40 hover:bg-zinc-900/80 transition-all duration-300 hover:-translate-y-1 hover:border-brand-500/30 flex flex-col"
+                                >
+                                    <div className="flex justify-between items-start mb-4">
+                                        <div className="bg-brand-500/10 text-brand-400 text-xs font-bold px-2 py-1 rounded-md">
+                                            {item.type === 'episode' ? `EP ${item.number.toString().padStart(3, '0')}` : 'Ad-Hoc'}
+                                        </div>
+                                        <div className="flex items-center gap-1 text-zinc-400 text-xs">
+                                            {new Date(item.created_at).toLocaleDateString()}
+                                        </div>
+                                    </div>
+
+                                    <h3 className="font-semibold text-lg text-zinc-200 mb-2 line-clamp-2" title={item.filename}>
+                                        {item.filename}
+                                    </h3>
+                                    <p className="text-xs text-zinc-500 mb-4">
+                                        {item.clips_generated} clips extráidos
+                                    </p>
+
+                                    <div className="mt-auto pt-4">
+                                        <div className="w-full text-center py-2 rounded-lg bg-white/5 group-hover:bg-white/10 text-white border border-white/10 text-sm font-medium transition-colors">
+                                            Ver Clips Generados
+                                        </div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    ) : !jobId ? (
+                        <div className="text-center py-20 bg-zinc-900/40 border border-white/5 rounded-2xl max-w-2xl mx-auto mt-10">
+                            <VideoOff className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
+                            <h3 className="text-lg font-medium text-zinc-300">Sin historial</h3>
+                            <p className="text-sm text-zinc-500 mt-2">
+                                No tienes clips procesados. Ve al Dashboard para procesar un video o episodio.
+                            </p>
+                            <a
+                                href="/dashboard"
+                                className="inline-flex items-center gap-2 px-6 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-colors mt-6"
+                            >
+                                <ArrowLeft className="w-4 h-4" /> Volver al Dashboard
+                            </a>
+                        </div>
+                    ) : null}
                 </div>
             )}
         </div>
