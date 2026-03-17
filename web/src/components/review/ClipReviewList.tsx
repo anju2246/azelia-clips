@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { ClipReviewCard } from './ClipReviewCard';
+import { ClipPlayerModal } from './ClipPlayerModal';
+import { RejectedClipsList } from './RejectedClipsList';
 import { ClipsApi, type JobResponse, type Clip, type EpisodeResponse } from '../../lib/api';
-import { ArrowLeft, Loader2, VideoOff } from 'lucide-react';
+import { ArrowLeft, Loader2, VideoOff, Trash2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export const ClipReviewList: React.FC = () => {
@@ -10,6 +12,11 @@ export const ClipReviewList: React.FC = () => {
     const [jobId, setJobId] = useState<string | null>(null);
     const [history, setHistory] = useState<any[]>([]);
     const [loadingHistory, setLoadingHistory] = useState(false);
+    const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
+    const [trashVersion, setTrashVersion] = useState(0);
+    const [showTrash, setShowTrash] = useState(false);
+    const [selectedRejectedIndex, setSelectedRejectedIndex] = useState<number | null>(null);
+    const [rejectedClips, setRejectedClips] = useState<any[]>([]);
 
     useEffect(() => {
         // Parse jobId from URL query parameters (e.g., ?job=12345)
@@ -52,34 +59,49 @@ export const ClipReviewList: React.FC = () => {
     };
 
     const handleApprove = async (clipId: number) => {
-        try {
-            await ClipsApi.approveClip(clipId);
-            toast.success('Clip approved and saved to output folder!');
+        if (!job || !jobId) return;
+        const clip = job.clips.find(c => c.id === clipId);
+        if (!clip) return;
 
-            // Update local state to reflect approval
-            if (job) {
-                const updatedClips = job.clips.map(c =>
-                    c.id === clipId ? { ...c, status: 'approved' } : c
-                );
-                setJob({ ...job, clips: updatedClips });
-            }
+        try {
+            await ClipsApi.approveClip(jobId, clip.filename);
+            toast.success('Clip aprobado ✓');
+
+            // Update local state
+            const updatedClips = job.clips.map(c =>
+                c.id === clipId ? { ...c, status: 'approved' } : c
+            );
+            setJob({ ...job, clips: updatedClips });
         } catch (error: any) {
-            toast.error(error.message || 'Failed to approve clip');
+            toast.error(error.message || 'Error al aprobar clip');
         }
     };
 
     const handleReject = async (clipId: number) => {
+        if (!job || !jobId) return;
+        const clip = job.clips.find(c => c.id === clipId);
+        if (!clip) return;
+
         try {
-            // For MVP, rejecting might just remove it from the UI or call an endpoint
-            // We'll simulate removal from UI for now since API deletion isn't fully spec'd
-            if (job) {
-                const updatedClips = job.clips.filter(c => c.id !== clipId);
-                setJob({ ...job, clips: updatedClips });
+            await ClipsApi.rejectClip(jobId, clip.filename);
+
+            // Remove from UI
+            const updatedClips = job.clips.filter(c => c.id !== clipId);
+            setJob({ ...job, clips: updatedClips });
+            // If we're in modal, adjust index
+            if (selectedClipIndex !== null && selectedClipIndex >= updatedClips.length) {
+                setSelectedClipIndex(updatedClips.length > 0 ? updatedClips.length - 1 : null);
             }
-            toast.success('Clip rejected');
+            setTrashVersion(v => v + 1);
+            toast.success('Clip rechazado (se eliminará en 30 días)');
         } catch (error: any) {
-            toast.error('Failed to reject clip');
+            toast.error(error.message || 'Error al rechazar clip');
         }
+    };
+
+    const handleRejectedClipClick = (index: number, clipsList: any[]) => {
+        setRejectedClips(clipsList);
+        setSelectedRejectedIndex(index);
     };
 
     if (loading) {
@@ -98,31 +120,64 @@ export const ClipReviewList: React.FC = () => {
                 <>
                     <div className="flex items-center justify-between mb-8">
                         <div>
-                            <a href="/dashboard" className="text-brand-400 text-sm flex items-center gap-1 hover:text-brand-300 mb-2 w-max transition-colors">
-                                <ArrowLeft className="w-4 h-4" /> Back to Dashboard
-                            </a>
+                            <button
+                                onClick={() => {
+                                    const url = new URL(window.location.href);
+                                    url.searchParams.delete('job');
+                                    window.history.pushState({}, '', url.toString());
+                                    setJobId(null);
+                                    setJob(null);
+                                    setSelectedClipIndex(null);
+                                    setShowTrash(false);
+                                }}
+                                className="text-brand-400 text-sm flex items-center gap-1 hover:text-brand-300 mb-2 w-max transition-colors"
+                            >
+                                <ArrowLeft className="w-4 h-4" /> Volver al Historial
+                            </button>
                             <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
                                 Review Clips
                             </h2>
                             <p className="text-zinc-500 mt-1">
-                                Job ID: <span className="font-mono">{jobId}</span> • {clips.length} clips generated
+                                {clips.length} clips generados
                             </p>
                         </div>
+                        
+                        <button
+                            onClick={() => setShowTrash(!showTrash)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium ${
+                                showTrash 
+                                    ? 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 hover:text-white' 
+                                    : 'bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10'
+                            }`}
+                        >
+                            {showTrash ? <ArrowLeft className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                            {showTrash ? 'Volver a Clips' : 'Ver Papelera'}
+                        </button>
                     </div>
 
-                    {clips.length === 0 ? (
+                    {showTrash ? (
+                        <div className="bg-zinc-900/30 border border-red-500/10 rounded-3xl p-6">
+                            <RejectedClipsList 
+                                jobId={jobId} 
+                                onRestored={() => loadJob(jobId)} 
+                                onClipClick={handleRejectedClipClick}
+                                version={trashVersion} 
+                            />
+                        </div>
+                    ) : clips.length === 0 ? (
                         <div className="text-center py-20 bg-zinc-900/40 border border-white/5 rounded-2xl">
                             <p className="text-zinc-400">No clips found for this job. It might have failed or not generated any results.</p>
                         </div>
                     ) : (
                         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                            {clips.map(clip => (
+                            {clips.map((clip, index) => (
                                 <ClipReviewCard
                                     key={clip.id}
                                     clip={clip}
                                     jobId={jobId}
                                     onApprove={handleApprove}
                                     onReject={handleReject}
+                                    onClick={() => setSelectedClipIndex(index)}
                                 />
                             ))}
                         </div>
@@ -194,6 +249,39 @@ export const ClipReviewList: React.FC = () => {
                         </div>
                     ) : null}
                 </div>
+            )}
+
+            {/* Modal */}
+            {(selectedClipIndex !== null || selectedRejectedIndex !== null) && jobId && (
+                <ClipPlayerModal
+                    clips={selectedRejectedIndex !== null ? rejectedClips : (job?.clips || [])}
+                    initialClipIndex={selectedRejectedIndex !== null ? selectedRejectedIndex : (selectedClipIndex || 0)}
+                    jobId={jobId}
+                    onClose={() => {
+                        setSelectedClipIndex(null);
+                        setSelectedRejectedIndex(null);
+                    }}
+                    onApprove={async (id) => {
+                        if (selectedRejectedIndex !== null) {
+                            // If it's a rejected clip, Approve = Restore
+                            const clip = rejectedClips[selectedRejectedIndex];
+                            if (clip) {
+                                try {
+                                    await ClipsApi.restoreClip(jobId, clip.filename);
+                                    toast.success('Clip restaurado');
+                                    loadJob(jobId);
+                                    setTrashVersion(v => v + 1);
+                                    setSelectedRejectedIndex(null);
+                                } catch (e) {
+                                    toast.error('Error al restaurar');
+                                }
+                            }
+                        } else {
+                            handleApprove(id);
+                        }
+                    }}
+                    onReject={handleReject}
+                />
             )}
         </div>
     );
