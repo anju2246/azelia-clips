@@ -282,6 +282,31 @@ async def get_jobs_history(user: User = Depends(require_auth)):
         
     return history
 
+def _get_video_duration(path: Path) -> float:
+    """Get video duration in seconds using ffprobe."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            capture_output=True, text=True, timeout=5
+        )
+        return float(result.stdout.strip())
+    except Exception:
+        return 0.0
+
+def _load_curation(job_dir: Path) -> list:
+    """Load curation.json if it exists, returns list of dicts."""
+    curation_path = job_dir / "curation.json"
+    if not curation_path.exists():
+        # Also check the clips parent (for ad-hoc, curation may be in episode_folder)
+        return []
+    try:
+        with open(curation_path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return []
+
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str, user: User = Depends(require_auth)):
     """Get job status."""
@@ -295,18 +320,41 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
         job_dir = DATA_DIR / job_id
         clips_dir = job_dir / "clips"
         
+        # Try to load curation metadata for richer clip info
+        curation = _load_curation(job_dir)
+        
+        def _clip_meta(index: int) -> dict:
+            """Get curation metadata for clip at index (1-based clip_XX)."""
+            if index <= len(curation):
+                c = curation[index - 1]
+                return {
+                    "title": c.get("title", f"Clip {index}"),
+                    "summary": c.get("summary", ""),
+                    "score": c.get("virality_score", {}).get("total", 0) if isinstance(c.get("virality_score"), dict) else c.get("virality_score", 0),
+                    "start_time": c.get("start_time", 0),
+                    "end_time": c.get("end_time", 0),
+                }
+            return {"title": f"Clip {index}", "summary": "", "score": 0, "start_time": 0, "end_time": 0}
+        
         # Scan approved folder
         if (clips_dir / "approved").exists():
             for i, clip_file in enumerate(sorted((clips_dir / "approved").glob("*.mp4"))):
+                # Extract clip number from filename (clip_01.mp4 -> 1)
+                try:
+                    clip_num = int(clip_file.stem.split("_")[1])
+                except (IndexError, ValueError):
+                    clip_num = i + 1
+                meta = _clip_meta(clip_num)
+                dur = _get_video_duration(clip_file)
                 clips.append(Clip(
                     id=i+1,
                     filename=clip_file.name,
-                    start_time=0, 
-                    end_time=0,
-                    duration=0,
-                    virality_score=85,
-                    title=f"Clip {i+1}",
-                    summary="Generated clip",
+                    start_time=meta["start_time"],
+                    end_time=meta["end_time"],
+                    duration=round(dur, 1),
+                    virality_score=meta["score"] or 85,
+                    title=meta["title"],
+                    summary=meta["summary"] or "Aprobado automáticamente",
                     status="approved",
                     download_url=f"/api/clips/{job_id}/{clip_file.name}"
                 ))
@@ -315,15 +363,21 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
         if (clips_dir / "review").exists():
             base_id = len(clips)
             for i, clip_file in enumerate(sorted((clips_dir / "review").glob("*.mp4"))):
+                try:
+                    clip_num = int(clip_file.stem.split("_")[1])
+                except (IndexError, ValueError):
+                    clip_num = base_id + i + 1
+                meta = _clip_meta(clip_num)
+                dur = _get_video_duration(clip_file)
                 clips.append(Clip(
                     id=base_id+i+1,
                     filename=clip_file.name,
-                    start_time=0, 
-                    end_time=0,
-                    duration=0,
-                    virality_score=75,
-                    title=f"Clip {base_id+i+1}",
-                    summary="Needs review",
+                    start_time=meta["start_time"],
+                    end_time=meta["end_time"],
+                    duration=round(dur, 1),
+                    virality_score=meta["score"] or 75,
+                    title=meta["title"],
+                    summary=meta["summary"] or "Requiere revisión manual",
                     status="review",
                     download_url=f"/api/clips/{job_id}/{clip_file.name}"
                 ))
@@ -343,6 +397,31 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
         clips=clips,
         error=job.error
     )
+
+@router.get("/clips/{job_id}/rejected")
+async def list_rejected_clips(job_id: str):
+    """List all rejected clips for a job, with age info."""
+    import time
+    clips_dir = (DATA_DIR / job_id / "clips" / "rejected").resolve()
+    
+    if not clips_dir.exists():
+        return []
+    
+    now = time.time()
+    results = []
+    for f in sorted(clips_dir.glob("*.mp4")):
+        age_seconds = now - f.stat().st_mtime
+        days_remaining = max(0, 30 - int(age_seconds / 86400))
+        dur = _get_video_duration(f)
+        results.append({
+            "filename": f.name,
+            "rejected_at": f.stat().st_mtime,
+            "days_remaining": days_remaining,
+            "duration": round(dur, 1),
+            "download_url": f"/api/clips/{job_id}/{f.name}"
+        })
+    
+    return results
 
 @router.get("/clips/{job_id}/{filename}")
 async def get_clip(job_id: str, filename: str):
@@ -365,8 +444,158 @@ async def get_clip(job_id: str, filename: str):
     if path_review.exists():
         return FileResponse(path_review)
         
+    # Check rejected folder
+    path_rejected = (safe_dir / "rejected" / filename).resolve()
+    if not path_rejected.is_relative_to(safe_dir):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+        
+    if path_rejected.exists():
+        return FileResponse(path_rejected)
+        
     raise HTTPException(status_code=404, detail="Clip not found")
 
+@router.post("/clips/{job_id}/{filename}/open")
+async def open_clip_location(job_id: str, filename: str):
+    """Open the local folder containing the clip (macOS)."""
+    import subprocess
+    safe_dir = (DATA_DIR / job_id / "clips").resolve()
+    
+    path_approved = (safe_dir / "approved" / filename).resolve()
+    path_review = (safe_dir / "review" / filename).resolve()
+    
+    target_path = None
+    if path_approved.exists():
+        target_path = path_approved
+    elif path_review.exists():
+        target_path = path_review
+        
+    if not target_path:
+        raise HTTPException(status_code=404, detail="Clip not found locally")
+        
+    try:
+        # -R flag selects the file in Finder
+        subprocess.run(["open", "-R", str(target_path)])
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/clips/{job_id}/{filename}/approve")
+async def approve_clip(job_id: str, filename: str):
+    """Approve a clip: move it from review/ to approved/."""
+    import shutil
+    clips_dir = (DATA_DIR / job_id / "clips").resolve()
+    
+    source = clips_dir / "review" / filename
+    dest = clips_dir / "approved" / filename
+    
+    if not source.exists():
+        # Already in approved or doesn't exist
+        if dest.exists():
+            return {"status": "already_approved"}
+        raise HTTPException(status_code=404, detail="Clip not found in review folder")
+    
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.move(str(source), str(dest))
+    
+    # Also move the caption file if it exists
+    caption_source = clips_dir / "review" / filename.replace(".mp4", "_caption.txt")
+    if caption_source.exists():
+        caption_dest = clips_dir / "approved" / filename.replace(".mp4", "_caption.txt")
+        shutil.move(str(caption_source), str(caption_dest))
+    
+    return {"status": "approved", "filename": filename}
+
+@router.post("/clips/{job_id}/{filename}/reject")
+async def reject_clip(job_id: str, filename: str):
+    """Reject a clip: move it to rejected/ (auto-deleted after 30 days)."""
+    import shutil
+    clips_dir = (DATA_DIR / job_id / "clips").resolve()
+    rejected_dir = clips_dir / "rejected"
+    rejected_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Find the clip in approved or review
+    source = None
+    for folder in ["approved", "review"]:
+        candidate = clips_dir / folder / filename
+        if candidate.exists():
+            source = candidate
+            break
+    
+    if not source:
+        raise HTTPException(status_code=404, detail="Clip not found")
+    
+    dest = rejected_dir / filename
+    shutil.move(str(source), str(dest))
+    
+    # Also move the caption file
+    caption_name = filename.replace(".mp4", "_caption.txt")
+    for folder in ["approved", "review"]:
+        caption = clips_dir / folder / caption_name
+        if caption.exists():
+            shutil.move(str(caption), str(rejected_dir / caption_name))
+            break
+    
+    return {"status": "rejected", "filename": filename}
+    return {"status": "rejected", "filename": filename}
+@router.post("/clips/{job_id}/{filename}/restore")
+async def restore_clip(job_id: str, filename: str):
+    """Restore a rejected clip back to the review folder."""
+    import shutil
+    clips_dir = (DATA_DIR / job_id / "clips").resolve()
+    source = clips_dir / "rejected" / filename
+    
+    if not source.exists():
+        raise HTTPException(status_code=404, detail="Clip not found in rejected folder")
+    
+    dest_dir = clips_dir / "review"
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest = dest_dir / filename
+    shutil.move(str(source), str(dest))
+    
+    # Also restore caption if exists
+    caption_name = filename.replace(".mp4", "_caption.txt")
+    caption_source = clips_dir / "rejected" / caption_name
+    if caption_source.exists():
+        shutil.move(str(caption_source), str(dest_dir / caption_name))
+    
+    return {"status": "restored", "filename": filename}
+
+
+def cleanup_rejected_clips(max_age_days: int = 30):
+    """Delete rejected clips older than max_age_days. Runs on server startup."""
+    import time
+    now = time.time()
+    max_age_seconds = max_age_days * 86400
+    deleted = 0
+    
+    if not DATA_DIR.exists():
+        return
+    
+    for job_dir in DATA_DIR.iterdir():
+        if not job_dir.is_dir():
+            continue
+        rejected_dir = job_dir / "clips" / "rejected"
+        if not rejected_dir.exists():
+            continue
+        
+        for f in rejected_dir.iterdir():
+            age = now - f.stat().st_mtime
+            if age > max_age_seconds:
+                f.unlink()
+                deleted += 1
+        
+        # Remove the rejected folder if empty
+        if rejected_dir.exists() and not any(rejected_dir.iterdir()):
+            rejected_dir.rmdir()
+    
+    if deleted > 0:
+        print(f"🗑️ Cleaned up {deleted} rejected clips older than {max_age_days} days")
+
+# Run cleanup on module load (i.e. server startup)
+try:
+    cleanup_rejected_clips()
+except Exception:
+    pass
 
 # ─── Face Tracking ───────────────────────────────────────────────────────────
 

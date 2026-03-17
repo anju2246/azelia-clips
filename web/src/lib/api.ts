@@ -181,9 +181,25 @@ export const ClipsApi = {
       body: JSON.stringify(req)
     }),
 
-  // Approve a clip (stub for API implementation)
-  approveClip: (clipId: number) =>
-    fetchApi<any>(`/clips/${clipId}/approve`, { method: 'POST' }),
+  // Approve a clip (move from review/ to approved/)
+  approveClip: (jobId: string, filename: string) =>
+    fetchApi<any>(`/clips/${jobId}/${filename}/approve`, { method: 'POST' }),
+
+  // Reject a clip (move to rejected/, auto-deleted after 30 days)
+  rejectClip: (jobId: string, filename: string) =>
+    fetchApi<any>(`/clips/${jobId}/${filename}/reject`, { method: 'POST' }),
+
+  // List rejected clips for a job
+  getRejectedClips: (jobId: string) =>
+    fetchApi<any[]>(`/clips/${jobId}/rejected`),
+
+  // Restore a rejected clip back to review
+  restoreClip: (jobId: string, filename: string) =>
+    fetchApi<any>(`/clips/${jobId}/${filename}/restore`, { method: 'POST' }),
+
+  // Open clip location in Finder (macOS)
+  openClipLocation: (jobId: string, filename: string) =>
+    fetchApi<any>(`/clips/${jobId}/${filename}/open`, { method: 'POST' }),
 };
 
 // --- SETTINGS API ---
