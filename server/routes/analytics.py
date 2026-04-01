@@ -171,16 +171,16 @@ def _get_yt_db():
 
 
 def _get_user_id_from_auth(authorization: str) -> str | None:
-    """Extract user_id from a Supabase JWT Authorization header."""
+    """Extract user_id from a Supabase JWT Authorization header.
+    Uses server-side JWT verification via Supabase API (no manual decode).
+    """
     if not authorization:
         return None
     try:
-        import json, base64
+        from packages.core.auth import verify_supabase_jwt
         token = authorization.replace("Bearer ", "").strip()
-        payload = token.split(".")[1]
-        payload += "=" * (4 - len(payload) % 4)
-        decoded = json.loads(base64.b64decode(payload))
-        return decoded.get("sub")
+        user = verify_supabase_jwt(token)
+        return user.id
     except Exception:
         return None
 
@@ -438,13 +438,11 @@ async def sync_youtube_with_code(
             try:
                 token = authorization.replace("Bearer ", "").strip()
                 analytics = AnalyticsSync(auth_token=token)
-                import json, base64
-                payload = token.split(".")[1]
-                payload += "=" * (4 - len(payload) % 4)
-                decoded = json.loads(base64.b64decode(payload))
-                user_id = decoded.get("sub")
+                from packages.core.auth import verify_supabase_jwt
+                verified_user = verify_supabase_jwt(token)
+                user_id = verified_user.id
             except Exception as e:
-                print(f"Auth parsing failed: {e}")
+                print(f"Auth verification failed: {e}")
 
         # If channel_id provided, sync directly
         if channel_id:
@@ -545,11 +543,9 @@ async def auto_sync_youtube(authorization: str = Header(None)):
             try:
                 token = authorization.replace("Bearer ", "").strip()
                 analytics = AnalyticsSync(auth_token=token)
-                import base64
-                payload = token.split(".")[1]
-                payload += "=" * (4 - len(payload) % 4)
-                decoded = json.loads(base64.b64decode(payload))
-                user_id = decoded.get("sub")
+                from packages.core.auth import verify_supabase_jwt
+                verified_user = verify_supabase_jwt(token)
+                user_id = verified_user.id
             except Exception:
                 pass
             
@@ -675,41 +671,32 @@ async def _sync_channel(access_token: str, channel_id: str, user_id: str = None,
     if user_id and analytics and analytics.Enabled:
         from packages.core.services.telemetry import telemetry
         import hashlib
-        
-        # Match SQLite titles against Supabase clips_metadata
+
+        # Fetch all matching clips_metadata in a single query
+        titles = [s["title"] for s in shorts]
+        res = analytics.client.table("clips_metadata")\
+            .select("video_title, hook_type, sentiment_score")\
+            .in_("video_title", titles)\
+            .execute()
+        clips_by_title = {row["video_title"]: row for row in (res.data or [])}
+
         for s in shorts:
-            metrics = {
-                "platform": "youtube",
-                "youtube_id": s["video_id"],
-                "views": s["view_count"],
-                "likes": s["like_count"],
-                "comments": s["comment_count"],
-                "last_updated": "now()"
-            }
-            
-            # We only select here since performance_metrics column doesn't exist
-            res = analytics.client.table("clips_metadata")\
-                .select("hook_type, sentiment_score")\
-                .eq("video_title", s["title"])\
-                .execute()
-                
-            if res.data:
-                clip_data = res.data[0]
-                hook_type = clip_data.get("hook_type")
-                predicted_score = clip_data.get("sentiment_score")
-                
-                title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]
-                telemetry.track_youtube_performance(
-                    user_id=user_id,
-                    youtube_id=s["video_id"],
-                    views=s["view_count"],
-                    likes=s["like_count"],
-                    comments=s["comment_count"],
-                    duration_seconds=s["duration_seconds"],
-                    hook_type=hook_type,
-                    predicted_score=predicted_score,
-                    title_hash=title_hash
-                )
+            clip_data = clips_by_title.get(s["title"])
+            hook_type = clip_data.get("hook_type") if clip_data else None
+            predicted_score = clip_data.get("sentiment_score") if clip_data else None
+
+            title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]
+            telemetry.track_youtube_performance(
+                user_id=user_id,
+                youtube_id=s["video_id"],
+                views=s["view_count"],
+                likes=s["like_count"],
+                comments=s["comment_count"],
+                duration_seconds=s["duration_seconds"],
+                hook_type=hook_type,
+                predicted_score=predicted_score,
+                title_hash=title_hash
+            )
     
     return {
         "total_shorts": len(shorts),
@@ -862,9 +849,8 @@ async def sync_historical_data(request: Request, authorization: str = Header(Non
         """Background worker for historical sync."""
         try:
             from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
-            from packages.core.services.telemetry import TelemetryService
-            
-            telemetry_svc = TelemetryService()
+            from packages.core.services.telemetry import telemetry as telemetry_svc
+
             extractor = YouTubeHistoricalExtractor(telemetry_svc)
             
             result = await extractor.process_historical_shorts(

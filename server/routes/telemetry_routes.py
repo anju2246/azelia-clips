@@ -10,7 +10,7 @@ Admin routes (super_admin only):
   GET  /api/admin/telemetry/stats  — Aggregated statistics
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 from server.middleware.auth import require_auth, optional_auth
@@ -18,7 +18,59 @@ from packages.core.auth import User
 from packages.core.services.telemetry import telemetry
 from packages.core.config import settings
 import os
+import sqlite3
+import hashlib
+import threading
 from pathlib import Path
+
+YT_DB_PATH = Path(__file__).parent.parent / "data" / "youtube_shorts.db"
+
+
+def _backfill_sqlite_history(user_id: str):
+    """
+    Reads all historical YouTube data from local SQLite and sends it to
+    ic_user_telemetry. Called in a background thread when user activates telemetry.
+    Only runs if telemetry is enabled and Supabase is connected.
+    """
+    if not telemetry.enabled or not telemetry.supabase:
+        return
+
+    if not YT_DB_PATH.exists():
+        return
+
+    try:
+        conn = sqlite3.connect(str(YT_DB_PATH))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """SELECT video_id, title, duration_seconds, view_count, like_count,
+                      comment_count, hook_type, average_view_duration
+               FROM youtube_shorts WHERE user_id = ?""",
+            (user_id,)
+        ).fetchall()
+        conn.close()
+    except Exception as e:
+        print(f"[Telemetry Backfill] Failed to read SQLite: {e}")
+        return
+
+    sent = 0
+    for row in rows:
+        try:
+            title_hash = hashlib.sha256((row["title"] or "").encode()).hexdigest()[:12]
+            telemetry.track_youtube_performance(
+                user_id=user_id,
+                youtube_id=row["video_id"],
+                views=row["view_count"] or 0,
+                likes=row["like_count"] or 0,
+                comments=row["comment_count"] or 0,
+                duration_seconds=row["average_view_duration"] or row["duration_seconds"],
+                hook_type=row["hook_type"],
+                title_hash=title_hash,
+            )
+            sent += 1
+        except Exception as e:
+            print(f"[Telemetry Backfill] Failed to send {row['video_id']}: {e}")
+
+    print(f"[Telemetry Backfill] Sent {sent}/{len(rows)} historical records for user {user_id}")
 
 router = APIRouter()
 
@@ -52,7 +104,7 @@ class TelemetryStatusResponse(BaseModel):
 @router.post("/telemetry/consent", response_model=ConsentResponse)
 async def toggle_telemetry_consent(
     body: ConsentRequest,
-    user: User = Depends(optional_auth),
+    user: User = Depends(require_auth),
 ):
     """
     Toggle telemetry consent. Persists to .env file so it survives restarts.
@@ -88,6 +140,12 @@ async def toggle_telemetry_consent(
 
     # Record consent change in Supabase (always, for audit trail)
     telemetry.track_consent_change(user.id, body.enabled)
+
+    # Backfill historical SQLite data when user activates telemetry
+    if body.enabled:
+        threading.Thread(
+            target=_backfill_sqlite_history, args=(user.id,), daemon=False
+        ).start()
 
     action = "activated" if body.enabled else "deactivated"
     return ConsentResponse(

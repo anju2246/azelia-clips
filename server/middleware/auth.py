@@ -20,12 +20,40 @@ def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) 
 
 def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
     """
-    Auth dependency that is truly optional for local-first usage.
+    Auth dependency that is optional.
     - If credentials are provided, validates the JWT (throws 401 if invalid).
-    - If no credentials are provided, returns a dev user (local mode fallback).
+    - If no credentials, returns None. No fake users.
     """
     if credentials is None:
-        return User(id="dev-user", email="dev@local", role="authenticated")
-    
-    # If the frontend bothered to send a token, it MUST be valid. No silent fallback.
+        return None
+
     return verify_supabase_jwt(credentials.credentials)
+
+def require_onboarding(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+    """
+    FastAPI dependency that validates auth AND checks onboarding completion.
+    Returns 428 Precondition Required if user hasn't completed onboarding
+    (content_niche is NULL in their profile).
+    """
+    if credentials is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
+
+    token = credentials.credentials
+    user = verify_supabase_jwt(token)
+
+    try:
+        from supabase import create_client
+        sb = create_client(settings.supabase_url, settings.supabase_key)
+        res = sb.table("profiles").select("content_niche").eq("id", user.id).execute()
+
+        if res.data and res.data[0].get("content_niche") is None:
+            raise HTTPException(
+                status_code=428,
+                detail="Onboarding required. Please complete your profile setup first."
+            )
+    except HTTPException:
+        raise
+    except Exception:
+        pass  # If profile check fails, don't block the user
+
+    return user

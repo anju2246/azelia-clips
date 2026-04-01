@@ -312,6 +312,7 @@ class TelemetryService:
                     event.metadata["episode_format"] = final_format or "interview"
 
                 self.supabase.table("ic_user_telemetry").insert({
+                    "user_id": user_id,
                     "podcast_fingerprint": event.metadata.get("title_hash", "unknown_hash"),
                     "category": event.metadata.get("category"),
                     "episode_format": final_format or "interview",
