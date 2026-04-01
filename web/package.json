@@ -25,7 +25,6 @@
     "clsx": "^2.1.1",
     "framer-motion": "^12.34.0",
     "lucide-react": "^0.563.0",
-    "tailwind-merge": "^3.4.0",
-    "vite-plugin-pwa": "^1.2.0"
+    "tailwind-merge": "^3.4.0"
   }
 }
