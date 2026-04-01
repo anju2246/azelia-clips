@@ -40,10 +40,10 @@ export default function EpisodeList() {
         setProcessingId(`EP${epNumber}`);
         try {
             // Get settings from LocalStorage
-            const transcriptionSource = localStorage.getItem('celia_transcription_source') || 'local_whisper';
-            const supabaseUrl = localStorage.getItem('celia_supabase_url') || '';
-            const supabaseKey = localStorage.getItem('celia_supabase_key') || '';
-            const assemblyKey = localStorage.getItem('celia_assemblyai_key') || '';
+            const transcriptionSource = localStorage.getItem('azelia_transcription_source') || 'local_whisper';
+            const supabaseUrl = localStorage.getItem('azelia_supabase_url') || '';
+            const supabaseKey = localStorage.getItem('azelia_supabase_key') || '';
+            const assemblyKey = localStorage.getItem('azelia_assemblyai_key') || '';
             // Default score/style if not set (though SettingsDashboard doesn't save these to LS yet, we should use defaults)
             // TODO: Ensure SettingsDashboard saves min_score to LS if we want it global
 

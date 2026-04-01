@@ -1,10 +1,10 @@
 # Custom Database Integration Guide
 
-This guide explains how to integrate your own Supabase database with Celia Clips to act as a source for transcripts. This is useful for "Pro" workflows where you have a separate pipeline generating transcripts (e.g. from AssemblyAI, Deepgram, or human transcription) and want Celia to use them instead of re-transcribing locally.
+This guide explains how to integrate your own Supabase database with Azelia Clips to act as a source for transcripts. This is useful for "Pro" workflows where you have a separate pipeline generating transcripts (e.g. from AssemblyAI, Deepgram, or human transcription) and want Azelia to use them instead of re-transcribing locally.
 
 ## 1. Understanding the Data Model
 
-Celia relies on two key concepts: **Episodes** and **Utterances**.
+Azelia relies on two key concepts: **Episodes** and **Utterances**.
 
 ### Episodes
 An **Episode** represents a single media file (video or audio).
@@ -22,7 +22,7 @@ An **Utterance** is the atomic unit of a transcript. It represents a continuous 
 
 ## 2. Database Schema
 
-For Celia to read your data, your Supabase database must have these tables. Run this SQL in your Supabase SQL Editor:
+For Azelia to read your data, your Supabase database must have these tables. Run this SQL in your Supabase SQL Editor:
 
 ```sql
 -- 1. Episodes Table (Optional, for metadata)
@@ -78,9 +78,9 @@ export SUPABASE_KEY="your-service-role-key" # Needs write access
 python tools/upload_transcript.py path/to/transcript.json --episode_id "EP100"
 ```
 
-## 4. Connecting to Celia Dashboard
+## 4. Connecting to Azelia Dashboard
 
 1. Go to **Settings > Transcription**
 2. Select **Source: Custom Database**
 3. Enter your **Supabase URL** and **Anon Key**
-4. Celia will now look for transcripts in your DB before trying to transcribe locally.
+4. Azelia will now look for transcripts in your DB before trying to transcribe locally.

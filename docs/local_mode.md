@@ -1,10 +1,10 @@
 # Configuración del Modo Local
 
-Celia autogenera clips a partir de tus podcasts. Puedes configurar tu entorno local para que detecte automáticamente tus episodios y gestionarlos desde el Dashboard.
+Azelia autogenera clips a partir de tus podcasts. Puedes configurar tu entorno local para que detecte automáticamente tus episodios y gestionarlos desde el Dashboard.
 
 ## 1. Estructura de Carpetas
 
-Para que Celia detecte tus episodios, tu carpeta de podcasts debe seguir esta estructura exacta:
+Para que Azelia detecte tus episodios, tu carpeta de podcasts debe seguir esta estructura exacta:
 
 ```
 Carpeta_Principal/    (Ej: /Volumes/Backup Inminente)

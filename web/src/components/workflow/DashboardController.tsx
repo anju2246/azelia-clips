@@ -7,7 +7,7 @@ import { YouTubeNudge } from '../analytics/YouTubeNudge';
 import { ClipsApi, SettingsApi } from '../../lib/api';
 import toast from 'react-hot-toast';
 
-const JOB_STORAGE_KEY = 'celia_active_job_id';
+const JOB_STORAGE_KEY = 'azelia_active_job_id';
 
 export const DashboardController: React.FC = () => {
     const [activeJobId, setActiveJobId] = useState<string | null>(() => {
