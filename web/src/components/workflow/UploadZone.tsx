@@ -218,7 +218,7 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApi
                             >
                                 <option value="local_whisper">Local Whisper (Free, Slower)</option>
                                 <option value="assemblyai">AssemblyAI (Cloud, Faster)</option>
-                                <option value="supabase">Supabase Serverless (Edge)</option>
+                                <option value="supabase_custom">My Supabase (custom transcripts)</option>
                             </select>
                         </div>
                     </div>

@@ -26,14 +26,28 @@ class TranscriptionDriver:
     def get_source_from_config(config: Dict[str, Any]) -> TranscriptionSource:
         """
         Determine source from configuration payload.
-        Priority: 
-        1. Custom Supabase (if URL/Key present)
-        2. AssemblyAI (if Key present)
-        3. Local Whisper (Default)
+        Priority:
+        1. Explicit source_type (user's choice always wins)
+        2. Fallback by key presence (legacy / CLI usage)
+        3. Local Whisper (default)
+
+        Note: config may contain Azelia's central Supabase keys (for auth/telemetry).
+        Those must NOT trigger SupabaseSource — only 'supabase_custom' source_type should.
         """
-        if config.get("supabase_url") and config.get("supabase_key"):
+        source_type = config.get("source_type", "")
+
+        if source_type == "supabase_custom":
+            return SupabaseSource()
+        elif source_type == "assemblyai":
+            return AssemblyAISource()
+        elif source_type == "local_whisper":
+            return LocalWhisperSource()
+
+        # Legacy fallback: no explicit source_type, infer from dedicated transcript keys
+        # Only match supabase if transcript-specific keys are present (not Azelia central keys)
+        if config.get("transcript_supabase_url") and config.get("transcript_supabase_key"):
             return SupabaseSource()
         elif config.get("assemblyai_api_key"):
             return AssemblyAISource()
-        else:
-            return LocalWhisperSource()
+
+        return LocalWhisperSource()
