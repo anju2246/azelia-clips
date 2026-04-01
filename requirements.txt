@@ -1,6 +1,7 @@
 # Azelia Clips - Complete Requirements for Mac M3
 # ==================================================
 # Use: pip install -r requirements.txt
+# Recommended: pip install -e ".[all]"
 
 # Install package in editable mode (base dependencies)
 -e .
@@ -23,7 +24,6 @@ openai-whisper>=20231117  # Fallback for non-MLX
 # Audio Processing (PyTorch with MPS support)
 # ============================================
 torch>=2.0.0
-torchaudio>=2.0.0
 torchaudio>=2.0.0
 
 # ============================================
@@ -51,11 +51,6 @@ anthropic>=0.18.0      # Claude via Vertex
 # ============================================
 supabase>=2.0.0
 sqlmodel>=0.0.14
-
-# ============================================
-# Web UI - Streamlit (Legacy)
-# ============================================
-streamlit>=1.30.0
 
 # ============================================
 # Web API - FastAPI
