@@ -88,9 +88,9 @@ class AnalyticsSync:
     def connect_platform(self, platform: str, metadata: Dict[str, Any] = {}) -> bool:
         """
         Register a platform connection for the user.
-        
+
         Args:
-            platform: 'youtube', 'tiktok', 'instagram'
+            platform: 'youtube', 'tiktok', 'instagram', 'spotify'
             metadata: Extra info (channel_id, handle, etc.)
         """
         if not self.Enabled or not self.client:
@@ -98,42 +98,25 @@ class AnalyticsSync:
             return False
 
         try:
-            # Upsert connection record
             payload = {
                 "platform": platform,
                 "status": "active",
                 "connected_at": "now()",
                 "last_sync_at": "now()",
-                "metadata": metadata
+                "metadata": metadata,
             }
-            
-            # We don't need to specify user_id if RLS handles it, 
-            # but for upsert we might need to be careful about the unique constraint (user_id, platform).
-            # The RLS policy 'insert with check auth.uid() = user_id' implies we might need to send it 
-            # or rely on default. Let's rely on default but handle conflict.
-            
-            # Using upsert on (user_id, platform) unique constraint
-            # We must ensure the query matches the RLS.
-            
-            # Note: Supabase-py 'upsert' might need the user_id explicit if it's part of the conflict content.
-            # But we can't easily get the user_id from the token here without decoding.
-            # Let's hope the default value works on insert, but for upsert it might be tricky.
-            
-            # Strategy: Try insert, if fail, update. OR just uses upsert and see.
-            # Actually, simpler: Select first.
-            
+
+            # Select first to decide insert vs update (RLS scopes to current user)
             res = self.client.table("user_connections").select("*").eq("platform", platform).execute()
-            
+
             if res.data:
-                # Update
                 self.client.table("user_connections").update(payload).eq("platform", platform).execute()
             else:
-                # Insert
                 self.client.table("user_connections").insert(payload).execute()
-                
+
             console.print(f"[green]✅ Connected platform: {platform}[/green]")
             return True
-            
+
         except Exception as e:
             console.print(f"[red]❌ Connection Error: {e}[/red]")
             return False

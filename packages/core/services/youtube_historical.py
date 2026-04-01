@@ -32,8 +32,7 @@ class YouTubeHistoricalExtractor:
     # Path to local SQLite DB
     YT_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "server", "data", "youtube_shorts.db")
 
-    # Safe switch: set to True when Supabase schema is ready
-    SUPABASE_SYNC_ENABLED = False
+    SUPABASE_SYNC_ENABLED = True
 
     def __init__(self, telemetry_service: TelemetryService):
         self.telemetry = telemetry_service

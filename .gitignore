@@ -75,3 +75,7 @@ src.bak/
 
 # Scratch/test scripts (exploratory, never commit)
 _scratch/
+
+# MCP server config (local only)
+.mcp.json
+.claude/settings.json

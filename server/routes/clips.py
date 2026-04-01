@@ -22,7 +22,7 @@ from server.models import (
 from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
-from server.middleware.auth import require_auth
+from server.middleware.auth import require_auth, require_onboarding
 from packages.core.auth import User
 from packages.core.db.engine import engine
 from packages.core.db.models import Episode
@@ -56,7 +56,7 @@ async def process_video(
     assemblyai_key: str | None = Form(None),
     supabase_url: str | None = Form(None),
     supabase_key: str | None = Form(None),
-    user: User = Depends(require_auth)
+    user: User = Depends(require_onboarding)
 ):
     """Upload a video and start processing."""
     
@@ -148,7 +148,7 @@ async def process_video(
 async def process_local_video(
     background_tasks: BackgroundTasks,
     req: ProcessLocalRequest,
-    user: User = Depends(require_auth)
+    user: User = Depends(require_onboarding)
 ):
     """Process a video directly from the local file system using the Server-Side Picker."""
     import os
