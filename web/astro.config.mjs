@@ -32,8 +32,8 @@ export default defineConfig({
         disable: process.env.NODE_ENV === 'development', // KILL aggressive offline caching in DEV
         registerType: 'autoUpdate',
         manifest: {
-          name: 'Celia Clips',
-          short_name: 'Celia',
+          name: 'Azelia Clips',
+          short_name: 'Azelia',
           description: 'AI-powered podcast clip generator',
           theme_color: '#09090b',
           background_color: '#09090b',

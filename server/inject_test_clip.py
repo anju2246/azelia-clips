@@ -2,8 +2,8 @@ import shutil
 from pathlib import Path
 
 # Fix to find a valid job
-data_dir = Path("/Users/juanpabloduqueb/Documents/GitHub/celia-clips/server/data/jobs")
-dummy_mp4 = Path("/Users/juanpabloduqueb/Documents/GitHub/celia-clips/dummy.mp4")
+data_dir = Path("/Users/juanpabloduqueb/Documents/GitHub/azelia-clips/server/data/jobs")
+dummy_mp4 = Path("/Users/juanpabloduqueb/Documents/GitHub/azelia-clips/dummy.mp4")
 
 # Find first job with clips
 for job_dir in data_dir.iterdir():

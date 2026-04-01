@@ -83,7 +83,7 @@ echo "✓ Python ${PYTHON_VERSION}"
 echo -e "\n${BLUE}[2/5] Descargando Azelia Clips...${NC}"
 
 INSTALL_DIR="$HOME/.azelia"
-REPO_URL="https://github.com/anju2246/celia-clips.git"
+REPO_URL="https://github.com/anju2246/azelia-clips.git"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "Carpeta $INSTALL_DIR ya existe. Actualizando..."
