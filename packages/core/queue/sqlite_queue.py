@@ -23,27 +23,27 @@ class SQLiteJobQueue(BaseJobQueue):
 
     async def enqueue(self, job_id: str, payload: Dict[str, Any]) -> str:
         """
-        In SQLModel, we assume the Episode row was created by the FastAPI endpoint.
-        This simply sets its status to 'pending' to be picked up by the worker.
+        Persists the full payload to the Episode row so the worker
+        can reconstruct all settings (transcription_config, auth_token, etc.)
+        after a restart or async pickup.
         """
         with Session(engine) as session:
-            # We assume payload contains 'episode_id' representing the primary key
             ep_id = payload.get("episode_id")
             if not ep_id:
                 raise ValueError("Payload must contain 'episode_id'")
-                
+
             statement = select(Episode).where(Episode.id == ep_id)
             episode = session.exec(statement).first()
             if not episode:
                 raise ValueError(f"Episode with id {ep_id} not found")
-                
-            # Assign job_id so worker can track it
+
             episode.job_id = job_id
             episode.status = "pending"
             episode.progress_percent = 0
+            episode.payload_json = json.dumps(payload)
             session.add(episode)
             session.commit()
-            
+
         return job_id
 
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -107,12 +107,19 @@ class SQLiteJobQueue(BaseJobQueue):
                         session.add(pending_ep)
                         session.commit()
                         
+                        # Restore full payload persisted at enqueue time
+                        if pending_ep.payload_json:
+                            restored_payload = json.loads(pending_ep.payload_json)
+                        else:
+                            # Fallback for episodes enqueued before this fix
+                            restored_payload = {
+                                "episode_id": pending_ep.id,
+                                "video_path": pending_ep.video_path,
+                                "user_id": pending_ep.user_id,
+                            }
                         job_to_process = {
                             "job_id": pending_ep.job_id,
-                            "payload": {
-                                "episode_id": pending_ep.id,
-                                "video_path": pending_ep.video_path
-                            }
+                            "payload": restored_payload,
                         }
                 
                 if job_to_process:

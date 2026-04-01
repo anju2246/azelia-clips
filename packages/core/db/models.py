@@ -27,7 +27,8 @@ class Episode(SQLModel, table=True):
     
     status: str = Field(default="pending", description="pending, transcribing, curating, failed, completed")
     error_message: Optional[str] = None
-    
+    payload_json: Optional[str] = Field(default=None, description="Full job payload (settings, config, tokens) serialized as JSON")
+
     # Progress tracking for resuming
     progress_percent: int = Field(default=0)
     
