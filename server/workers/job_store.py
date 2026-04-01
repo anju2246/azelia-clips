@@ -20,7 +20,7 @@ class JobStatus:
     """Processing job status with pause/resume support."""
     job_id: str
     episode_id: str
-    status: str  # pending, processing, paused, completed, error, cancelled
+    status: str  # pending, processing, paused, completed, failed, cancelled
     progress: int  # 0-100
     message: str
     clips_generated: int
@@ -259,8 +259,8 @@ class JobStore:
         now = datetime.utcnow().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                UPDATE jobs SET 
-                    status = 'error',
+                UPDATE jobs SET
+                    status = 'failed',
                     message = ?,
                     error = ?,
                     updated_at = ?

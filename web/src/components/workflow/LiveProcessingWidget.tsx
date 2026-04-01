@@ -34,7 +34,7 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
         try {
             const data = await ClipsApi.getJob(jobId);
             setJob(data);
-            if (data.status === 'completed' || data.status === 'error') {
+            if (data.status === 'completed' || data.status === 'error' || data.status === 'failed') {
                 if (wsRef.current) wsRef.current.close();
                 if (data.status === 'completed') onJobComplete();
             }
