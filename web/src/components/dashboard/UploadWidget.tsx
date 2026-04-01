@@ -48,7 +48,7 @@ export default function UploadWidget() {
         formData.append('file', file);
 
         // Get settings
-        const settings = JSON.parse(localStorage.getItem('celia-settings') || '{}');
+        const settings = JSON.parse(localStorage.getItem('azelia-settings') || '{}');
         formData.append('min_duration', settings.minDuration || 30);
         formData.append('max_duration', settings.maxDuration || 90);
         formData.append('subtitle_style', settings.subtitleStyle || 'highlight');
@@ -56,16 +56,16 @@ export default function UploadWidget() {
         formData.append('min_score', '70');
 
         // Transcription Configuration (Privacy-First: Loaded from LocalStorage)
-        const transcriptionSource = localStorage.getItem('celia_transcription_source') || 'local_whisper';
+        const transcriptionSource = localStorage.getItem('azelia_transcription_source') || 'local_whisper';
         formData.append('transcription_source', transcriptionSource);
 
-        const assemblyKey = localStorage.getItem('celia_assemblyai_key');
+        const assemblyKey = localStorage.getItem('azelia_assemblyai_key');
         if (assemblyKey) formData.append('assemblyai_key', assemblyKey);
 
-        const supabaseUrl = localStorage.getItem('celia_supabase_url');
+        const supabaseUrl = localStorage.getItem('azelia_supabase_url');
         if (supabaseUrl) formData.append('supabase_url', supabaseUrl);
 
-        const supabaseKey = localStorage.getItem('celia_supabase_key');
+        const supabaseKey = localStorage.getItem('azelia_supabase_key');
         if (supabaseKey) formData.append('supabase_key', supabaseKey);
 
         try {

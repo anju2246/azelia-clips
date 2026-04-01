@@ -1,11 +1,11 @@
 # Configuration Reference
 
 > **For contributors and developers only.**
-> End users configure Celia through the Dashboard UI — no manual file editing needed.
+> End users configure Azelia through the Dashboard UI — no manual file editing needed.
 
 ## Environment Variables
 
-Celia Clips uses a `.env` file for local configuration. The Dashboard generates this file automatically during the setup wizard. If you're developing or contributing, create a `.env` in the project root with these variables:
+Azelia Clips uses a `.env` file for local configuration. The Dashboard generates this file automatically during the setup wizard. If you're developing or contributing, create a `.env` in the project root with these variables:
 
 ### Required
 
@@ -56,8 +56,8 @@ Celia Clips uses a `.env` file for local configuration. The Dashboard generates 
 
 | Variable | Description |
 |---|---|
-| `SUPABASE_URL` | Celia Central project URL (auth + telemetry) |
-| `SUPABASE_KEY` | Celia Central anon key (public by design) |
+| `SUPABASE_URL` | Azelia Central project URL (auth + telemetry) |
+| `SUPABASE_KEY` | Azelia Central anon key (public by design) |
 | `SUPABASE_JWT_SECRET` | JWT secret for token validation |
 
 ### User's Own Supabase (optional — for importing transcriptions)
@@ -71,7 +71,7 @@ Celia Clips uses a `.env` file for local configuration. The Dashboard generates 
 
 | Variable | Default | Description |
 |---|---|---|
-| `CELIA_TELEMETRY_OPT_OUT` | `false` | Set to `true` to disable anonymized telemetry |
+| `AZELIA_TELEMETRY_OPT_OUT` | `false` | Set to `true` to disable anonymized telemetry |
 
 ## Notes
 

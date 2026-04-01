@@ -1,6 +1,6 @@
-# Customizing Celia Clips
+# Customizing Azelia Clips
 
-Celia Clips allows you to override default behaviors without modifying the source code. This is perfect for maintaining your podcast's unique voice and style while keeping the core software up to date.
+Azelia Clips allows you to override default behaviors without modifying the source code. This is perfect for maintaining your podcast's unique voice and style while keeping the core software up to date.
 
 ## 1. Custom Prompts
 

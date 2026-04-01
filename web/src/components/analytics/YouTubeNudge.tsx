@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Youtube, X, ArrowRight, Sparkles } from 'lucide-react';
 
-const DISMISS_KEY = 'celia_yt_nudge_dismissed';
+const DISMISS_KEY = 'azelia_yt_nudge_dismissed';
 
 export const YouTubeNudge: React.FC = () => {
     const [dismissed, setDismissed] = useState(true);

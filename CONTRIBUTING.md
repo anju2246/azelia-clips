@@ -1,6 +1,6 @@
-# Contributing to Celia Clips
+# Contributing to Azelia Clips
 
-Thanks for your interest in contributing to Celia Clips — part of the **Celia** suite by [Inminente](https://inminente.co).
+Thanks for your interest in contributing to Azelia Clips — part of the **Celia** suite by [Inminente](https://inminente.co).
 
 ## Getting Started
 

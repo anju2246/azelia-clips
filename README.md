@@ -1,6 +1,6 @@
-# Celia Clips 🎬✂️
+# Azelia Clips 🎬✂️
 
-> AI-powered podcast clip generator — part of the **Celia** suite by [Inminente](https://inminente.co).
+> AI-powered podcast clip generator — part of the **Azelia** suite by [Inminente](https://inminente.co).
 
 [![License](https://img.shields.io/badge/License-MIT_Commons_Clause-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
@@ -9,7 +9,7 @@
 
 ## What It Does
 
-Celia Clips takes a podcast episode and outputs ready-to-post vertical clips with:
+Azelia Clips takes a podcast episode and outputs ready-to-post vertical clips with:
 
 1. **🎤 Transcription** — WhisperX / MLX-Whisper with word-level timestamps + speaker diarization
 2. **🧠 AI Curation** — Multi-agent system (Finder → Critic → Ranker) selects the most viral moments
@@ -55,13 +55,13 @@ On first launch, the onboarding wizard walks you through:
 
 ```bash
 # Build frontend + start server
-celia start --build
+azelia start --build
 
 # Or start with existing build
-celia start
+azelia start
 
 # Development mode (hot-reload)
-celia start --dev
+azelia start --dev
 ```
 
 Open `http://localhost:8000` and you're ready to go.
@@ -70,20 +70,20 @@ Open `http://localhost:8000` and you're ready to go.
 
 ```bash
 # Full pipeline: transcribe → curate → extract → subtitle
-celia process video.mp4 --output ./clips --top 5
+azelia process video.mp4 --output ./clips --top 5
 
 # Individual steps
-celia transcribe video.mp4                 # Transcribe only
-celia curate transcript.json --top 10      # Curate from transcript
-celia reframe clip.mp4 --mode face         # Reframe to 9:16
-celia subtitles clip.mp4 transcript.json   # Generate subtitles
+azelia transcribe video.mp4                 # Transcribe only
+azelia curate transcript.json --top 10      # Curate from transcript
+azelia reframe clip.mp4 --mode face         # Reframe to 9:16
+azelia subtitles clip.mp4 transcript.json   # Generate subtitles
 ```
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────┐
-│                     celia process                        │
+│                     azelia process                        │
 ├─────────────┬──────────────┬─────────────┬──────────────┤
 │  Transcribe │    Curate    │   Reframe   │  Subtitles   │
 │  WhisperX / │  Finder  ──→│   MTCNN +   │  ASS/SRT     │
@@ -102,13 +102,13 @@ celia subtitles clip.mp4 transcript.json   # Generate subtitles
 | **Critic** | Filters weak clips (incomplete ideas, bad hooks, wrong duration) | 8-12 approved |
 | **Ranker** | Scores clips on 10 dimensions (hook, quotability, storytelling, pacing...) | Top N ranked |
 
-## The Celia Suite
+## The Azelia Suite
 
-Celia Clips is the first product in the **Celia** suite — an open-source toolkit for podcasters.
+Azelia Clips is the first product in the **Azelia** suite — an open-source toolkit for podcasters.
 
 | Product | Description | Status |
 |---------|------------|--------|
-| **Celia Clips** | AI clip generation from episodes | ✅ Available |
+| **Azelia Clips** | AI clip generation from episodes | ✅ Available |
 | **Celia Insights** | YouTube + TikTok analytics | 🔜 Coming Soon |
 | **Celia Studio** | Full episode editing | 🔜 Coming Soon |
 | **Celia Grow** | Guest outreach + audience growth | 🔜 Coming Soon |
@@ -168,9 +168,9 @@ Need a managed, hosted solution? Contact us directly for enterprise/agency prici
 - **[Privacy Policy](PRIVACY_POLICY.md)** — What data we collect and how we handle it.
 - **[Terms of Service](TERMS_OF_SERVICE.md)** — Usage rules and legal obligations.
 - **[Contributor License Agreement (CLA)](CLA.md)** — Required for contributing.
-- **[Data Usage Terms](DATA_USAGE_TERMS.md)** — How we handle anonymized analytics. Telemetry is opt-out via `CELIA_TELEMETRY_OPT_OUT=true`.
+- **[Data Usage Terms](DATA_USAGE_TERMS.md)** — How we handle anonymized analytics. Telemetry is opt-out via `AZELIA_TELEMETRY_OPT_OUT=true`.
 
 
 ---
 
-**Celia** — The open-source podcaster's toolkit. *By [Inminente](https://inminente.co).*
+**Azelia** — The open-source podcaster's toolkit. *By [Inminente](https://inminente.co).*

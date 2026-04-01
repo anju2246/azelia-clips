@@ -1,9 +1,9 @@
 from sqlmodel import create_engine, SQLModel
 from packages.core.config import settings
 
-# Usar base de datos nativa local por defecto ("celia.db") 
+# Usar base de datos nativa local por defecto ("azelia.db")
 # para no forzar Postgres localmente si no es necesario.
-sqlite_url = "sqlite:///celia.db"
+sqlite_url = "sqlite:///azelia.db"
 
 # Si Supabase / PG URL está definido y queremos usar DB directa
 # postgres_url = settings.postgres_url 

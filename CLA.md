@@ -1,6 +1,6 @@
 # Contributor License Agreement (CLA)
 
-Thank you for your interest in contributing to **Celia Clips** ("the Project"). This Contributor License Agreement ("Agreement") is to clarify the intellectual property license granted with Contributions from any person or entity.
+Thank you for your interest in contributing to **Azelia Clips** ("the Project"). This Contributor License Agreement ("Agreement") is to clarify the intellectual property license granted with Contributions from any person or entity.
 
 ## 1. Definitions
 
