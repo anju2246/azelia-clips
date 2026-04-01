@@ -76,8 +76,8 @@ dev = [
 [project.urls]
 Homepage = "https://azelia.ai"
 Documentation = "https://azelia.ai/clips"
-Repository = "https://github.com/anju2246/celia-clips"
-Issues = "https://github.com/anju2246/celia-clips/issues"
+Repository = "https://github.com/anju2246/azelia-clips"
+Issues = "https://github.com/anju2246/azelia-clips/issues"
 
 [project.scripts]
 azelia = "packages.clips.cli:app"
