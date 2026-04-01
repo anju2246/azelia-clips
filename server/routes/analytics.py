@@ -108,46 +108,79 @@ def _get_yt_db():
     """Get or create the YouTube shorts database with multi-user support."""
     YT_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(YT_DB_PATH))
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS youtube_shorts (
-            video_id TEXT PRIMARY KEY,
-            user_id TEXT,
-            title TEXT,
-            published_at TEXT,
-            duration_seconds INTEGER,
-            view_count INTEGER DEFAULT 0,
-            like_count INTEGER DEFAULT 0,
-            comment_count INTEGER DEFAULT 0,
-            channel_name TEXT,
-            channel_id TEXT,
-            thumbnail_url TEXT,
-            synced_at TEXT
-        )
-    """)
-    # Ensure user_id column exists if table was already created
-    try:
-        conn.execute("ALTER TABLE youtube_shorts ADD COLUMN user_id TEXT")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
 
-    # ── New analytics columns for Local Intelligence ──
-    _new_columns = [
-        ("average_view_duration", "REAL"),
-        ("average_view_percentage", "REAL"),
-        ("shares_count", "INTEGER DEFAULT 0"),
-        ("subscribers_gained", "INTEGER DEFAULT 0"),
-        ("subscribers_lost", "INTEGER DEFAULT 0"),
-        ("estimated_minutes_watched", "REAL"),
-        ("hook_type", "TEXT"),
-        ("emotional_charge", "TEXT"),
-        ("core_topics", "TEXT"),
-        ("llm_analysis", "TEXT"),
-    ]
-    for col_name, col_type in _new_columns:
-        try:
-            conn.execute(f"ALTER TABLE youtube_shorts ADD COLUMN {col_name} {col_type}")
-        except sqlite3.OperationalError:
-            pass  # Column already exists
+    # ── Migrate single-PK table to composite PK (video_id, user_id) ──
+    # Check if old single-PK table exists and migrate it transparently
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='youtube_shorts'"
+    ).fetchone()
+    if row and "PRIMARY KEY (video_id, user_id)" not in row[0]:
+        conn.execute("ALTER TABLE youtube_shorts RENAME TO youtube_shorts_old")
+        conn.execute("""
+            CREATE TABLE youtube_shorts (
+                video_id TEXT NOT NULL,
+                user_id TEXT NOT NULL DEFAULT '__legacy__',
+                title TEXT,
+                published_at TEXT,
+                duration_seconds INTEGER,
+                view_count INTEGER DEFAULT 0,
+                like_count INTEGER DEFAULT 0,
+                comment_count INTEGER DEFAULT 0,
+                channel_name TEXT,
+                channel_id TEXT,
+                thumbnail_url TEXT,
+                synced_at TEXT,
+                average_view_duration REAL,
+                average_view_percentage REAL,
+                shares_count INTEGER DEFAULT 0,
+                subscribers_gained INTEGER DEFAULT 0,
+                subscribers_lost INTEGER DEFAULT 0,
+                estimated_minutes_watched REAL,
+                hook_type TEXT,
+                emotional_charge TEXT,
+                core_topics TEXT,
+                llm_analysis TEXT,
+                PRIMARY KEY (video_id, user_id)
+            )
+        """)
+        conn.execute("""
+            INSERT OR IGNORE INTO youtube_shorts
+            SELECT video_id, COALESCE(user_id, '__legacy__'), title, published_at,
+                   duration_seconds, view_count, like_count, comment_count,
+                   channel_name, channel_id, thumbnail_url, synced_at,
+                   NULL, NULL, 0, 0, 0, NULL, NULL, NULL, NULL, NULL
+            FROM youtube_shorts_old
+        """)
+        conn.execute("DROP TABLE youtube_shorts_old")
+        conn.commit()
+    elif not row:
+        conn.execute("""
+            CREATE TABLE youtube_shorts (
+                video_id TEXT NOT NULL,
+                user_id TEXT NOT NULL DEFAULT '__legacy__',
+                title TEXT,
+                published_at TEXT,
+                duration_seconds INTEGER,
+                view_count INTEGER DEFAULT 0,
+                like_count INTEGER DEFAULT 0,
+                comment_count INTEGER DEFAULT 0,
+                channel_name TEXT,
+                channel_id TEXT,
+                thumbnail_url TEXT,
+                synced_at TEXT,
+                average_view_duration REAL,
+                average_view_percentage REAL,
+                shares_count INTEGER DEFAULT 0,
+                subscribers_gained INTEGER DEFAULT 0,
+                subscribers_lost INTEGER DEFAULT 0,
+                estimated_minutes_watched REAL,
+                hook_type TEXT,
+                emotional_charge TEXT,
+                core_topics TEXT,
+                llm_analysis TEXT,
+                PRIMARY KEY (video_id, user_id)
+            )
+        """)
 
     # ── Multi-user connection store (replaces old youtube_sync_meta) ──
     conn.execute("""

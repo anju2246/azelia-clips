@@ -372,19 +372,35 @@ Devuelve SOLO un JSON con estos campos (sin markdown, sin explicación):
             try:
                 conn = sqlite3.connect(db_path)
                 conn.execute("""
-                    UPDATE youtube_shorts SET
-                        average_view_duration = ?,
-                        average_view_percentage = ?,
-                        shares_count = ?,
-                        subscribers_gained = ?,
-                        subscribers_lost = ?,
-                        estimated_minutes_watched = ?,
-                        hook_type = ?,
-                        emotional_charge = ?,
-                        core_topics = ?,
-                        llm_analysis = ?
-                    WHERE video_id = ? AND user_id = ?
+                    INSERT INTO youtube_shorts
+                        (video_id, user_id, title, duration_seconds,
+                         view_count, like_count, comment_count,
+                         average_view_duration, average_view_percentage,
+                         shares_count, subscribers_gained, subscribers_lost,
+                         estimated_minutes_watched,
+                         hook_type, emotional_charge, core_topics, llm_analysis,
+                         synced_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+                    ON CONFLICT(video_id, user_id) DO UPDATE SET
+                        average_view_duration = excluded.average_view_duration,
+                        average_view_percentage = excluded.average_view_percentage,
+                        shares_count = excluded.shares_count,
+                        subscribers_gained = excluded.subscribers_gained,
+                        subscribers_lost = excluded.subscribers_lost,
+                        estimated_minutes_watched = excluded.estimated_minutes_watched,
+                        hook_type = excluded.hook_type,
+                        emotional_charge = excluded.emotional_charge,
+                        core_topics = excluded.core_topics,
+                        llm_analysis = excluded.llm_analysis,
+                        synced_at = excluded.synced_at
                 """, (
+                    v_id,
+                    user_id,
+                    stat_data["title"],
+                    int(duration_delta.total_seconds()),
+                    metrics.get("views", 0),
+                    metrics.get("likes", 0),
+                    metrics.get("comments", 0),
                     vid_analytics.get("averageViewDuration"),
                     vid_analytics.get("averageViewPercentage"),
                     vid_analytics.get("shares", 0),
@@ -395,8 +411,6 @@ Devuelve SOLO un JSON con estos campos (sin markdown, sin explicación):
                     analysis.get("emotional_charge"),
                     json.dumps(analysis.get("core_topics", []), ensure_ascii=False),
                     json.dumps(analysis, ensure_ascii=False),
-                    v_id,
-                    user_id,
                 ))
                 conn.commit()
                 conn.close()
