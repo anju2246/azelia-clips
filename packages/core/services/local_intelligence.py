@@ -123,6 +123,17 @@ class LocalIntelligenceService:
             # 1. Check cache first (ic_user_intelligence table with TTL)
             cached = self._get_cached_intelligence(user_id)
             if cached:
+                # If cached result has IC signals, verify user still has Pro tier.
+                # Pro may have expired during the 7-day cache window.
+                if cached.get("ic_signals_count", 0) > 0:
+                    tier = self._get_user_tier(user_id)
+                    if tier != "pro":
+                        cached.pop("ic_signals_count", None)
+                        cached.pop("blend_weights", None)
+                        # Strip IC hints (they were prepended after local patterns)
+                        local_count = cached.get("based_on_runs", 0)
+                        all_patterns = cached.get("high_retention_patterns", [])
+                        cached["high_retention_patterns"] = all_patterns[:max(1, local_count)]
                 console.print(
                     f"[green]✓[/green] Local Intelligence: "
                     f"{len(cached.get('high_retention_patterns', []))} patterns loaded "
@@ -250,7 +261,7 @@ class LocalIntelligenceService:
                     self._supabase.table("ic_telemetry_events")
                     .select("metadata")
                     .eq("user_id", user_id)
-                    .eq("event_type", "youtube_performance")
+                    .eq("event_type", "youtube_clip_aggregate")
                     .order("created_at", desc=True)
                     .limit(500)
                     .execute()
