@@ -6,6 +6,7 @@ import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRig
 import toast from 'react-hot-toast';
 import { RetroactiveSyncModal } from '../analytics/RetroactiveSyncModal';
 import { useAIModels } from '../../hooks/useAIModels';
+import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
@@ -21,6 +22,7 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 }
 
 export const OnboardingWizard: React.FC = () => {
+    const [showProCard, setShowProCard] = useState(false);
     const [step, setStep] = useState<1 | 2 | 3 | 4>(() => {
         if (typeof window !== 'undefined') {
             const saved = localStorage.getItem('az_onboard_step');
@@ -244,9 +246,7 @@ export const OnboardingWizard: React.FC = () => {
             localStorage.setItem('az_onboarding_complete', 'true');
 
             toast.success("¡Bienvenido a Azelia Clips!");
-            setTimeout(() => {
-                window.location.replace('/dashboard');
-            }, 1000);
+            setShowProCard(true);
 
         } catch (e) {
             console.error("Failed to save onboarding data", e);
@@ -366,6 +366,22 @@ export const OnboardingWizard: React.FC = () => {
 
     if (loading) return (
         <div className="flex justify-center items-center py-20"><Loader2 className="w-8 h-8 text-brand-500 animate-spin" /></div>
+    );
+
+    if (showProCard) return (
+        <div className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl space-y-4">
+            <div>
+                <h2 className="text-2xl font-bold text-white">¡Ya estás listo!</h2>
+                <p className="text-zinc-400 mt-1">Una última cosa antes de entrar al dashboard.</p>
+            </div>
+            <ProUpgradeCard onActivated={() => window.location.replace('/dashboard')} />
+            <button
+                onClick={() => window.location.replace('/dashboard')}
+                className="w-full text-center text-xs text-zinc-500 hover:text-zinc-400 transition-colors py-1"
+            >
+                Continuar con Free por ahora →
+            </button>
+        </div>
     );
 
     return (
