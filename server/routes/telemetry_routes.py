@@ -17,7 +17,6 @@ from server.middleware.auth import require_auth, optional_auth
 from packages.core.auth import User
 from packages.core.services.telemetry import telemetry
 from packages.core.config import settings
-import os
 import sqlite3
 import hashlib
 import threading
@@ -107,39 +106,14 @@ async def toggle_telemetry_consent(
     user: User = Depends(require_auth),
 ):
     """
-    Toggle telemetry consent. Persists to .env file so it survives restarts.
-    Also updates profiles in Supabase with consent timestamp.
+    Toggle telemetry consent for this user. Persisted in profiles.telemetry_consent
+    (Supabase DB) — NOT in a global .env file, so multi-user installs are safe.
     """
-    env_path = Path(".env")
-
-    # Read existing .env content
-    env_lines = []
-    if env_path.exists():
-        env_lines = env_path.read_text().splitlines()
-
-    # Update or add AZELIA_TELEMETRY_ENABLED
-    found = False
-    new_value = "true" if body.enabled else "false"
-    for i, line in enumerate(env_lines):
-        if line.startswith("AZELIA_TELEMETRY_ENABLED"):
-            env_lines[i] = f"AZELIA_TELEMETRY_ENABLED={new_value}"
-            found = True
-            break
-
-    if not found:
-        env_lines.append(f"AZELIA_TELEMETRY_ENABLED={new_value}")
-
-    # Write back
-    env_path.write_text("\n".join(env_lines) + "\n")
-
-    # Update environment variable for current process
-    os.environ["AZELIA_TELEMETRY_ENABLED"] = new_value
-
-    # Reload telemetry service consent state
-    telemetry.reload_consent()
-
-    # Record consent change in Supabase (always, for audit trail)
+    # Persist consent in profiles (authoritative source)
     telemetry.track_consent_change(user.id, body.enabled)
+
+    # Invalidate this user's in-memory consent cache so next event re-reads DB
+    telemetry.invalidate_consent_cache(user.id)
 
     # Backfill historical SQLite data when user activates telemetry
     if body.enabled:
@@ -147,10 +121,10 @@ async def toggle_telemetry_consent(
             target=_backfill_sqlite_history, args=(user.id,), daemon=False
         ).start()
 
-    action = "activated" if body.enabled else "deactivated"
+    action = "activada" if body.enabled else "desactivada"
     return ConsentResponse(
         telemetry_enabled=body.enabled,
-        message=f"Telemetry {action} successfully. {'Anonymized metrics will be sent to improve IC.' if body.enabled else 'No data will be sent.'}",
+        message=f"Telemetría {action}. {'Tus métricas anónimas contribuirán al IC colectivo.' if body.enabled else 'No se enviarán datos.'}",
     )
 
 
