@@ -447,11 +447,21 @@ def start(
         if not (web_dir / "node_modules").exists():
             console.print("[dim]Installing frontend dependencies...[/dim]")
             subprocess.run(["npm", "install"], cwd=str(web_dir), capture_output=True, text=True)
+
+        # Astro bakes PUBLIC_* vars at build time. Auto-derive them from the root .env
+        # so users only need to set SUPABASE_URL / SUPABASE_KEY in one place.
+        build_env = os.environ.copy()
+        if not build_env.get("PUBLIC_SUPABASE_URL") and build_env.get("SUPABASE_URL"):
+            build_env["PUBLIC_SUPABASE_URL"] = build_env["SUPABASE_URL"]
+        if not build_env.get("PUBLIC_SUPABASE_ANON_KEY") and build_env.get("SUPABASE_KEY"):
+            build_env["PUBLIC_SUPABASE_ANON_KEY"] = build_env["SUPABASE_KEY"]
+
         result = subprocess.run(
             ["npm", "run", "build"],
             cwd=str(web_dir),
             capture_output=True,
             text=True,
+            env=build_env,
         )
         if result.returncode != 0:
             console.print(f"[red]Build failed:[/red]\n{result.stderr}")

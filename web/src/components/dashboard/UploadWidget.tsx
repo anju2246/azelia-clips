@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Upload, FileVideo, Music, Loader2 } from 'lucide-react';
+import { Upload, FileVideo, Loader2 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -28,6 +28,10 @@ export default function UploadWidget() {
 
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             const droppedFile = e.dataTransfer.files[0];
+            if (!droppedFile.type.startsWith('video/')) {
+                alert('Please upload a video file (MP4, MOV, MKV).');
+                return;
+            }
             setFile(droppedFile);
         }
     }, []);
@@ -127,14 +131,14 @@ export default function UploadWidget() {
                 type="file"
                 id="file-upload"
                 className="hidden"
-                accept="video/*,audio/*"
+                accept="video/*"
                 onChange={handleFileSelect}
             />
 
             {file ? (
                 <div className="flex flex-col items-center gap-2 animate-in fade-in zoom-in duration-300">
                     <div className="w-16 h-16 rounded-full bg-brand-500/20 text-brand-500 flex items-center justify-center mb-2">
-                        {file.type.startsWith('audio') ? <Music size={32} /> : <FileVideo size={32} />}
+                        <FileVideo size={32} />
                     </div>
                     <p className="font-medium text-zinc-100 text-lg">{file.name}</p>
                     <p className="text-zinc-500">{(file.size / (1024 * 1024)).toFixed(2)} MB</p>
