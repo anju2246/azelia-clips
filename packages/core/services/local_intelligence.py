@@ -577,20 +577,28 @@ Respond ONLY with valid JSON matching this schema:
     # ——————————————————————————————————————————————
 
     def _get_user_tier(self, user_id: str) -> str:
-        """Fetch user tier from profiles table. Defaults to 'community'."""
+        """Fetch user tier from profiles table. Validates pro_expires_at for Pro users."""
         try:
             result = (
                 self._supabase.table("profiles")
-                .select("tier")
+                .select("tier, pro_expires_at")
                 .eq("id", user_id)
                 .single()
                 .execute()
             )
             if result.data:
-                return result.data.get("tier", "community") or "community"
+                tier = result.data.get("tier", "free") or "free"
+                if tier == "pro":
+                    expires_at = result.data.get("pro_expires_at")
+                    if not expires_at:
+                        return "free"
+                    expiry = datetime.fromisoformat(expires_at.replace("Z", "+00:00"))
+                    if expiry <= datetime.now(timezone.utc):
+                        return "free"
+                return tier
         except Exception:
             pass
-        return "community"
+        return "free"
 
     def _get_user_context(self, user_id: str) -> Dict[str, str]:
         """Fetch user's region, category, episode_format from profiles.preferences."""

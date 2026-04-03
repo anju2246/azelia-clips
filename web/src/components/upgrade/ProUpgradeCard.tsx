@@ -26,6 +26,14 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated }) =
     const handleActivate = async () => {
         setLoading(true);
         try {
+            // Activating Pro implies telemetry consent (the tradeoff is explicit in the UI).
+            // Set consent first so the DB trigger accepts the upgrade.
+            await fetchWithAuth('/telemetry/consent', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: true }),
+            });
+
             const res = await fetchWithAuth('/upgrade/pro', { method: 'POST' });
             if (res.status === 410) {
                 toast.error('La beta gratuita ha finalizado. ¡Gracias por el interés!');
