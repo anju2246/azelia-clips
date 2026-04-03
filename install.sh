@@ -25,7 +25,7 @@ echo -e "${GREEN}${BOLD}Bienvenido al instalador de Azelia Clips.${NC}\n"
 # ─────────────────────────────────────────────
 # 1. System Requirements Check & Install
 # ─────────────────────────────────────────────
-echo -e "${BLUE}[1/6] Verificando dependencias del sistema...${NC}"
+echo -e "${BLUE}[1/5] Verificando dependencias del sistema...${NC}"
 
 check_cmd() {
     command -v "$1" &> /dev/null
@@ -80,7 +80,7 @@ echo "✓ Python ${PYTHON_VERSION}"
 # ─────────────────────────────────────────────
 # 2. Clone or Update Repository
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[2/6] Descargando Azelia Clips...${NC}"
+echo -e "\n${BLUE}[2/5] Descargando Azelia Clips...${NC}"
 
 INSTALL_DIR="$HOME/.azelia"
 REPO_URL="https://github.com/anju2246/azelia-clips.git"
@@ -102,7 +102,7 @@ fi
 # ─────────────────────────────────────────────
 # 3. Python Virtual Environment + Dependencies
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[3/6] Configurando entorno Python...${NC}"
+echo -e "\n${BLUE}[3/5] Configurando entorno Python...${NC}"
 echo -e "${YELLOW}(Puede tomar unos minutos)${NC}"
 
 if [ ! -d "venv" ]; then
@@ -115,65 +115,20 @@ pip install -e ".[all]" --quiet
 echo "✓ Backend e IA configurados."
 
 # ─────────────────────────────────────────────
-# 4. Supabase Configuration
+# 4. Frontend Build
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[4/6] Configuración de Supabase (obligatorio)...${NC}"
-echo -e "${YELLOW}Azelia necesita un proyecto Supabase para auth y datos.${NC}"
-echo -e "${YELLOW}Obtén estos valores en: https://supabase.com/dashboard → tu proyecto → Settings → API${NC}\n"
-
-ENV_FILE="$INSTALL_DIR/.env"
-
-if [ -f "$ENV_FILE" ] && grep -q "SUPABASE_URL=https://" "$ENV_FILE"; then
-    echo "✓ Configuración de Supabase ya existente en .env."
-    SUPABASE_URL=$(grep "^SUPABASE_URL=" "$ENV_FILE" | cut -d= -f2-)
-    SUPABASE_KEY=$(grep "^SUPABASE_KEY=" "$ENV_FILE" | cut -d= -f2-)
-else
-    read -r -p "  SUPABASE_URL (ej: https://xyz.supabase.co): " SUPABASE_URL
-    read -r -p "  SUPABASE_ANON_KEY (clave pública anon):      " SUPABASE_KEY
-
-    if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_KEY" ]; then
-        echo -e "${RED}Las credenciales de Supabase son obligatorias. Abortando.${NC}"
-        exit 1
-    fi
-
-    # Write root .env
-    cat > "$ENV_FILE" << ENVFILE
-# ─── Supabase ────────────────────────────────────────────────────────────────
-SUPABASE_URL=$SUPABASE_URL
-SUPABASE_KEY=$SUPABASE_KEY
-
-# ─── AI Providers (configura al menos uno desde el dashboard) ───────────────
-AI_PROVIDER_ORDER=anthropic,groq,openai,vertex
-ANTHROPIC_API_KEY=
-GROQ_API_KEY=
-OPENAI_API_KEY=
-GCP_PROJECT_ID=
-
-# ─── Podcast config ──────────────────────────────────────────────────────────
-PODCAST_DIR=.
-
-# ─── Features ────────────────────────────────────────────────────────────────
-AZELIA_TELEMETRY_ENABLED=false
-ENVFILE
-    echo "✓ .env creado."
-fi
-
-# ─────────────────────────────────────────────
-# 5. Frontend Build
-# ─────────────────────────────────────────────
-echo -e "\n${BLUE}[5/6] Construyendo interfaz web (Astro/React)...${NC}"
+echo -e "\n${BLUE}[4/5] Construyendo interfaz web (Astro/React)...${NC}"
 
 cd web
 npm install --silent 2>/dev/null
-# Pass Supabase vars so Astro bakes them into the build
-PUBLIC_SUPABASE_URL="$SUPABASE_URL" PUBLIC_SUPABASE_ANON_KEY="$SUPABASE_KEY" npm run build --silent 2>/dev/null
+npm run build --silent 2>/dev/null
 cd ..
 echo "✓ Dashboard construido."
 
 # ─────────────────────────────────────────────
 # 5. Global Command Setup
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[6/6] Instalando comando global 'azelia'...${NC}"
+echo -e "\n${BLUE}[5/5] Instalando comando global 'azelia'...${NC}"
 
 BIN_DIR="$HOME/.azelia/bin"
 mkdir -p "$BIN_DIR"
