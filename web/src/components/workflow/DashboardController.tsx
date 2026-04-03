@@ -4,12 +4,27 @@ import { LibraryView } from './LibraryView';
 import { LiveProcessingWidget } from './LiveProcessingWidget';
 import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
+import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 import { ClipsApi, SettingsApi } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
+
+const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+
+async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
+    const headers = new Headers(options.headers || {});
+    try {
+        const { data } = await supabase.auth.getSession();
+        if (data?.session?.access_token)
+            headers.set('Authorization', `Bearer ${data.session.access_token}`);
+    } catch (e) { /* continue */ }
+    return fetch(`${API_BASE}${endpoint}`, { ...options, headers });
+}
 
 const JOB_STORAGE_KEY = 'azelia_active_job_id';
 
 export const DashboardController: React.FC = () => {
+    const [userTier, setUserTier] = useState<string | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(() => {
         // Recover active job from localStorage on mount
         if (typeof window !== 'undefined') {
@@ -22,6 +37,14 @@ export const DashboardController: React.FC = () => {
     const [showApiKeyModal, setShowApiKeyModal] = useState(false);
     const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
     const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+
+    // Fetch user tier to decide whether to show Pro upgrade card
+    useEffect(() => {
+        fetchWithAuth('/upgrade/status')
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d) setUserTier(d.tier); })
+            .catch(() => {});
+    }, []);
 
     // Check if user has any API key configured
     useEffect(() => {
@@ -130,6 +153,9 @@ export const DashboardController: React.FC = () => {
 
     return (
         <div className="flex flex-col gap-12">
+            {userTier === 'free' && (
+                <ProUpgradeCard onActivated={() => setUserTier('pro')} />
+            )}
             <YouTubeNudge />
             <LibraryView onProcessEpisode={handleProcessEpisode} />
 
