@@ -10,11 +10,16 @@ Rules:
 """
 
 import threading
+import time
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from supabase import create_client, Client
 from pydantic import BaseModel
 from packages.core.config import settings
+
+# Per-user consent cache TTL (5 minutes). Avoids a DB call on every event
+# while ensuring consent changes propagate quickly.
+_CONSENT_CACHE_TTL = 300
 
 
 def _utc_now_iso() -> str:
@@ -40,30 +45,54 @@ class TelemetryService:
     """
 
     def __init__(self):
-        # Opt-in: only enabled when user explicitly consents
-        self.enabled = settings.azelia_telemetry_enabled
+        # Service-level flag: is Supabase reachable? (not the same as user consent)
         self.supabase: Optional[Client] = None
+        # Per-user consent cache: {user_id: (consented: bool, expires_at: float)}
+        self._consent_cache: Dict[str, Tuple[bool, float]] = {}
 
-        if self.enabled and settings.supabase_url and settings.supabase_key:
+        if settings.supabase_url and settings.supabase_key:
             try:
                 self.supabase = create_client(settings.supabase_url, settings.supabase_key)
             except Exception as e:
                 print(f"[Telemetry] Warning: Could not initialize Supabase client: {e}")
-                self.enabled = False
+
+    @property
+    def enabled(self) -> bool:
+        """True if the Supabase client is available (service-level check)."""
+        return self.supabase is not None
+
+    def _is_user_consented(self, user_id: str) -> bool:
+        """
+        Check if this specific user has opted in to telemetry.
+        Reads from profiles.telemetry_consent with a 5-minute in-memory cache.
+        This is the authoritative check — not a global env var.
+        """
+        if not self.supabase or not user_id or user_id == "anonymous":
+            return False
+        now = time.monotonic()
+        cached = self._consent_cache.get(user_id)
+        if cached and now < cached[1]:
+            return cached[0]
+        try:
+            result = self.supabase.table("profiles").select("telemetry_consent").eq("id", user_id).single().execute()
+            consented = bool(result.data and result.data.get("telemetry_consent"))
+        except Exception:
+            consented = False
+        self._consent_cache[user_id] = (consented, now + _CONSENT_CACHE_TTL)
+        return consented
+
+    def invalidate_consent_cache(self, user_id: str):
+        """Call after a user changes their consent so the next event re-checks DB."""
+        self._consent_cache.pop(user_id, None)
 
     def reload_consent(self):
-        """Re-check consent status (called after user toggles telemetry)."""
-        # Re-read from environment / .env
-        from importlib import reload
-        import packages.core.config as config_module
-        reload(config_module)
-        self.enabled = config_module.settings.azelia_telemetry_enabled
-
-        if self.enabled and not self.supabase and settings.supabase_url and settings.supabase_key:
+        """Legacy: clear the whole cache so all users re-check on next event."""
+        self._consent_cache.clear()
+        if not self.supabase and settings.supabase_url and settings.supabase_key:
             try:
                 self.supabase = create_client(settings.supabase_url, settings.supabase_key)
             except Exception:
-                self.enabled = False
+                pass
 
     # ── Normalization helpers (align with IC Signal Contract) ────────────
 
@@ -142,7 +171,7 @@ class TelemetryService:
         NEVER includes: episode title, podcast name, video URL, transcript text.
         ONLY includes: aggregated metrics and structural patterns.
         """
-        if not self.enabled or not self.supabase:
+        if not self._is_user_consented(user_id):
             return
 
         # Normalize hook_types to canonical values
@@ -175,7 +204,7 @@ class TelemetryService:
         Upserts tool usage tracking.
         Tools: 'clips', 'studio', 'crm', 'ros_maker'
         """
-        if not self.enabled or not self.supabase:
+        if not self._is_user_consented(user_id):
             return
 
         def _upsert():
@@ -212,7 +241,7 @@ class TelemetryService:
         These feed IC pattern detection (hook effectiveness, duration optimization).
         Fields normalized to IC Signal Contract canonical values.
         """
-        if not self.enabled or not self.supabase:
+        if not self._is_user_consented(user_id):
             return
 
         event = TelemetryEvent(
@@ -278,7 +307,7 @@ class TelemetryService:
         
         NEVER includes: video title, URL, channel name.
         """
-        if not self.enabled or not self.supabase:
+        if not self._is_user_consented(user_id):
             return
 
         event = TelemetryEvent(

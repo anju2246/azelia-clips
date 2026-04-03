@@ -60,9 +60,18 @@ async def process_video(
 ):
     """Upload a video and start processing."""
     
-    # Validate file type
+    # Validate file type by extension AND magic bytes (prevent disguised uploads)
     if not file.filename.lower().endswith(('.mp4', '.mov', '.mkv')):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP4, MOV, MKV supported.")
+
+    header = await file.read(12)
+    await file.seek(0)
+    # MP4/MOV: bytes 4-7 are 'ftyp' or 'moov' or 'wide'
+    # MKV/WebM: starts with 0x1A 0x45 0xDF 0xA3
+    is_mp4_mov = len(header) >= 8 and header[4:8] in (b'ftyp', b'moov', b'wide', b'mdat', b'free')
+    is_mkv    = header[:4] == b'\x1a\x45\xdf\xa3'
+    if not (is_mp4_mov or is_mkv):
+        raise HTTPException(status_code=400, detail="File content does not match a valid video format.")
     
     # Create Job ID
     job_id = str(uuid.uuid4())
