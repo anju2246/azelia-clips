@@ -8,8 +8,10 @@ __pycache__/
 venv/
 ENV/
 
-# Environment files
+# Environment files — root .env has private keys (never commit)
 .env
+# web/.env only has the public anon key — safe to commit
+!web/.env
 
 # IDE
 .idea/

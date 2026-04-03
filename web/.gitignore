@@ -14,8 +14,11 @@ pnpm-debug.log*
 
 
 # environment variables
-.env
+# .env is committed (only contains public anon key — safe to expose)
+# .env.local overrides locally and stays gitignored
+.env.local
 .env.production
+.env.*.local
 
 # macOS-specific files
 .DS_Store
