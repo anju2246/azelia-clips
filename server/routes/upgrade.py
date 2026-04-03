@@ -13,6 +13,10 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 import os
 
+# Beta offer closes July 2, 2026 at midnight UTC.
+# After this date, POST /upgrade/pro returns 410 Gone.
+BETA_ENDS = datetime(2026, 7, 2, 23, 59, 59, tzinfo=timezone.utc)
+
 from server.middleware.auth import require_auth
 from packages.core.auth import User
 from packages.core.services.telemetry import telemetry
@@ -55,6 +59,12 @@ async def activate_pro(user: User = Depends(require_auth)):
     - Idempotent: if already Pro, refreshes expiry and returns current state
     """
     sb = _get_service_client()
+
+    if datetime.now(timezone.utc) > BETA_ENDS:
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="La beta gratuita de Pro ha finalizado. Pronto disponible con planes de pago.",
+        )
 
     expires_at = datetime.now(timezone.utc) + timedelta(days=90)
     expires_iso = expires_at.isoformat()

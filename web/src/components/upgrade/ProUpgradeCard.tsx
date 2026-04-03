@@ -27,6 +27,10 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated }) =
         setLoading(true);
         try {
             const res = await fetchWithAuth('/upgrade/pro', { method: 'POST' });
+            if (res.status === 410) {
+                toast.error('La beta gratuita ha finalizado. ¡Gracias por el interés!');
+                return;
+            }
             if (!res.ok) {
                 const err = await res.json();
                 throw new Error(err.detail || 'Error activando Pro');
