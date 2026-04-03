@@ -156,7 +156,17 @@ async def toggle_telemetry_consent(
 
 @router.get("/telemetry/status", response_model=TelemetryStatusResponse)
 async def get_telemetry_status(user: User = Depends(optional_auth)):
-    """Returns current telemetry consent state."""
+    """Returns telemetry consent for the current user, read from their profile in Supabase."""
+    if user and telemetry.supabase:
+        try:
+            result = telemetry.supabase.table("profiles").select("telemetry_consent").eq("id", user.id).single().execute()
+            if result.data:
+                return TelemetryStatusResponse(
+                    telemetry_enabled=bool(result.data.get("telemetry_consent")),
+                    supabase_connected=True,
+                )
+        except Exception:
+            pass
     return TelemetryStatusResponse(
         telemetry_enabled=telemetry.enabled,
         supabase_connected=telemetry.supabase is not None,
