@@ -5,7 +5,10 @@ Server Routes — Platform Analytics & YouTube OAuth
 import os
 import glob
 from datetime import datetime
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header, Body, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header, Body, Request, Depends
+
+from server.middleware.auth import require_auth
+from packages.core.auth import User
 
 router = APIRouter()
 
@@ -37,7 +40,7 @@ def _find_client_secrets() -> str:
 # ─── Personal Intelligence Insights ─────────────────────────────────────────
 
 @router.get("/analytics/insights")
-async def get_analytics_insights(authorization: str = Header(None)):
+async def get_analytics_insights(user: User = Depends(require_auth)):
     """
     Aggregate insights from the local job store for Personal Intelligence.
     Returns stats about processed episodes and generated clips.
@@ -220,11 +223,10 @@ def _get_user_id_from_auth(authorization: str) -> str | None:
 
 
 @router.get("/analytics/youtube/status")
-async def get_youtube_status(request: Request, authorization: str = Header(None)):
+async def get_youtube_status(user: User = Depends(require_auth)):
     """Check if YouTube shorts have been synced (user-scoped)."""
     try:
-        user = getattr(request.state, "user", None)
-        user_id = user["id"] if user else _get_user_id_from_auth(authorization)
+        user_id = user.id
         conn = _get_yt_db()
         
         query = "SELECT COUNT(*) FROM youtube_shorts"
@@ -261,7 +263,7 @@ async def get_youtube_status(request: Request, authorization: str = Header(None)
 
 
 @router.post("/analytics/youtube/sync")
-async def sync_youtube_shorts(body: dict = Body(...)):
+async def sync_youtube_shorts(body: dict = Body(...), user: User = Depends(require_auth)):
     """
     Fetch ALL shorts from the user's YouTube channel using their Google provider token.
     Paginates through all uploads, filters for shorts (<= 60s), and stores locally.
@@ -395,7 +397,8 @@ async def sync_youtube_shorts(body: dict = Body(...)):
 @router.post("/analytics/youtube/sync-with-code")
 async def sync_youtube_with_code(
     body: dict = Body(...),
-    authorization: str = Header(None)
+    authorization: str = Header(None),
+    user: User = Depends(require_auth),
 ):
     """
     Step 1: Exchange OAuth code for access token, then list available channels.
@@ -466,17 +469,14 @@ async def sync_youtube_with_code(
     
         # Authenticate to get user_id & AnalyticsSync
         from server.services.analytics import AnalyticsSync
-        user_id = None
+        user_id = user.id
         analytics = None
         if authorization:
             try:
                 token = authorization.replace("Bearer ", "").strip()
                 analytics = AnalyticsSync(auth_token=token)
-                from packages.core.auth import verify_supabase_jwt
-                verified_user = verify_supabase_jwt(token)
-                user_id = verified_user.id
             except Exception as e:
-                print(f"Auth verification failed: {e}")
+                print(f"AnalyticsSync init failed: {e}")
 
         # If channel_id provided, sync directly
         if channel_id:
@@ -527,10 +527,10 @@ async def sync_youtube_with_code(
         raise HTTPException(status_code=500, detail=f"Sync crash: {str(e)} \nTrace: {trace}")
 
 @router.post("/analytics/youtube/auto-sync")
-async def auto_sync_youtube(authorization: str = Header(None)):
+async def auto_sync_youtube(authorization: str = Header(None), user: User = Depends(require_auth)):
     """Automatically fetch latest YouTube stats using stored refresh_token (user-scoped)."""
     try:
-        user_id = _get_user_id_from_auth(authorization) or '__legacy__'
+        user_id = user.id
         conn = _get_yt_db()
         cursor = conn.execute(
             "SELECT refresh_token, channel_id FROM youtube_connections WHERE user_id = ?",
@@ -571,18 +571,14 @@ async def auto_sync_youtube(authorization: str = Header(None)):
     
         # Authenticate for telemetry
         from server.services.analytics import AnalyticsSync
-        user_id = None
         analytics = None
         if authorization:
             try:
                 token = authorization.replace("Bearer ", "").strip()
                 analytics = AnalyticsSync(auth_token=token)
-                from packages.core.auth import verify_supabase_jwt
-                verified_user = verify_supabase_jwt(token)
-                user_id = verified_user.id
             except Exception:
                 pass
-            
+
         result = await _sync_channel(access_token, channel_id, user_id=user_id, analytics=analytics)
         return result
     except HTTPException:
@@ -742,7 +738,7 @@ async def _sync_channel(access_token: str, channel_id: str, user_id: str = None,
 # ─── YouTube Historical Extractor (Retroactive Intelligence) ────────────────
 
 @router.get("/analytics/youtube/historical/estimate")
-async def estimate_historical_cost(request: Request, authorization: str = Header(None)):
+async def estimate_historical_cost(user: User = Depends(require_auth)):
     """
     Counts available historical shorts and calculates the OpenRouter LLM cost
     based on the user's currently configured model.
@@ -825,7 +821,7 @@ async def estimate_historical_cost(request: Request, authorization: str = Header
     }
 
 @router.post("/analytics/youtube/historical/sync")
-async def sync_historical_data(request: Request, authorization: str = Header(None)):
+async def sync_historical_data(user: User = Depends(require_auth)):
     """
     Triggers the YouTubeHistoricalExtractor as a BACKGROUND JOB.
     Returns immediately with a job_id for polling progress.
@@ -833,9 +829,8 @@ async def sync_historical_data(request: Request, authorization: str = Header(Non
     import asyncio
     from server.workers.job_store import get_job_store
     from packages.core.config import settings
-    
-    # Need youtube access token from sqlite metadata (user-scoped)
-    user_id = _get_user_id_from_auth(authorization) or 'default_user'
+
+    user_id = user.id
     conn = _get_yt_db()
     cursor = conn.execute(
         "SELECT refresh_token, channel_id FROM youtube_connections WHERE user_id = ?",
@@ -913,7 +908,7 @@ async def sync_historical_data(request: Request, authorization: str = Header(Non
 
 
 @router.get("/analytics/youtube/historical/status/{job_id}")
-async def get_historical_sync_status(job_id: str):
+async def get_historical_sync_status(job_id: str, user: User = Depends(require_auth)):
     """Poll the status of a historical sync background job."""
     from server.workers.job_store import get_job_store
     
@@ -933,11 +928,10 @@ async def get_historical_sync_status(job_id: str):
 
 
 @router.get("/analytics/youtube/insights")
-async def get_youtube_insights(request: Request, authorization: str = Header(None)):
+async def get_youtube_insights(user: User = Depends(require_auth)):
     """Aggregate insights from synced YouTube Shorts data (Local Intelligence)."""
     try:
-        user = getattr(request.state, "user", None)
-        user_id = user["id"] if user else _get_user_id_from_auth(authorization)
+        user_id = user.id
         conn = _get_yt_db()
         
         base_where = "WHERE 1=1"
@@ -1112,12 +1106,9 @@ def _parse_iso_duration(duration: str) -> int:
 # ─── Platform Connections ────────────────────────────────────────────────────
 
 @router.get("/connections/youtube")
-async def get_youtube_connection_status(authorization: str = Header(None)):
+async def get_youtube_connection_status(authorization: str = Header(None), user: User = Depends(require_auth)):
     """Check if YouTube is connected for the current user."""
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    
-    token = authorization.replace("Bearer ", "").strip()
+    token = (authorization or "").replace("Bearer ", "").strip()
     
     try:
         from server.services.analytics import AnalyticsSync
@@ -1150,14 +1141,11 @@ async def get_youtube_connection_status(authorization: str = Header(None)):
 
 
 @router.post("/connections/{platform}")
-async def connect_platform_endpoint(platform: str, authorization: str = Header(None)):
+async def connect_platform_endpoint(platform: str, authorization: str = Header(None), user: User = Depends(require_auth)):
     """Connect a social platform."""
     from server.services.analytics import AnalyticsSync
-    
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-        
-    token = authorization.replace("Bearer ", "").strip()
+
+    token = (authorization or "").replace("Bearer ", "").strip()
     analytics = AnalyticsSync(auth_token=token)
     
     if not analytics.Enabled:
@@ -1176,15 +1164,13 @@ async def connect_platform_endpoint(platform: str, authorization: str = Header(N
 @router.post("/analytics/upload-csv")
 async def upload_analytics_csv(
     file: UploadFile = File(...),
-    authorization: str = Header(None)
+    authorization: str = Header(None),
+    user: User = Depends(require_auth),
 ):
     """Upload and process YouTube Analytics CSV."""
     from server.sources.youtube_analytics import YouTubeAnalyticsParser
-    
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-        
-    token = authorization.replace("Bearer ", "").strip()
+
+    token = (authorization or "").replace("Bearer ", "").strip()
     
     if not file.filename.lower().endswith('.csv'):
         raise HTTPException(status_code=400, detail="Invalid file type. Only CSV supported.")
@@ -1208,7 +1194,8 @@ async def upload_analytics_csv(
 @router.post("/analytics/fetch-youtube")
 async def fetch_youtube_analytics(
     provider_token: str = Form(...),
-    authorization: str = Header(None)
+    authorization: str = Header(None),
+    user: User = Depends(require_auth),
 ):
     """
     Fetch real-time analytics from YouTube Data API using the user's Google Access Token.
@@ -1220,26 +1207,13 @@ async def fetch_youtube_analytics(
     from server.services.analytics import AnalyticsSync
     from packages.core.services.telemetry import telemetry
     import hashlib
-    
-    if not authorization:
-        raise HTTPException(status_code=401, detail="Missing Authorization header")
-    
-    # Setup Supabase Client (to save results)
-    token = authorization.replace("Bearer ", "").strip()
+
+    token = (authorization or "").replace("Bearer ", "").strip()
     analytics = AnalyticsSync(auth_token=token)
     if not analytics.Enabled:
-         raise HTTPException(status_code=500, detail="Analytics service not enabled")
+        raise HTTPException(status_code=500, detail="Analytics service not enabled")
 
-    # Extract user_id from JWT for telemetry
-    user_id = None
-    try:
-        import json, base64
-        payload = token.split(".")[1]
-        payload += "=" * (4 - len(payload) % 4)  # Fix padding
-        decoded = json.loads(base64.b64decode(payload))
-        user_id = decoded.get("sub")
-    except Exception:
-        pass
+    user_id = user.id
 
     try:
         # Initialize YouTube Client
@@ -1355,7 +1329,8 @@ async def fetch_youtube_analytics(
 @router.get("/auth/youtube/authorize")
 async def authorize_youtube(
     redirect_uri: str,
-    authorization: str = Header(None)
+    authorization: str = Header(None),
+    user: User = Depends(require_auth),
 ):
     """
     Start OAuth flow for YouTube connection.
@@ -1401,7 +1376,8 @@ async def authorize_youtube(
 async def callback_youtube(
     code: str = Body(..., embed=True),
     redirect_uri: str = Body(..., embed=True),
-    authorization: str = Header(None)
+    authorization: str = Header(None),
+    user: User = Depends(require_auth),
 ):
     """
     Exchange authorization code for tokens and link to current user.
@@ -1409,11 +1385,8 @@ async def callback_youtube(
     from google_auth_oauthlib.flow import Flow
     from googleapiclient.discovery import build
     from server.services.analytics import AnalyticsSync
-    
-    if not authorization:
-         raise HTTPException(status_code=401, detail="User must be logged in to link account")
-         
-    token = authorization.replace("Bearer ", "").strip()
+
+    token = (authorization or "").replace("Bearer ", "").strip()
     analytics = AnalyticsSync(auth_token=token)
     
     try:
