@@ -595,16 +595,6 @@ class BatchProcessor:
             from server.workers.job_store import get_job_store
             store = get_job_store()
             store.update_progress(job_id, 20, "🎤 Obteniendo transcripción...")
-            # The provided change was syntactically incorrect and used undefined variables (clip, ep, settings).
-            # Assuming the intent was to pass podcast_name to the transcription config if applicable,
-            # but the current transcription driver doesn't directly support it.
-            # The original code for transcription is kept as is, as the requested change
-            # cannot be applied syntactically or logically in this specific method.
-            # If the intent was to add a new parameter to get_transcript, that would require
-            # modifying the get_transcript signature and its implementations.
-            # The instruction "Pass settings.podcast_name" is too vague without a clear target function.
-            # The provided code snippet for the change was malformed.
-            # Therefore, no change is made to the _transcribe_video method based on the provided snippet.
             
         try:
             return self.transcription_driver.get_transcript(resource, **self.transcription_config)

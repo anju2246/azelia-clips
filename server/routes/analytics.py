@@ -48,7 +48,8 @@ async def get_analytics_insights(authorization: str = Header(None)):
     
     try:
         # Query all completed jobs from SQLite
-        conn = store._get_conn()
+        import sqlite3 as _sqlite3
+        conn = _sqlite3.connect(store.db_path)
         cursor = conn.execute("""
             SELECT 
                 COUNT(*) as total_jobs,

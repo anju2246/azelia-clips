@@ -12,6 +12,25 @@ class User(BaseModel):
     email: Optional[str] = None
     role: Optional[str] = None
 
+def _extract_custom_role(token: str) -> str:
+    """
+    Decodes the JWT (without verification — already validated by Supabase) to read
+    the `user_role` custom claim injected by custom_access_token_hook.
+    Falls back to 'authenticated' if the claim is absent.
+    """
+    try:
+        import base64, json as _json
+        parts = token.split(".")
+        if len(parts) != 3:
+            return "authenticated"
+        padding = 4 - len(parts[1]) % 4
+        payload = base64.urlsafe_b64decode(parts[1] + "=" * padding)
+        claims = _json.loads(payload)
+        return claims.get("user_role", "authenticated")
+    except Exception:
+        return "authenticated"
+
+
 def verify_supabase_jwt(token: str) -> User:
     """
     Verifies a Supabase-issued JWT by calling the Supabase Auth API.
@@ -37,10 +56,14 @@ def verify_supabase_jwt(token: str) -> User:
             )
 
         user = user_resp.user
+        # user.role is always "authenticated" (Supabase Auth system role).
+        # The actual app role (e.g. "super_admin") lives in the custom JWT claim
+        # `user_role` injected by custom_access_token_hook.
+        role = _extract_custom_role(token)
         return User(
             id=user.id,
             email=user.email,
-            role=user.role or "authenticated"
+            role=role,
         )
 
     except HTTPException:

@@ -408,7 +408,7 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
     )
 
 @router.get("/clips/{job_id}/rejected")
-async def list_rejected_clips(job_id: str):
+async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
     """List all rejected clips for a job, with age info."""
     import time
     clips_dir = (DATA_DIR / job_id / "clips" / "rejected").resolve()
@@ -433,7 +433,7 @@ async def list_rejected_clips(job_id: str):
     return results
 
 @router.get("/clips/{job_id}/{filename}")
-async def get_clip(job_id: str, filename: str):
+async def get_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Serve a generated clip."""
     safe_dir = (DATA_DIR / job_id / "clips").resolve()
     
@@ -464,7 +464,7 @@ async def get_clip(job_id: str, filename: str):
     raise HTTPException(status_code=404, detail="Clip not found")
 
 @router.post("/clips/{job_id}/{filename}/open")
-async def open_clip_location(job_id: str, filename: str):
+async def open_clip_location(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Open the local folder containing the clip (macOS)."""
     import subprocess
     safe_dir = (DATA_DIR / job_id / "clips").resolve()
@@ -489,7 +489,7 @@ async def open_clip_location(job_id: str, filename: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/clips/{job_id}/{filename}/approve")
-async def approve_clip(job_id: str, filename: str):
+async def approve_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Approve a clip: move it from review/ to approved/."""
     import shutil
     clips_dir = (DATA_DIR / job_id / "clips").resolve()
@@ -515,7 +515,7 @@ async def approve_clip(job_id: str, filename: str):
     return {"status": "approved", "filename": filename}
 
 @router.post("/clips/{job_id}/{filename}/reject")
-async def reject_clip(job_id: str, filename: str):
+async def reject_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Reject a clip: move it to rejected/ (auto-deleted after 30 days)."""
     import shutil
     clips_dir = (DATA_DIR / job_id / "clips").resolve()
@@ -547,7 +547,7 @@ async def reject_clip(job_id: str, filename: str):
     return {"status": "rejected", "filename": filename}
     return {"status": "rejected", "filename": filename}
 @router.post("/clips/{job_id}/{filename}/restore")
-async def restore_clip(job_id: str, filename: str):
+async def restore_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Restore a rejected clip back to the review folder."""
     import shutil
     clips_dir = (DATA_DIR / job_id / "clips").resolve()
@@ -609,7 +609,7 @@ except Exception:
 # ─── Face Tracking ───────────────────────────────────────────────────────────
 
 @router.post("/jobs/{job_id}/extract-faces")
-async def extract_faces(job_id: str):
+async def extract_faces(job_id: str, user: User = Depends(require_auth)):
     """Scan video to extract unique biometric face identities (MTCNN + FaceNet)."""
     job = store.get_job(job_id)
     if not job:
@@ -632,7 +632,7 @@ async def extract_faces(job_id: str):
     return {"status": "success", "faces": faces}
 
 @router.get("/jobs/{job_id}/faces")
-async def get_faces(job_id: str):
+async def get_faces(job_id: str, user: User = Depends(require_auth)):
     """Returns the biometric face map {FACE_XX: filename} and role assignments if available."""
     json_path = DATA_DIR / job_id / "faces.json"
     if not json_path.exists():
@@ -651,7 +651,7 @@ async def get_faces(job_id: str):
     return {"status": "success", "faces": faces, "roles": roles}
 
 @router.get("/jobs/{job_id}/faces/{filename}")
-async def get_face_image(job_id: str, filename: str):
+async def get_face_image(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Serves the actual thumbnail image of a face."""
     safe_dir = (DATA_DIR / job_id / "faces").resolve()
     path = (safe_dir / filename).resolve()
@@ -663,7 +663,7 @@ async def get_face_image(job_id: str, filename: str):
     return FileResponse(path)
 
 @router.post("/jobs/{job_id}/assign-roles")
-async def assign_roles(job_id: str, role_map: dict):
+async def assign_roles(job_id: str, role_map: dict, user: User = Depends(require_auth)):
     """
     Assign semantic roles to biometric face IDs.
     
@@ -700,7 +700,7 @@ async def assign_roles(job_id: str, role_map: dict):
 # ─── Episodes (Local Library) ───────────────────────────────────────────────
 
 @router.get("/episodes", response_model=List[EpisodeResponse])
-async def list_episodes():
+async def list_episodes(user: User = Depends(require_auth)):
     """List episodes from configured podcast directory."""
     try:
         if not settings.podcast_dir.exists():
@@ -727,9 +727,10 @@ async def list_episodes():
 
 @router.post("/episodes/{episode_number}/process", response_model=JobResponse)
 async def process_episode_endpoint(
-    episode_number: int, 
+    episode_number: int,
     background_tasks: BackgroundTasks,
-    req: ProcessRequest
+    req: ProcessRequest,
+    user: User = Depends(require_auth)
 ):
     """Trigger processing for a specific episode from the library."""
     from server.processor import BatchProcessor
@@ -800,7 +801,7 @@ async def process_episode_endpoint(
     )
 
 @router.post("/episodes/{episode_number}/upload-transcript")
-async def upload_transcript_endpoint(episode_number: int):
+async def upload_transcript_endpoint(episode_number: int, user: User = Depends(require_auth)):
     """Upload the transcript for a specific episode to Supabase."""
     from server.sources.supabase_transcripts import upload_transcript
     from packages.clips.transcription.transcriber import Transcript
