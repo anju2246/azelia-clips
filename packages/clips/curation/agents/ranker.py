@@ -6,7 +6,7 @@ from packages.clips.transcription.transcriber import Transcript
 from packages.core.llm_provider import get_llm
 from packages.clips.curation.prompts import RANKER_SYSTEM, CAPTION_GENERATOR_SYSTEM
 from packages.clips.curation.prompt_manager import PromptManager
-from packages.clips.curation.models import CriticClip, RankerResponse, CuratedClip, CaptionResponse, CurationConfig
+from packages.clips.curation.models import CriticClip, RankerResponse, CuratedClip, CaptionResponse, CurationConfig, ViralityScore
 from packages.clips.curation.signals import TextAnalyzer, AudioAnalyzer, StructuralAnalyzer
 
 console = Console()
@@ -108,7 +108,22 @@ class RankerAgent:
             
         except Exception as e:
             console.print(f"[red]Failed to run RankerAgent: {e}[/red]")
-            return []
+            console.print("[yellow]Fallback: returning approved clips with baseline score=50.[/yellow]")
+            return [
+                CuratedClip(
+                    start_time=c.start_time, end_time=c.end_time,
+                    title=c.title or "", summary=c.summary or "",
+                    virality_score=ViralityScore(
+                        hook_strength=5, quotability=5, storytelling=5,
+                        controversy=5, energy_level=5, pacing=5,
+                        emotional_arc=5, standalone_clarity=5,
+                        segment_completeness=5, optimal_duration=5,
+                    ),
+                    category="insight",
+                    pending_review=True,
+                    review_reason="Ranker agent failed — scores are baseline estimates",
+                ) for c in approved_clips
+            ]
 
     def generate_captions(
         self,

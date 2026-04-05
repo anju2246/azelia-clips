@@ -151,8 +151,12 @@ class CurationPipeline:
             
         # Cap captions to only the exported/top ones to save tokens
         if episode_number > 0 and final_clips:
+            cap_config = CurationConfig(
+                podcast_name=podcast_name,
+                guest_name=guest_name,
+            )
             final_clips = self.ranker.generate_captions(
-                final_clips, transcript, episode_number, guest_name, podcast_name
+                final_clips, transcript, episode_number, cap_config
             )
             
         return final_clips

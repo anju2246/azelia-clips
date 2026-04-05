@@ -78,14 +78,14 @@ class CriticAgent:
             
         except Exception as e:
             console.print(f"[red]Failed to run CriticAgent: {e}[/red]")
-            # Fallback: if critic fails, approve all candidates to avoid losing data
+            console.print("[yellow]Fallback: all candidates marked as NOT approved — manual review required.[/yellow]")
             return [
                 CriticClip(
                     start_time=c.start_time,
                     end_time=c.end_time,
                     title=c.title,
                     summary=c.summary,
-                    reasoning="Critic failed, auto-approved",
-                    approved=True
+                    reasoning="Critic agent failed — manual review required",
+                    approved=False
                 ) for c in candidates
             ]

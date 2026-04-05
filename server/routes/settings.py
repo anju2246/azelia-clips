@@ -194,7 +194,7 @@ async def get_available_models(user: User = Depends(require_auth)):
     return {"data": [m.dict() for m in models]}
 
 @router.get("/browse")
-async def browse_directory(path: str = "~"):
+async def browse_directory(path: str = "~", user: User = Depends(require_auth)):
     """
     Browse directories on the local filesystem.
     Used by the Settings UI to pick a podcast directory with full absolute paths.
@@ -235,7 +235,7 @@ async def browse_directory(path: str = "~"):
     }
 
 @router.get("/browse-files")
-async def browse_files(path: str = "~"):
+async def browse_files(path: str = "~", user: User = Depends(require_auth)):
     """
     Browse directories and video files on the local filesystem.
     Used by the Upload manual UI to pick a file without uploading.
@@ -290,7 +290,7 @@ async def browse_files(path: str = "~"):
     }
 
 @router.get("/resolve-path")
-async def resolve_path(name: str):
+async def resolve_path(name: str, user: User = Depends(require_auth)):
     """
     Resolve a folder name (from native showDirectoryPicker) to full absolute path(s).
     Searches common locations: home dir, /Volumes (external drives), Desktop, Documents.
