@@ -115,7 +115,8 @@ async def process_video(
     store.create_job(
         job_id=job_id,
         episode_id=file.filename,
-        config=process_settings.dict()
+        config=process_settings.dict(),
+        user_id=user.id,
     )
     
     # Create Episode in SQLite
@@ -221,7 +222,8 @@ async def process_local_video(
     store.create_job(
         job_id=job_id,
         episode_id=filename,
-        config=req.dict()
+        config=req.dict(),
+        user_id=user.id,
     )
     
     with Session(engine) as session:
@@ -261,7 +263,9 @@ async def process_local_video(
 @router.get("/jobs/history")
 async def get_jobs_history(user: User = Depends(require_auth)):
     """Get a unified history of all processing jobs (both episodes and ad-hoc)."""
-    jobs = store.get_latest_jobs_per_episode()
+    all_jobs = store.get_latest_jobs_per_episode()
+    # Filter: show only jobs owned by this user (legacy jobs with empty user_id are visible to all)
+    jobs = {k: v for k, v in all_jobs.items() if not v.user_id or v.user_id == user.id}
     history = []
     
     # Sort by created_at descending
@@ -319,7 +323,7 @@ def _load_curation(job_dir: Path) -> list:
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str, user: User = Depends(require_auth)):
     """Get job status."""
-    job = store.get_job(job_id)
+    job = store.get_job_for_user(job_id, user.id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
@@ -755,7 +759,8 @@ async def process_episode_endpoint(
     store.create_job(
         job_id=job_id,
         episode_id=f"EP{episode_number:03d}",
-        config=req.dict()
+        config=req.dict(),
+        user_id=user.id,
     )
     
     # Prepare batch processor for single episode
