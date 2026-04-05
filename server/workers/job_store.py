@@ -31,6 +31,7 @@ class JobStatus:
     last_clip_index: int = 0  # Last successfully processed clip (0-indexed)
     total_clips: int = 0  # Total clips to process
     config_json: Optional[str] = None  # Serialized processing config for resume
+    user_id: str = ""  # Owner — empty string for legacy jobs
     
     def to_dict(self) -> dict:
         return asdict(self)
@@ -75,7 +76,8 @@ class JobStore:
                     error TEXT,
                     last_clip_index INTEGER DEFAULT 0,
                     total_clips INTEGER DEFAULT 0,
-                    config_json TEXT
+                    config_json TEXT,
+                    user_id TEXT DEFAULT ''
                 )
             """)
             conn.execute("""
@@ -101,27 +103,32 @@ class JobStore:
                 conn.execute("ALTER TABLE jobs ADD COLUMN config_json TEXT")
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute("ALTER TABLE jobs ADD COLUMN user_id TEXT DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
     
     def create_job(
-        self, 
-        job_id: str, 
+        self,
+        job_id: str,
         episode_id: str,
         total_clips: int = 0,
         config: dict = None,
+        user_id: str = "",
     ) -> JobStatus:
         """Create a new job with optional resume config."""
         now = datetime.utcnow().isoformat()
         config_json = json.dumps(config) if config else None
-        
+
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
-                INSERT OR REPLACE INTO jobs 
-                (job_id, episode_id, status, progress, message, clips_generated, 
-                 created_at, updated_at, last_clip_index, total_clips, config_json)
-                VALUES (?, ?, 'pending', 0, 'Iniciando...', 0, ?, ?, 0, ?, ?)
-            """, (job_id, episode_id, now, now, total_clips, config_json))
+                INSERT OR REPLACE INTO jobs
+                (job_id, episode_id, status, progress, message, clips_generated,
+                 created_at, updated_at, last_clip_index, total_clips, config_json, user_id)
+                VALUES (?, ?, 'pending', 0, 'Iniciando...', 0, ?, ?, 0, ?, ?, ?)
+            """, (job_id, episode_id, now, now, total_clips, config_json, user_id))
             conn.commit()
-        
+
         return JobStatus(
             job_id=job_id,
             episode_id=episode_id,
@@ -133,6 +140,7 @@ class JobStore:
             updated_at=now,
             total_clips=total_clips,
             config_json=config_json,
+            user_id=user_id,
         )
     
     def update_progress(
@@ -281,6 +289,16 @@ class JobStore:
             
             return JobStatus(**dict(row))
     
+    def get_job_for_user(self, job_id: str, user_id: str) -> Optional[JobStatus]:
+        """Get job only if it belongs to user_id (or is a legacy job with no owner)."""
+        job = self.get_job(job_id)
+        if job is None:
+            return None
+        # Legacy jobs (user_id == "") are visible to anyone (backwards compat)
+        if job.user_id and job.user_id != user_id:
+            return None
+        return job
+
     def get_episode_jobs(self, episode_id: str) -> list[JobStatus]:
         """Get all jobs for an episode."""
         with sqlite3.connect(self.db_path) as conn:
