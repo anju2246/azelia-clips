@@ -29,34 +29,17 @@ import { OnboardingWizard } from "../components/onboarding/OnboardingWizard";
                         return;
                     }
 
-                    // 2. Prevent looping if they already have keys
-                    const res = await fetch("/api/settings", {
+                    // 2. Prevent looping if they already completed onboarding
+                    const res = await fetch("/api/auth/onboarding-status", {
                         headers: {
                             Authorization: `Bearer ${authData.session.access_token}`,
                         },
                     });
                     if (res.ok) {
                         const data = await res.json();
-                        const hasKey = !!(
-                            data.groq_api_key ||
-                            data.openai_api_key ||
-                            data.anthropic_api_key ||
-                            data.gcp_project_id
-                        );
-                        // Check local storage to see if they are actively in the middle of the wizard
-                        const isComplete = localStorage.getItem(
-                            "az_onboarding_complete",
-                        );
-                        const activeStep =
-                            localStorage.getItem("az_onboard_step");
-
-                        if (
-                            hasKey &&
-                            !window.location.search.includes("code=")
-                        ) {
-                            if (isComplete === "true" || !activeStep) {
-                                window.location.replace("/dashboard");
-                            }
+                        if (data.onboarding_complete) {
+                            window.location.replace("/dashboard");
+                            return;
                         }
                     }
                 } catch (e) {
