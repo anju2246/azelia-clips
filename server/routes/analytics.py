@@ -9,6 +9,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header, Bo
 
 from server.middleware.auth import require_auth
 from packages.core.auth import User
+from packages.core.crypto import encrypt_token, decrypt_token
 
 router = APIRouter()
 
@@ -460,7 +461,7 @@ async def sync_youtube_with_code(
                     INSERT INTO youtube_connections (user_id, refresh_token)
                     VALUES (?, ?)
                     ON CONFLICT(user_id) DO UPDATE SET refresh_token = excluded.refresh_token
-                """, (_uid, refresh_token))
+                """, (_uid, encrypt_token(refresh_token)))
                 conn_db.commit()
                 conn_db.close()
     
@@ -542,12 +543,12 @@ async def auto_sync_youtube(authorization: str = Header(None), user: User = Depe
         if not row or not row[0] or not row[1]:
             raise HTTPException(status_code=400, detail="No refresh token or channel ID found. Please connect manually.")
         
-        refresh_token = row[0]
+        refresh_token = decrypt_token(row[0])
         channel_id = row[1]
-    
+
         import json
         import requests as http_requests
-    
+
         secrets_path = _find_client_secrets()
         with open(secrets_path) as f:
             secrets_data = json.load(f)
@@ -842,9 +843,9 @@ async def sync_historical_data(user: User = Depends(require_auth)):
     if not row or not row[0] or not row[1]:
         raise HTTPException(status_code=400, detail="YouTube no conectado. Conéctalo primero.")
         
-    refresh_token = row[0]
+    refresh_token = decrypt_token(row[0])
     channel_id = row[1]
-    
+
     # Refresh the access token
     import json
     import requests as http_requests
