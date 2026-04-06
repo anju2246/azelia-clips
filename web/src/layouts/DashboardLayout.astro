@@ -60,23 +60,21 @@ const currentPath = Astro.url.pathname;
             return; // Stop execution
           }
 
-          // 2. Onboarding Gate: Enforce API Key Configuration
-          const res = await fetch("/api/settings", {
+          // 2. Onboarding Gate: Check per-user onboarding_complete flag
+          const res = await fetch("/api/auth/onboarding-status", {
             headers: {
               Authorization: `Bearer ${authData.session.access_token}`,
             },
           });
+          if (res.status === 401) {
+            // Token rejected by server (e.g. user deleted) — force logout
+            await supabase.auth.signOut();
+            window.location.replace("/login");
+            return;
+          }
           if (res.ok) {
             const data = await res.json();
-            const hasKey = !!(
-              data.groq_api_key ||
-              data.openai_api_key ||
-              data.anthropic_api_key ||
-              data.gcp_project_id
-            );
-
-            // If the user has zero AI engine keys configured, they cannot process anything.
-            if (!hasKey) {
+            if (!data.onboarding_complete) {
               window.location.replace("/onboarding");
             }
           }

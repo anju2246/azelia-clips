@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Github, Mail, ArrowRight, User } from 'lucide-react';
+import { Github, Mail, ArrowRight, User, Eye, EyeOff } from 'lucide-react';
 import toast, { Toaster } from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 
@@ -9,6 +9,7 @@ export const LoginForm: React.FC = () => {
     const [password, setPassword] = useState('');
     const [fullName, setFullName] = useState('');
     const [isLoading, setIsLoading] = useState(false);
+    const [showPassword, setShowPassword] = useState(false);
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
@@ -32,7 +33,7 @@ export const LoginForm: React.FC = () => {
                 toast.success('Registration successful!', { icon: '🎉' });
                 // If email confirmation is off, they might be logged in immediately
                 if (data.session) {
-                    window.location.href = '/dashboard';
+                    window.location.href = '/auth/callback';
                 } else {
                     toast('Please check your email to verify your account.', { icon: '✉️' });
                     setIsSignUp(false);
@@ -46,7 +47,7 @@ export const LoginForm: React.FC = () => {
                 if (error) throw error;
 
                 toast.success('Successfully authenticated', { icon: '🔑' });
-                window.location.href = '/dashboard';
+                window.location.href = '/auth/callback';
             }
         } catch (error: any) {
             toast.error(error.message || 'Authentication failed');
@@ -153,15 +154,24 @@ export const LoginForm: React.FC = () => {
                                 </button>
                             )}
                         </div>
-                        <input
-                            type="password"
-                            value={password}
-                            autoComplete={isSignUp ? "new-password" : "current-password"}
-                            onChange={(e) => setPassword(e.target.value)}
-                            className="w-full px-4 py-3 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-white transition-all"
-                            placeholder="••••••••"
-                            required
-                        />
+                        <div className="relative">
+                            <input
+                                type={showPassword ? "text" : "password"}
+                                value={password}
+                                autoComplete={isSignUp ? "new-password" : "current-password"}
+                                onChange={(e) => setPassword(e.target.value)}
+                                className="w-full px-4 pr-11 py-3 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 text-white transition-all"
+                                placeholder="••••••••"
+                                required
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowPassword(!showPassword)}
+                                className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-zinc-500 hover:text-zinc-300 transition-colors"
+                            >
+                                {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                            </button>
+                        </div>
                     </div>
 
                     <button
