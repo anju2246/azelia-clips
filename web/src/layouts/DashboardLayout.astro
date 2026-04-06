@@ -76,10 +76,16 @@ const currentPath = Astro.url.pathname;
             const data = await res.json();
             if (!data.onboarding_complete) {
               window.location.replace("/onboarding");
+              return;
             }
+          } else {
+            // Non-401 error — fail safe: send to onboarding
+            window.location.replace("/onboarding");
+            return;
           }
         } catch (e) {
           console.error("Failed to check auth/onboarding status", e);
+          window.location.replace("/onboarding");
         }
       });
     </script>
