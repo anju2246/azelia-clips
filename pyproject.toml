@@ -42,6 +42,7 @@ dependencies = [
     "google-auth>=2.23.0",
     "google-auth-oauthlib>=1.1.0",
     "isodate>=0.6.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]

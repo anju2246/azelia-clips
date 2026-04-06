@@ -238,12 +238,15 @@ export const OnboardingWizard: React.FC = () => {
                     body: JSON.stringify({ enabled: telemetry }),
                 });
             } catch { /* non-critical — telemetry preference saved on next settings visit */ }
-            // 4. Clear local storage checkpoints & mark as complete
+            // 4. Clear local storage checkpoints & mark as complete (DB + localStorage)
             localStorage.removeItem('az_onboard_step');
             localStorage.removeItem('az_onboard_profile');
             localStorage.removeItem('az_onboard_telemetry');
             localStorage.removeItem('az_onboard_form');
             localStorage.setItem('az_onboarding_complete', 'true');
+            try {
+                await fetchWithAuth('/auth/onboarding-complete', { method: 'POST' });
+            } catch { /* non-critical — gate will re-check on next login */ }
 
             toast.success("¡Bienvenido a Azelia Clips!");
             setShowProCard(true);
