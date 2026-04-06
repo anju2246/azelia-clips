@@ -227,7 +227,7 @@ class FinderAgent:
                 try:
                     console.print(f"[red]   Raw response type: {type(response).__name__}[/red]")
                     console.print(f"[red]   Raw response preview: {str(response)[:500]}[/red]")
-                except:
-                    pass
+                except Exception:
+                    pass  # response object unavailable for debug printing
                 
         return self._deduplicate_candidates(all_candidates)
