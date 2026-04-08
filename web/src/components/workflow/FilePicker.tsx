@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Folder, FileVideo, ArrowUp, Loader2, X, Check } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 interface FileEntry {
     name: string;
@@ -44,17 +45,21 @@ export const FilePicker: React.FC<FilePickerProps> = ({ isOpen, currentPath, onS
         setIsLoading(true);
         setError('');
         try {
-            const res = await fetch(`${API_BASE}/browse-files?path=${encodeURIComponent(path)}`);
+            const { data: authData } = await supabase.auth.getSession();
+            const token = authData?.session?.access_token;
+            const res = await fetch(`${API_BASE}/browse-files?path=${encodeURIComponent(path)}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
             const data: BrowseFilesResponse = await res.json();
 
-            if (data.error) {
-                setError(data.error);
+            if (!res.ok || data.error) {
+                setError(data.error || 'Failed to load files');
                 setEntries([]);
             } else {
-                setEntries(data.entries);
+                setEntries(data.entries ?? []);
             }
-            setResolvedPath(data.path);
-            setParentPath(data.parent);
+            setResolvedPath(data.path ?? path);
+            setParentPath(data.parent ?? null);
         } catch (e) {
             setError('Failed to load files');
         } finally {

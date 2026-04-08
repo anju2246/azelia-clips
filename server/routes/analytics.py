@@ -444,8 +444,12 @@ async def sync_youtube_with_code(
         
             if token_res.status_code != 200:
                 import logging
-                logging.error(f"YouTube token exchange failed: {token_res.text}")
-                error_msg = token_res.json().get("error_description", "Token exchange failed")
+                try:
+                    error_type = token_res.json().get("error", "unknown_error")
+                except Exception:
+                    error_type = "unknown_error"
+                logging.error(f"YouTube token exchange failed with error: {error_type}")
+                error_msg = token_res.json().get("error_description", "Token exchange failed") if token_res.headers.get("content-type", "").startswith("application/json") else "Token exchange failed"
                 raise HTTPException(status_code=400, detail=f"Failed to exchange code: {error_msg}")
         
             access_token = token_res.json().get("access_token")
@@ -477,7 +481,8 @@ async def sync_youtube_with_code(
                 token = authorization.replace("Bearer ", "").strip()
                 analytics = AnalyticsSync(auth_token=token)
             except Exception as e:
-                print(f"AnalyticsSync init failed: {e}")
+                import logging
+                logging.getLogger(__name__).warning("AnalyticsSync init failed — check configuration")
 
         # If channel_id provided, sync directly
         if channel_id:
@@ -1321,8 +1326,9 @@ async def fetch_youtube_analytics(
         }
 
     except Exception as e:
-        print(f"YouTube Fetch Error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        import logging
+        logging.getLogger(__name__).error("YouTube Fetch Error occurred", exc_info=True)
+        raise HTTPException(status_code=400, detail="Failed to fetch YouTube analytics. Please try again.")
 
 
 # ─── YouTube OAuth Flow ──────────────────────────────────────────────────────
@@ -1423,5 +1429,6 @@ async def callback_youtube(
         return {"status": "success", "channel": channel['snippet']['title']}
         
     except Exception as e:
-        print(f"OAuth Callback Error: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        import logging
+        logging.getLogger(__name__).error("OAuth Callback Error occurred", exc_info=True)
+        raise HTTPException(status_code=500, detail="Authentication failed. Please try again.")

@@ -124,27 +124,39 @@ class YouTubeHistoricalExtractor:
             batch_ids = video_ids[i:i+200]
             filters_str = "video==" + ",".join(batch_ids)
 
-            try:
-                response = yt_analytics.reports().query(
-                    ids=f"channel=={channel_id}",
-                    startDate=start_date,
-                    endDate=end_date,
-                    metrics=metrics_str,
-                    dimensions="video",
-                    filters=filters_str,
-                    maxResults=200,
-                ).execute()
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = yt_analytics.reports().query(
+                        ids=f"channel=={channel_id}",
+                        startDate=start_date,
+                        endDate=end_date,
+                        metrics=metrics_str,
+                        dimensions="video",
+                        filters=filters_str,
+                        maxResults=200,
+                    ).execute()
 
-                headers = [h["name"] for h in response.get("columnHeaders", [])]
-                for row in response.get("rows", []):
-                    row_dict = dict(zip(headers, row))
-                    vid_id = row_dict.pop("video", None)
-                    if vid_id:
-                        analytics_map[vid_id] = row_dict
+                    headers = [h["name"] for h in response.get("columnHeaders", [])]
+                    for row in response.get("rows", []):
+                        row_dict = dict(zip(headers, row))
+                        vid_id = row_dict.pop("video", None)
+                        if vid_id:
+                            analytics_map[vid_id] = row_dict
+                    break  # success
 
-            except Exception as e:
-                logger.warning("YouTube Analytics query failed for batch: %s", e)
-                continue
+                except Exception as e:
+                    error_str = str(e)
+                    if "quotaExceeded" in error_str or ("403" in error_str and "quota" in error_str.lower()):
+                        logger.warning("YouTube Analytics quota exceeded — stopping sync early after %d videos", len(analytics_map))
+                        return analytics_map
+                    if attempt < max_retries - 1:
+                        import time
+                        wait = 2 ** attempt
+                        logger.warning("YouTube Analytics batch failed (attempt %d/%d), retrying in %ds: %s", attempt + 1, max_retries, wait, error_str)
+                        time.sleep(wait)
+                    else:
+                        logger.warning("YouTube Analytics batch failed after %d attempts, skipping: %s", max_retries, error_str)
 
         logger.info("Fetched analytics for %d/%d videos", len(analytics_map), len(video_ids))
         return analytics_map

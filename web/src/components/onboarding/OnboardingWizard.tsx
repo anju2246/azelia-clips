@@ -5,7 +5,7 @@ import { DirectoryPicker } from '../settings/DirectoryPicker';
 import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRight, ArrowLeft, CheckCircle2, User, Target, BarChart, Youtube, Link as LinkIcon, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { RetroactiveSyncModal } from '../analytics/RetroactiveSyncModal';
-import { useAIModels } from '../../hooks/useAIModels';
+
 import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
@@ -37,9 +37,6 @@ export const OnboardingWizard: React.FC = () => {
 
     // Core settings
     const [formData, setFormData] = useState<Partial<UpdateSettingsRequest>>({});
-
-    // New Model-Centric Selection
-    const [selectedModelId, setSelectedModelId] = useState<string>('');
 
     // Strategic Profiling (Step 2)
     const [profile, setProfile] = useState(() => {
@@ -83,38 +80,72 @@ export const OnboardingWizard: React.FC = () => {
         return false;
     });
 
-    // AI Provider config — selected provider
-    const [selectedProvider, setSelectedProvider] = useState<string>('');
-    const { groupedModels } = useAIModels();
-
-    const PROVIDERS: Record<string, { name: string, desc: string, color: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, keyUrl: string, models: { id: string, label: string, badge?: string }[] }> = {
-        'anthropic': {
-            name: 'Anthropic (Claude)', desc: 'Excelente para curación de contenido', color: 'border-orange-500/50 bg-orange-500/10',
-            field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...',
-            keyUrl: 'https://console.anthropic.com/settings/keys',
-            models: groupedModels.find(g => g.provider === 'anthropic')?.models.map(m => ({ id: m.id, label: m.name })) || []
-        },
-        'openai': {
-            name: 'OpenAI (GPT)', desc: 'Razonamiento de alta calidad', color: 'border-green-500/50 bg-green-500/10',
-            field: 'openai_api_key', modelField: 'openai_model', ph: 'sk-...',
-            keyUrl: 'https://platform.openai.com/api-keys',
-            models: groupedModels.find(g => g.provider === 'openai')?.models.map(m => ({ id: m.id, label: m.name })) || []
-        },
-        'groq': {
-            name: 'Groq (Llama)', desc: 'Inferencia ultra rapida, gratis limitado', color: 'border-yellow-500/50 bg-yellow-500/10',
-            field: 'groq_api_key', modelField: 'groq_model', ph: 'gsk_...',
-            keyUrl: 'https://console.groq.com/keys',
-            models: groupedModels.find(g => g.provider === 'groq')?.models.map(m => ({ id: m.id, label: m.name })) || []
-        },
-        'vertex': {
-            name: 'Google (Vertex AI)', desc: 'Requiere gcloud auth local', color: 'border-blue-500/50 bg-blue-500/10',
-            field: 'gcp_project_id', modelField: 'vertex_model', ph: 'mi-proyecto-gcp',
-            keyUrl: 'https://console.cloud.google.com',
-            models: groupedModels.find(g => g.provider === 'vertex')?.models.map(m => ({ id: m.id, label: m.name })) || []
-        },
+    const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, keyUrl: string }> = {
+        anthropic: { name: 'Anthropic (Claude)', desc: 'Mejor para curación de contenido largo', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...', keyUrl: 'https://console.anthropic.com/settings/keys' },
+        openai:    { name: 'OpenAI (GPT)',        desc: 'Razonamiento de alta calidad',           field: 'openai_api_key',    modelField: 'openai_model',    ph: 'sk-...',     keyUrl: 'https://platform.openai.com/api-keys' },
+        groq:      { name: 'Groq',                desc: 'Inferencia ultra rápida, tier gratis',   field: 'groq_api_key',      modelField: 'groq_model',      ph: 'gsk_...',    keyUrl: 'https://console.groq.com/keys' },
+        google:    { name: 'Google (Gemini)',      desc: 'Gemini 2.5 Pro — API key simple',        field: 'google_api_key',    modelField: 'google_model',    ph: 'AIza...',    keyUrl: 'https://aistudio.google.com/apikey' },
     };
 
-    const providerOrder = ['anthropic', 'openai', 'groq', 'vertex'];
+    const providerOrder = ['anthropic', 'openai', 'groq', 'google'];
+
+    // Step 4 state: primary provider + optional extras
+    const [primaryProvider, setPrimaryProvider] = useState('');
+    const [extraProviders, setExtraProviders] = useState<string[]>([]);
+    const [detectedModels, setDetectedModels] = useState<Record<string, string>>({});
+    const [detectingProvider, setDetectingProvider] = useState<string | null>(null);
+    const detectTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+    const [detectionErrors, setDetectionErrors] = useState<Record<string, string>>({});
+
+    const detectModelForProvider = async (providerId: string, keyValue: string) => {
+        // Clear previous result immediately so stale data never persists
+        setDetectedModels(prev => { const n = { ...prev }; delete n[providerId]; return n; });
+        setDetectionErrors(prev => { const n = { ...prev }; delete n[providerId]; return n; });
+
+        if (keyValue.trim().length < 12) return;
+
+        clearTimeout(detectTimers.current[providerId]);
+        detectTimers.current[providerId] = setTimeout(async () => {
+            const cfg = PROVIDERS[providerId];
+            setDetectingProvider(providerId);
+            try {
+                // 1. Save the key — check for 422 (format validation error)
+                const saveRes = await fetchWithAuth('/settings', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ [cfg.field]: keyValue }),
+                });
+                if (!saveRes.ok) {
+                    if (saveRes.status === 422) {
+                        const err = await saveRes.json().catch(() => ({}));
+                        const msg = err.detail || 'Formato de key inválido';
+                        setDetectionErrors(prev => ({ ...prev, [providerId]: msg }));
+                    } else {
+                        setDetectionErrors(prev => ({ ...prev, [providerId]: 'Error al guardar la key' }));
+                    }
+                    return;
+                }
+                // 2. Force registry refresh and get live models
+                const res = await fetchWithAuth('/models/refresh', { method: 'POST' });
+                if (!res.ok) throw new Error('refresh failed');
+                const data = await res.json();
+                const providerModels: any[] = (data.data || []).filter((m: any) => m.provider === providerId);
+                if (providerModels.length > 0) {
+                    const best = providerModels[0].id;
+                    setDetectedModels(prev => ({ ...prev, [providerId]: best }));
+                    setDetectionErrors(prev => { const n = { ...prev }; delete n[providerId]; return n; });
+                    handleUpdate({ [cfg.modelField]: best } as Partial<UpdateSettingsRequest>);
+                } else {
+                    setDetectionErrors(prev => ({ ...prev, [providerId]: 'Key inválida o sin acceso a modelos' }));
+                }
+            } catch {
+                setDetectionErrors(prev => ({ ...prev, [providerId]: 'No se pudo verificar la key' }));
+            } finally {
+                setDetectingProvider(null);
+            }
+        }, 1200);
+    };
 
     const NICHES = ['Negocios & Emprendimiento', 'Comedia', 'Educación & Ciencia', 'Tecnología', 'True Crime', 'Gaming', 'Salud & Fitness', 'Estilo de Vida'];
     const ROLES = [
@@ -145,15 +176,26 @@ export const OnboardingWizard: React.FC = () => {
         { id: 'narrative', label: 'Narrativo / Storytelling' },
     ];
 
+    const stripMasked = (data: Record<string, any>) => {
+        // Always remove all API key fields from onboarding state —
+        // they must never be pre-filled (not from server masked values, not from localStorage cache)
+        const keyFields = ['groq_api_key', 'openai_api_key', 'anthropic_api_key', 'google_api_key'];
+        const cleaned = { ...data };
+        for (const f of keyFields) {
+            delete cleaned[f];
+        }
+        return cleaned;
+    };
+
     useEffect(() => {
         const init = async () => {
             try {
                 const existing = await SettingsApi.getSettings();
                 const savedForm = localStorage.getItem('az_onboard_form');
                 if (savedForm) {
-                    setFormData({ ...existing, ...JSON.parse(savedForm) });
+                    setFormData(stripMasked({ ...existing, ...JSON.parse(savedForm) }));
                 } else {
-                    setFormData(existing);
+                    setFormData(stripMasked(existing));
                 }
             } catch (e) {
                 console.warn("Could not load existing settings", e);
@@ -194,7 +236,9 @@ export const OnboardingWizard: React.FC = () => {
             localStorage.setItem('az_onboard_telemetry', String(telemetry));
             localStorage.setItem('az_historical_synced', String(hasSyncedHistorical));
             if (Object.keys(formData).length > 0) {
-                localStorage.setItem('az_onboard_form', JSON.stringify(formData));
+                // Never persist API keys to localStorage
+                const { groq_api_key, openai_api_key, anthropic_api_key, google_api_key, ...safeForm } = formData as any;
+                localStorage.setItem('az_onboard_form', JSON.stringify(safeForm));
             }
         }
     }, [step, profile, telemetry, formData]);
@@ -363,7 +407,7 @@ export const OnboardingWizard: React.FC = () => {
         toast('Próximamente — TikTok integration', { icon: '🔜' });
     };
 
-    const hasAnyKey = [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.gcp_project_id].some(
+    const hasAnyKey = [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.google_api_key].some(
         key => typeof key === 'string' && key.trim().length >= 20 && !key.includes('...')
     );
 
@@ -377,7 +421,10 @@ export const OnboardingWizard: React.FC = () => {
                 <h2 className="text-2xl font-bold text-white">¡Ya estás listo!</h2>
                 <p className="text-zinc-400 mt-1">Una última cosa antes de entrar al dashboard.</p>
             </div>
-            <ProUpgradeCard onActivated={() => window.location.replace('/dashboard')} />
+            <ProUpgradeCard
+                onActivated={() => window.location.replace('/dashboard')}
+                youtubeConnected={ytConnected}
+            />
             <button
                 onClick={() => window.location.replace('/dashboard')}
                 className="w-full text-center text-xs text-zinc-500 hover:text-zinc-400 transition-colors py-1"
@@ -435,8 +482,7 @@ export const OnboardingWizard: React.FC = () => {
                                             const folderName = dirHandle.name;
                                             toast.loading(`Buscando "${folderName}"...`, { id: 'resolve' });
 
-                                            const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
-                                            const res = await fetch(`${API_BASE}/resolve-path?name=${encodeURIComponent(folderName)}`);
+                                            const res = await fetchWithAuth(`/resolve-path?name=${encodeURIComponent(folderName)}`);
                                             const data = await res.json();
 
                                             if (data.count === 1) {
@@ -712,95 +758,130 @@ export const OnboardingWizard: React.FC = () => {
                         </div>
                     </div>
 
-                    <div className="space-y-4 mt-6 relative z-20">
-                        <div className="bg-black/40 border border-white/10 rounded-2xl p-6">
-                            {/* Dropdown 1: Provider */}
-                            <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 block">Proveedor de IA</label>
-                            <select
-                                value={selectedProvider}
-                                onChange={(e) => { setSelectedProvider(e.target.value); setSelectedModelId(''); }}
-                                className="w-full bg-zinc-900 border border-white/20 rounded-xl px-4 py-3 text-white appearance-none focus:border-brand-500 outline-none hover:border-white/30 transition-all font-medium text-sm"
-                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23A1A1AA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem top 50%', backgroundSize: '0.65rem auto' }}
-                            >
-                                <option value="" disabled>Selecciona un proveedor...</option>
-                                {providerOrder.map(key => (
-                                    <option key={key} value={key} className="bg-zinc-900">{PROVIDERS[key].name}</option>
-                                ))}
-                            </select>
-                            <p className="text-xs text-zinc-500 mt-1.5">{selectedProvider ? PROVIDERS[selectedProvider].desc : ''}</p>
+                    {/* Provider Cascade — primary + optional extras */}
+                    <div className="space-y-4 mt-6">
+                        {[primaryProvider, ...extraProviders].map((selectedId, slotIdx) => {
+                            const isExtra = slotIdx > 0;
+                            const usedIds = [primaryProvider, ...extraProviders];
+                            const availableForSlot = providerOrder.filter(id => !usedIds.includes(id) || id === selectedId);
 
-                            {/* Dropdown 2: Model (appears after provider selection) */}
-                            {selectedProvider && (
-                                <div className="mt-5 animate-in fade-in slide-in-from-top-2 duration-300">
-                                    <label className="text-xs font-semibold text-zinc-400 uppercase tracking-wider mb-2 block">Modelo</label>
-                                    <select
-                                        value={selectedModelId}
-                                        onChange={(e) => {
-                                            const id = e.target.value;
-                                            setSelectedModelId(id);
-                                            const p = selectedProvider;
-                                            if (p === 'openai') handleUpdate({ openai_model: id });
-                                            else if (p === 'anthropic') handleUpdate({ anthropic_model: id });
-                                            else if (p === 'vertex') handleUpdate({ vertex_model: id });
-                                            else if (p === 'groq') handleUpdate({ groq_model: id });
-                                        }}
-                                        className="w-full bg-zinc-900 border border-white/20 rounded-xl px-4 py-3 text-white appearance-none focus:border-brand-500 outline-none hover:border-white/30 transition-all font-medium text-sm"
-                                        style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23A1A1AA%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 1rem top 50%', backgroundSize: '0.65rem auto' }}
-                                    >
-                                        <option value="" disabled>Selecciona un modelo...</option>
-                                        {PROVIDERS[selectedProvider].models.map(m => (
-                                            <option key={m.id} value={m.id} className="bg-zinc-900">{m.label}</option>
-                                        ))}
-                                    </select>
-                                </div>
-                            )}
-
-                            {/* API Key Input (appears after model selection) */}
-                            {selectedModelId && selectedProvider && (
-                                <div className="mt-5 pt-5 border-t border-white/10 animate-in fade-in slide-in-from-top-2">
-                                    <div className="flex items-center justify-between mb-2">
-                                        <label className="text-xs font-semibold text-brand-300 uppercase tracking-wider">
-                                            {selectedProvider === 'vertex' ? 'GCP Project ID' : 'API Key'}
-                                        </label>
-                                        <a
-                                            href={PROVIDERS[selectedProvider].keyUrl}
-                                            target="_blank"
-                                            rel="noreferrer"
-                                            className="text-[10px] text-zinc-500 hover:text-white underline underline-offset-2 flex items-center gap-1"
-                                        >
-                                            Obtener llave <ArrowRight className="w-3 h-3" />
-                                        </a>
-                                    </div>
-                                    <div className="relative">
-                                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                                            <Key className="h-4 w-4 text-zinc-500" />
+                            return (
+                                <div key={slotIdx} className="bg-black/30 border border-white/10 rounded-2xl overflow-hidden">
+                                    {/* Header row */}
+                                    <div className="px-5 pt-4 pb-3 flex items-center gap-3">
+                                        <div className="flex-1">
+                                            <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
+                                                {isExtra ? `Proveedor de respaldo ${slotIdx}` : 'Proveedor principal'}
+                                            </label>
+                                            <select
+                                                value={selectedId}
+                                                onChange={(e) => {
+                                                    if (slotIdx === 0) setPrimaryProvider(e.target.value);
+                                                    else setExtraProviders(prev => prev.map((id, i) => i === slotIdx - 1 ? e.target.value : id));
+                                                }}
+                                                className="mt-1 w-full bg-zinc-900 border border-white/15 rounded-xl px-3 py-2.5 text-white text-sm focus:border-brand-500 outline-none appearance-none"
+                                            >
+                                                <option value="">Selecciona un proveedor...</option>
+                                                {providerOrder.filter(id => !usedIds.includes(id) || id === selectedId).map(id => (
+                                                    <option key={id} value={id} className="bg-zinc-900">{PROVIDERS[id].name}</option>
+                                                ))}
+                                            </select>
                                         </div>
-                                        <input
-                                            type="password"
-                                            value={
-                                                (selectedProvider === 'openai' ? formData.openai_api_key :
-                                                    selectedProvider === 'anthropic' ? formData.anthropic_api_key :
-                                                        selectedProvider === 'vertex' ? formData.gcp_project_id :
-                                                            formData.groq_api_key) || ''
-                                            }
-                                            onChange={(e) => {
-                                                const val = e.target.value;
-                                                if (selectedProvider === 'openai') handleUpdate({ openai_api_key: val, ai_provider_order: ['openai', 'groq', 'anthropic', 'vertex'] });
-                                                else if (selectedProvider === 'anthropic') handleUpdate({ anthropic_api_key: val, ai_provider_order: ['anthropic', 'groq', 'openai', 'vertex'] });
-                                                else if (selectedProvider === 'vertex') handleUpdate({ gcp_project_id: val, ai_provider_order: ['vertex', 'groq', 'openai', 'anthropic'] });
-                                                else handleUpdate({ groq_api_key: val, ai_provider_order: ['groq', 'openai', 'anthropic', 'vertex'] });
-                                            }}
-                                            placeholder={PROVIDERS[selectedProvider].ph}
-                                            className="w-full bg-black/60 border border-white/10 hover:border-white/20 rounded-xl pl-10 pr-4 py-3 text-sm text-zinc-200 placeholder-zinc-700 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 font-mono transition-all shadow-[inset_0_2px_4px_rgba(0,0,0,0.3)]"
-                                        />
+                                        {isExtra && (
+                                            <button
+                                                type="button"
+                                                onClick={() => setExtraProviders(prev => prev.filter((_, i) => i !== slotIdx - 1))}
+                                                className="mt-5 p-1.5 text-zinc-600 hover:text-red-400 transition-colors"
+                                                title="Quitar"
+                                            >
+                                                <span className="text-lg leading-none">×</span>
+                                            </button>
+                                        )}
                                     </div>
-                                    <p className="text-xs text-zinc-500 mt-3 leading-relaxed">
-                                        Se guarda en tu <code className="text-zinc-400">.env</code> local — nunca sale de tu máquina.
-                                    </p>
+
+                                    {/* Key input — only when provider selected */}
+                                    {selectedId && (() => {
+                                        const cfg = PROVIDERS[selectedId];
+                                        // @ts-ignore
+                                        const rawVal: string = formData[cfg.field] || '';
+                                        // Never show masked server values (e.g. "sk-ant-***...") in the input
+                                        const isMasked = rawVal.includes('*') || rawVal.includes('...');
+                                        const currentVal = isMasked ? '' : rawVal;
+                                        const detected = detectedModels[selectedId];
+                                        const detectionError = detectionErrors[selectedId];
+                                        const isDetecting = detectingProvider === selectedId;
+                                        const hasKey = currentVal.trim().length >= 12;
+                                        return (
+                                            <div className="px-5 pb-4 space-y-2 border-t border-white/5 pt-3">
+                                                <div className="flex items-center justify-between">
+                                                    <label className="text-xs text-zinc-500">
+                                                        {selectedId === 'vertex' ? 'GCP Project ID' : 'API Key'}
+                                                    </label>
+                                                    <a href={cfg.keyUrl} target="_blank" rel="noreferrer" className="text-[10px] text-zinc-600 hover:text-zinc-400 underline">
+                                                        Obtener key →
+                                                    </a>
+                                                </div>
+                                                <div className="relative">
+                                                    <Key className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-600" />
+                                                    <input
+                                                        type="password"
+                                                        value={currentVal}
+                                                        placeholder={cfg.ph}
+                                                        onChange={(e) => {
+                                                            const val = e.target.value;
+                                                            // Bubble up priority order: primary provider goes first
+                                                            const ordered = [selectedId, ...providerOrder.filter(id => id !== selectedId)];
+                                                            handleUpdate({ [cfg.field]: val, ai_provider_order: ordered } as Partial<UpdateSettingsRequest>);
+                                                            detectModelForProvider(selectedId, val);
+                                                        }}
+                                                        className="w-full bg-black/50 border border-white/10 rounded-xl pl-9 pr-4 py-2.5 text-sm text-zinc-200 placeholder-zinc-700 focus:outline-none focus:border-brand-500 font-mono transition-all"
+                                                    />
+                                                </div>
+                                                {/* Model detection feedback */}
+                                                {hasKey && (
+                                                    <div className="flex items-center gap-1.5 text-xs">
+                                                        {isDetecting ? (
+                                                            <>
+                                                                <Loader2 className="w-3 h-3 text-brand-400 animate-spin" />
+                                                                <span className="text-zinc-500">Verificando key...</span>
+                                                            </>
+                                                        ) : detected ? (
+                                                            <>
+                                                                <CheckCircle2 className="w-3 h-3 text-green-400" />
+                                                                <span className="text-zinc-400">Modelo: <code className="text-green-400 font-mono">{detected}</code></span>
+                                                            </>
+                                                        ) : detectionError ? (
+                                                            <span className="text-red-400">{detectionError}</span>
+                                                        ) : (
+                                                            <span className="text-zinc-600">Verificando...</span>
+                                                        )}
+                                                    </div>
+                                                )}
+                                            </div>
+                                        );
+                                    })()}
                                 </div>
-                            )}
-                        </div>
+                            );
+                        })}
+
+                        {/* Add backup provider */}
+                        {primaryProvider && extraProviders.length < 2 && providerOrder.filter(id => id !== primaryProvider && !extraProviders.includes(id)).length > 0 && (
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const next = providerOrder.find(id => id !== primaryProvider && !extraProviders.includes(id));
+                                    if (next) setExtraProviders(prev => [...prev, next]);
+                                }}
+                                className="w-full py-2.5 border border-dashed border-white/15 rounded-xl text-xs text-zinc-500 hover:text-zinc-300 hover:border-white/30 transition-all"
+                            >
+                                + Agregar proveedor de respaldo
+                            </button>
+                        )}
+                        <p className="text-xs text-zinc-600 text-center">
+                            El modelo se detecta automáticamente al verificar tu key. Cámbialo en <span className="text-zinc-500">Configuración → IA</span>.
+                        </p>
                     </div>
+
 
                     <div className="flex flex-col gap-4 pt-6 border-t border-white/10 mt-6">
                         <label className="flex items-start gap-3 cursor-pointer group">

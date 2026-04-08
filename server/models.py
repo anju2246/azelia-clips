@@ -53,15 +53,15 @@ class ProcessLocalRequest(ProcessRequest):
 class SettingsResponse(BaseModel):
     podcast_name: Optional[str] = Field(default="")
     podcast_dir: Optional[str] = Field(default="")
-    ai_provider_order: List[str] = Field(default=["groq", "openai", "anthropic", "vertex"])
+    ai_provider_order: List[str] = Field(default=["groq", "openai", "anthropic", "google"])
     groq_api_key: str = Field(default="", description="Masked key")
     groq_model: str = Field(default="llama-3.3-70b-versatile")
     openai_api_key: str = Field(default="", description="Masked key")
     openai_model: str = Field(default="gpt-4o")
     anthropic_api_key: str = Field(default="", description="Masked key")
     anthropic_model: str = Field(default="claude-3-7-sonnet-20250219")
-    gcp_project_id: str = Field(default="", description="Plaintext project ID")
-    vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas")
+    google_api_key: str = Field(default="", description="Masked key")
+    google_model: str = Field(default="gemini-2.5-pro")
     transcript_supabase_url: str = Field(default="")
     transcript_supabase_key: str = Field(default="", description="Masked key")
     generate_teasers: bool = Field(default=False)
@@ -76,8 +76,8 @@ class UpdateSettingsRequest(BaseModel):
     openai_model: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     anthropic_model: Optional[str] = None
-    gcp_project_id: Optional[str] = None
-    vertex_model: Optional[str] = None
+    google_api_key: Optional[str] = None
+    google_model: Optional[str] = None
     transcript_supabase_url: Optional[str] = None
     transcript_supabase_key: Optional[str] = None
     generate_teasers: Optional[bool] = None

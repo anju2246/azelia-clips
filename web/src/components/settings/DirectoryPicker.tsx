@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Folder, FolderOpen, ChevronRight, ArrowUp, Loader2, X, Check } from 'lucide-react';
+import { supabase } from '../../lib/supabase';
 
 interface DirEntry {
     name: string;
@@ -43,18 +44,22 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({ isOpen, curren
         setIsLoading(true);
         setError('');
         try {
-            const res = await fetch(`${API_BASE}/browse?path=${encodeURIComponent(path)}`);
+            const { data: authData } = await supabase.auth.getSession();
+            const token = authData?.session?.access_token;
+            const res = await fetch(`${API_BASE}/browse?path=${encodeURIComponent(path)}`, {
+                headers: token ? { Authorization: `Bearer ${token}` } : {},
+            });
             const data: BrowseResponse = await res.json();
 
-            if (data.error) {
-                setError(data.error);
+            if (!res.ok || data.error) {
+                setError(data.error || 'Failed to browse directory');
                 setDirs([]);
             } else {
-                setDirs(data.dirs);
+                setDirs(data.dirs ?? []);
             }
-            setResolvedPath(data.path);
-            setParentPath(data.parent);
-            setBrowsePath(data.path);
+            setResolvedPath(data.path ?? path);
+            setParentPath(data.parent ?? null);
+            setBrowsePath(data.path ?? path);
         } catch (e) {
             setError('Failed to browse directory');
         } finally {

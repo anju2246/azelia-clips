@@ -1,29 +1,22 @@
 """
 Upgrade Routes — Free → Pro activation.
 
-The actual upgrade logic lives in a Supabase Edge Function (upgrade-pro),
-running on Supabase's infrastructure. The service_role key never touches
-this repo. Business rules (beta cutoff, consent enforcement) are enforced
-at two layers:
-  1. Edge Function (Supabase servers)
-  2. DB trigger trg_enforce_pro_upgrade (Supabase DB)
-
-This file is just a thin proxy that forwards the user's JWT to the Edge Function.
+Beta Pro: free 3-month trial. No payment required.
+Writes directly to Supabase REST API using anon key (RLS must allow user to update own row).
 """
 
-import os
-import urllib.request
-import json
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from datetime import datetime, timezone, timedelta
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from typing import Optional
+import httpx
 from server.middleware.auth import require_auth, optional_auth
 from packages.core.auth import User
 from packages.core.config import settings
 
 router = APIRouter()
 
-EDGE_FUNCTION_URL = f"{settings.supabase_url}/functions/v1/upgrade-pro"
+BETA_DURATION_DAYS = 90  # 3 months
 
 
 class UpgradeResponse(BaseModel):
@@ -34,33 +27,38 @@ class UpgradeResponse(BaseModel):
 
 
 @router.post("/upgrade/pro", response_model=UpgradeResponse)
-async def activate_pro(request: Request, user: User = Depends(require_auth)):
+async def activate_pro(user: User = Depends(require_auth)):
     """
-    Proxy to Supabase Edge Function 'upgrade-pro'.
-    Business logic (beta cutoff, consent, service_role) lives in Supabase — not here.
+    Activate beta Pro for the authenticated user.
+    Sets tier='pro' and pro_expires_at = now + 90 days in their profiles row.
     """
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+    pro_expires_at = (datetime.now(timezone.utc) + timedelta(days=BETA_DURATION_DAYS)).isoformat()
 
-    req = urllib.request.Request(
-        EDGE_FUNCTION_URL,
-        method="POST",
-        headers={
-            "Authorization": auth_header,
-            "Content-Type": "application/json",
-            "apikey": settings.supabase_key,
-        },
+    async with httpx.AsyncClient() as client:
+        res = await client.patch(
+            f"{settings.supabase_url}/rest/v1/profiles",
+            params={"id": f"eq.{user.id}"},
+            json={"tier": "pro", "pro_expires_at": pro_expires_at},
+            headers={
+                "apikey": settings.supabase_key,
+                "Authorization": f"Bearer {settings.supabase_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+        )
+
+    if res.status_code not in (200, 204):
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Could not activate Pro: {res.text}",
+        )
+
+    return UpgradeResponse(
+        tier="pro",
+        pro_expires_at=pro_expires_at,
+        telemetry_enabled=True,
+        message="¡Pro activado! Tienes 3 meses de acceso completo al IC Cascade.",
     )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            body = json.loads(resp.read())
-            return UpgradeResponse(**body)
-    except urllib.error.HTTPError as e:
-        body = json.loads(e.read())
-        raise HTTPException(status_code=e.code, detail=body.get("error", "Error activando Pro"))
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Upgrade service unavailable: {e}")
 
 
 @router.get("/upgrade/status")
