@@ -549,7 +549,6 @@ async def reject_clip(job_id: str, filename: str, user: User = Depends(require_a
             break
     
     return {"status": "rejected", "filename": filename}
-    return {"status": "rejected", "filename": filename}
 @router.post("/clips/{job_id}/{filename}/restore")
 async def restore_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Restore a rejected clip back to the review folder."""
@@ -607,8 +606,9 @@ def cleanup_rejected_clips(max_age_days: int = 30):
 # Run cleanup on module load (i.e. server startup)
 try:
     cleanup_rejected_clips()
-except Exception:
-    pass
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).error(f"[Startup] Failed to run cleanup_rejected_clips: {e}", exc_info=True)
 
 # ─── Face Tracking ───────────────────────────────────────────────────────────
 
@@ -847,12 +847,25 @@ async def upload_transcript_endpoint(episode_number: int, user: User = Depends(r
 # ─── WebSocket Progress Stream ──────────────────────────────────────────────
 
 @router.websocket("/ws/jobs/{job_id}")
-async def websocket_job_status(websocket: WebSocket, job_id: str):
+async def websocket_job_status(websocket: WebSocket, job_id: str, token: str = ""):
     """
     Tethers a WebSocket connection to stream real-time progress.
-    Sends events in {event, data} format matching the frontend LiveProcessingWidget.
+    Auth via ?token= query param (WebSockets can't send Authorization headers).
     """
     await websocket.accept()
+
+    # Auth guard — reject immediately if no valid token
+    if not token:
+        await websocket.send_json({"event": "error", "data": {"error": "Unauthorized"}})
+        await websocket.close(code=4001)
+        return
+    try:
+        from packages.core.auth import verify_supabase_jwt
+        verify_supabase_jwt(token)
+    except Exception:
+        await websocket.send_json({"event": "error", "data": {"error": "Unauthorized"}})
+        await websocket.close(code=4001)
+        return
     
     try:
         while True:

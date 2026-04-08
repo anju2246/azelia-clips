@@ -76,7 +76,7 @@ def _is_masked(value: str) -> bool:
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings(user: User = Depends(require_auth)):
     """Get current application settings."""
-    provider_order = [p.strip() for p in settings.ai_provider_order.split(',')] if settings.ai_provider_order else ["groq", "openai", "anthropic", "vertex"]
+    provider_order = [p.strip() for p in settings.ai_provider_order.split(',')] if settings.ai_provider_order else ["groq", "openai", "anthropic", "google"]
     return SettingsResponse(
         podcast_name=settings.podcast_name or "",
         podcast_dir=str(settings.podcast_dir) if settings.podcast_dir else "",
@@ -87,8 +87,8 @@ async def get_settings(user: User = Depends(require_auth)):
         openai_model=settings.openai_model,
         anthropic_api_key=mask_key(settings.anthropic_api_key),
         anthropic_model=settings.anthropic_model,
-        gcp_project_id=settings.gcp_project_id,
-        vertex_model=settings.vertex_model,
+        google_api_key=mask_key(settings.google_api_key),
+        google_model=settings.google_model,
         transcript_supabase_url=settings.transcript_supabase_url,
         transcript_supabase_key=mask_key(settings.transcript_supabase_key),
         generate_teasers=settings.generate_teasers
@@ -158,13 +158,13 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         env_content["ANTHROPIC_MODEL"] = req.anthropic_model
         settings.anthropic_model = req.anthropic_model
         
-    if req.gcp_project_id is not None:
-        env_content["GCP_PROJECT_ID"] = req.gcp_project_id
-        settings.gcp_project_id = req.gcp_project_id
-        
-    if req.vertex_model is not None:
-        env_content["VERTEX_MODEL"] = req.vertex_model
-        settings.vertex_model = req.vertex_model
+    if req.google_api_key is not None and not _is_masked(req.google_api_key):
+        env_content["GOOGLE_API_KEY"] = req.google_api_key
+        settings.google_api_key = req.google_api_key
+
+    if req.google_model is not None:
+        env_content["GOOGLE_MODEL"] = req.google_model
+        settings.google_model = req.google_model
         
     if req.transcript_supabase_url is not None and not _is_masked(req.transcript_supabase_url):
         env_content["TRANSCRIPT_SUPABASE_URL"] = req.transcript_supabase_url
@@ -191,6 +191,16 @@ async def get_available_models(user: User = Depends(require_auth)):
     Dynamically discover and return available AI models via native SDKs.
     """
     models = await model_registry.get_all_models()
+    return {"data": [m.dict() for m in models]}
+
+
+@router.post("/models/refresh")
+async def refresh_models(user: User = Depends(require_auth)):
+    """
+    Force the model registry to re-query all provider APIs.
+    Call this after saving new API keys so the model selector updates immediately.
+    """
+    models = await model_registry.force_refresh()
     return {"data": [m.dict() for m in models]}
 
 @router.get("/browse")
@@ -299,9 +309,12 @@ async def resolve_path(name: str, user: User = Depends(require_auth)):
     import subprocess
     import re
 
-    # Security: sanitize folder name (alphanumeric, hyphens, underscores, spaces only)
-    if not re.match(r'^[\w\s\-\.]+$', name):
-        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name"}
+    # Security: reject path traversal attempts explicitly
+    if '..' in name or '/' in name or '\\' in name or not name.strip():
+        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name: path traversal not allowed"}
+    # Only allow alphanumeric, hyphens, underscores, spaces (no dots)
+    if not re.match(r'^[\w\s\-]+$', name):
+        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name: only alphanumeric, spaces, hyphens allowed"}
 
     home = Path(os.path.expanduser("~"))
 

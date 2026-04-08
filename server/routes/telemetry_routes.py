@@ -19,8 +19,11 @@ from packages.core.services.telemetry import telemetry
 from packages.core.config import settings
 import sqlite3
 import hashlib
+import logging
 import threading
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 YT_DB_PATH = Path(__file__).parent.parent / "data" / "youtube_shorts.db"
 
@@ -118,7 +121,7 @@ async def toggle_telemetry_consent(
     # Backfill historical SQLite data when user activates telemetry
     if body.enabled:
         threading.Thread(
-            target=_backfill_sqlite_history, args=(user.id,), daemon=False
+            target=_backfill_sqlite_history, args=(user.id,), daemon=True, name=f"telemetry_backfill_{user.id}"
         ).start()
 
     action = "activada" if body.enabled else "desactivada"
@@ -139,8 +142,8 @@ async def get_telemetry_status(user: User = Depends(optional_auth)):
                     telemetry_enabled=bool(result.data.get("telemetry_consent")),
                     supabase_connected=True,
                 )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.warning(f"[Telemetry] Failed to fetch user consent from Supabase: {type(e).__name__}: {str(e)}")
     return TelemetryStatusResponse(
         telemetry_enabled=telemetry.enabled,
         supabase_connected=telemetry.supabase is not None,

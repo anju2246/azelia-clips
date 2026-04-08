@@ -16,15 +16,15 @@ export const SettingsForm: React.FC = () => {
     const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const readyForAutoSaveRef = useRef(false);
     const [showBrowser, setShowBrowser] = useState(false);
-    const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'vertex']);
+    const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'google']);
     const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
     // Telemetry consent state
     const [telemetryEnabled, setTelemetryEnabled] = useState(false);
     const [telemetryLoading, setTelemetryLoading] = useState(false);
 
-    // OpenRouter dynamic models
-    const { groupedModels, loading: modelsLoading } = useAIModels();
+    // Live model registry from provider APIs
+    const { groupedModels, loading: modelsLoading, refetch: refetchModels } = useAIModels();
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, orProvider: 'meta' | 'openai' | 'anthropic' | 'google', fallbackModels: { id: string, label: string }[] }> = {
         'groq': {
@@ -49,12 +49,11 @@ export const SettingsForm: React.FC = () => {
                 { id: "claude-haiku-3-5", label: "Claude Haiku 3.5" },
             ]
         },
-        'vertex': {
-            name: 'Vertex AI (GCP)', desc: 'Requires local gcloud auth', field: 'gcp_project_id', modelField: 'vertex_model', ph: 'e.g. ce-video-engine', orProvider: 'vertex' as any,
+        'google': {
+            name: 'Google (Gemini)', desc: 'Gemini via AI Studio — simple API key', field: 'google_api_key', modelField: 'google_model', ph: 'AIza...', orProvider: 'google' as any,
             fallbackModels: [
                 { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
                 { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-                { id: "gemini-2.0-flash", label: "Gemini 2.0 Flash" },
             ]
         },
     };
@@ -78,13 +77,18 @@ export const SettingsForm: React.FC = () => {
                 if (payload.groq_api_key === '********' || !payload.groq_api_key) delete payload.groq_api_key;
                 if (payload.openai_api_key === '********' || !payload.openai_api_key) delete payload.openai_api_key;
                 if (payload.anthropic_api_key === '********' || !payload.anthropic_api_key) delete payload.anthropic_api_key;
-                if (payload.gcp_project_id === 'e.g. ce-video-engine' || !payload.gcp_project_id) delete payload.gcp_project_id;
+                if (payload.google_api_key === 'AIza...' || !payload.google_api_key) delete payload.google_api_key;
                 if (payload.transcript_supabase_key === '********' || !payload.transcript_supabase_key) delete payload.transcript_supabase_key;
                 const updated = await SettingsApi.updateSettings(payload);
                 setSettings(updated);
                 setSaveStatus('saved');
                 toast.success('Settings saved', { duration: 1500, icon: '✓', style: { background: '#18181b', color: '#a1a1aa', border: '1px solid rgba(255,255,255,0.05)', fontSize: '13px' } });
                 setTimeout(() => setSaveStatus('idle'), 2000);
+                // If any API key changed, refresh model registry so the selector shows current models
+                const hasKeyChange = payload.groq_api_key || payload.openai_api_key || payload.anthropic_api_key || payload.google_api_key;
+                if (hasKeyChange) {
+                    SettingsApi.refreshModels().then(() => refetchModels()).catch(() => {});
+                }
             } catch (error: any) {
                 setSaveStatus('error');
                 toast.error(error.message || 'Failed to auto-save settings');
@@ -154,7 +158,7 @@ export const SettingsForm: React.FC = () => {
             if (payload.groq_api_key === '********' || !payload.groq_api_key) delete payload.groq_api_key;
             if (payload.openai_api_key === '********' || !payload.openai_api_key) delete payload.openai_api_key;
             if (payload.anthropic_api_key === '********' || !payload.anthropic_api_key) delete payload.anthropic_api_key;
-            if (payload.gcp_project_id === 'e.g. ce-video-engine' || !payload.gcp_project_id) delete payload.gcp_project_id;
+            if (payload.google_api_key === 'AIza...' || !payload.google_api_key) delete payload.google_api_key;
             if (payload.transcript_supabase_key === '********' || !payload.transcript_supabase_key) delete payload.transcript_supabase_key;
             const updated = await SettingsApi.updateSettings(payload);
             setSettings(updated);
@@ -224,7 +228,11 @@ export const SettingsForm: React.FC = () => {
                                             toast.loading(`Resolving path for "${folderName}"...`, { id: 'resolve' });
 
                                             // Ask server to find the full path
-                                            const res = await fetch(`${API_BASE}/resolve-path?name=${encodeURIComponent(folderName)}`);
+                                            const { data: sessionData } = await (await import('../../lib/supabase')).supabase.auth.getSession();
+                                            const token = sessionData?.session?.access_token;
+                                            const res = await fetch(`${API_BASE}/resolve-path?name=${encodeURIComponent(folderName)}`, {
+                                                headers: token ? { Authorization: `Bearer ${token}` } : {},
+                                            });
                                             const data = await res.json();
 
                                             if (data.count === 1) {
@@ -369,7 +377,7 @@ export const SettingsForm: React.FC = () => {
                                             <div>
                                                 <label className="block text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-1.5">API Key / Auth</label>
                                                 <input
-                                                    type={providerId === 'vertex' ? 'text' : 'password'}
+                                                    type="password"
                                                     // @ts-ignore
                                                     placeholder={settings?.[config.field] ? '********' : config.ph}
                                                     // @ts-ignore

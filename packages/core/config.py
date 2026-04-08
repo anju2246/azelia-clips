@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     )
 
     # API Keys
-    ai_provider_order: str = Field(default="groq,openai,anthropic,vertex", description="Comma-separated list of AI providers by priority")
+    ai_provider_order: str = Field(default="groq,openai,anthropic,google", description="Comma-separated list of AI providers by priority")
     groq_api_key: str = Field(default="", description="Groq API key for LLM inference")
     groq_model: str = Field(default="llama-3.3-70b-versatile", description="Selected Groq model")
     groq_api_key_2: str = Field(default="", description="Secondary Groq API key (fallback)")
@@ -27,10 +27,9 @@ class Settings(BaseSettings):
     openai_api_key: str = Field(default="", description="OpenAI API key for ChatGPT")
     openai_model: str = Field(default="gpt-4o", description="Selected OpenAI model")
 
-    # GCP Configuration
-    gcp_project_id: str = Field(default="", alias="GCP_PROJECT_ID", description="Google Cloud Project ID")
-    gcp_location: str = Field(default="us-central1", alias="GCP_LOCATION", description="GCP region")
-    vertex_model: str = Field(default="meta/llama-3.3-70b-instruct-maas", description="Selected Vertex AI model")
+    # Google AI (Gemini via AI Studio — simple API key, no gcloud needed)
+    google_api_key: str = Field(default="", alias="GOOGLE_API_KEY", description="Google AI Studio API key")
+    google_model: str = Field(default="gemini-2.5-pro", description="Selected Google Gemini model")
 
     # ── Azelia Central DB (Supabase) ──────────────────────────────────────
     # ⚠️ DO NOT expose in Settings UI. These power telemetry, auth, and IC.

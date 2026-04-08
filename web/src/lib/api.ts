@@ -207,6 +207,7 @@ export const ClipsApi = {
 export const SettingsApi = {
   getSettings: () => fetchApi<SettingsResponse>('/settings'),
   getModels: () => fetchApi<{data: any[]}>('/models'),
+  refreshModels: () => fetchApi<{data: any[]}>('/models/refresh', { method: 'POST' }),
 
   updateSettings: (req: UpdateSettingsRequest) =>
     fetchApi<SettingsResponse>('/settings', {

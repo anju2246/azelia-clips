@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Loader2, CheckCircle2, AlertTriangle, ExternalLink, Play } from 'lucide-react';
 import { ClipsApi, type JobResponse, getWebSocketUrl } from '../../lib/api';
+import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
 interface LiveProcessingWidgetProps {
@@ -44,8 +45,10 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
         }
     };
 
-    const connectWebSocket = () => {
-        const wsUrl = getWebSocketUrl(`/ws/jobs/${jobId}`);
+    const connectWebSocket = async () => {
+        const { data: authData } = await supabase.auth.getSession();
+        const token = authData?.session?.access_token || '';
+        const wsUrl = getWebSocketUrl(`/ws/jobs/${jobId}`) + `?token=${token}`;
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
