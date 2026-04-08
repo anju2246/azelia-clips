@@ -201,17 +201,6 @@ export const OnboardingWizard: React.FC = () => {
                 console.warn("Could not load existing settings", e);
             }
 
-            // Check for YouTube OAuth callback
-            const urlParams = new URLSearchParams(window.location.search);
-            const code = urlParams.get('code');
-            if (code) {
-                window.history.replaceState({}, '', window.location.pathname);
-                setStep(3);
-                setLoading(false);
-                handleYouTubeCallback(code);
-                return;
-            }
-
             // Check if YouTube is already connected
             try {
                 const res = await fetchWithAuth('/analytics/youtube/status');
@@ -223,6 +212,17 @@ export const OnboardingWizard: React.FC = () => {
                     }
                 }
             } catch (e) { /* not connected */ }
+
+            // Check for YouTube OAuth callback
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+            if (code) {
+                window.history.replaceState({}, '', window.location.pathname);
+                setStep(3);
+                setLoading(false);
+                handleYouTubeCallback(code);
+                return;
+            }
 
             setLoading(false);
         };
@@ -337,11 +337,15 @@ export const OnboardingWizard: React.FC = () => {
                 setYtShowPicker(true);
                 toast.success(`Found ${result.channels?.length || 0} channel(s). Pick the one to sync.`, { icon: '📺' });
             } else {
-                toast.success(`Connected! Synced ${result.total_shorts} videos from ${result.channel_name}.`, { id: toastId, icon: '🔗' });
+                toast.success(`¡Conectado! ${result.total_shorts} videos sincronizados de ${result.channel_name}.`, { id: toastId, icon: '🔗' });
                 setYtConnected(true);
                 setYtChannelName(result.channel_name);
                 if (!hasSyncedHistorical) {
-                    setTimeout(() => setShowRetroactiveModal(true), 1500);
+                    setTimeout(() => setShowRetroactiveModal(true), 800);
+                }
+                // If coming back from YouTube OAuth during the ProUpgradeCard step, go to dashboard
+                if (showProCard) {
+                    setTimeout(() => window.location.replace('/dashboard'), 1500);
                 }
             }
         } catch (error: any) {
@@ -425,13 +429,8 @@ export const OnboardingWizard: React.FC = () => {
                 onActivated={() => window.location.replace('/dashboard')}
                 youtubeConnected={ytConnected}
                 redirectUri={window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost') + '/onboarding'}
+                onYouTubeConnected={() => window.location.replace('/dashboard')}
             />
-            <button
-                onClick={() => window.location.replace('/dashboard')}
-                className="w-full text-center text-xs text-zinc-500 hover:text-zinc-400 transition-colors py-1"
-            >
-                Continuar con Free por ahora →
-            </button>
         </div>
     );
 

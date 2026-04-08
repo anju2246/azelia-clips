@@ -20,11 +20,12 @@ interface ProUpgradeCardProps {
     onActivated?: () => void;
     youtubeConnected?: boolean;
     redirectUri?: string;
+    onYouTubeConnected?: () => void;
     // onConnectYouTube is no longer used — OAuth is handled internally
     onConnectYouTube?: () => void;
 }
 
-export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, youtubeConnected = false, redirectUri }) => {
+export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, youtubeConnected = false, redirectUri, onYouTubeConnected }) => {
     const [loading, setLoading] = useState(false);
     const [activated, setActivated] = useState(false);
     const [ytLoading, setYtLoading] = useState(false);
@@ -118,12 +119,14 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                     </button>
                 </div>
 
-                <button
-                    onClick={() => onActivated?.()}
-                    className="w-full flex items-center justify-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-400 transition-colors py-1"
-                >
-                    Ir al dashboard sin conectar <ArrowRight className="w-3 h-3" />
-                </button>
+                {!onYouTubeConnected && (
+                    <button
+                        onClick={() => onActivated?.()}
+                        className="w-full flex items-center justify-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-400 transition-colors py-1"
+                    >
+                        Ir al dashboard sin conectar <ArrowRight className="w-3 h-3" />
+                    </button>
+                )}
             </div>
         );
     }
