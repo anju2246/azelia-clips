@@ -424,6 +424,7 @@ export const OnboardingWizard: React.FC = () => {
             <ProUpgradeCard
                 onActivated={() => window.location.replace('/dashboard')}
                 youtubeConnected={ytConnected}
+                redirectUri={window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost') + '/onboarding'}
             />
             <button
                 onClick={() => window.location.replace('/dashboard')}

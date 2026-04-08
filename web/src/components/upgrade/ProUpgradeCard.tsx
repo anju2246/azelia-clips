@@ -19,11 +19,12 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 interface ProUpgradeCardProps {
     onActivated?: () => void;
     youtubeConnected?: boolean;
+    redirectUri?: string;
     // onConnectYouTube is no longer used — OAuth is handled internally
     onConnectYouTube?: () => void;
 }
 
-export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, youtubeConnected = false }) => {
+export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, youtubeConnected = false, redirectUri }) => {
     const [loading, setLoading] = useState(false);
     const [activated, setActivated] = useState(false);
     const [ytLoading, setYtLoading] = useState(false);
@@ -64,13 +65,11 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
     const handleConnectYouTube = async () => {
         setYtLoading(true);
         try {
-            // Use /dashboard as redirect URI so the user lands there after OAuth,
-            // not back in the onboarding wizard.
             const baseOrigin = window.location.origin
                 .replace('127.0.0.1', 'localhost')
                 .replace('0.0.0.0', 'localhost');
-            const redirectUri = baseOrigin + '/dashboard/intelligence';
-            const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`);
+            const resolvedRedirectUri = redirectUri ?? (baseOrigin + '/dashboard/intelligence');
+            const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(resolvedRedirectUri)}`);
             if (!res.ok) throw new Error('No se pudo iniciar la autorización de YouTube');
             const { url } = await res.json();
             window.location.href = url;
