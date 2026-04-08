@@ -29,6 +29,13 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
     const [activated, setActivated] = useState(false);
     const [ytLoading, setYtLoading] = useState(false);
 
+    // Check if already Pro on mount (e.g. after returning from YouTube OAuth)
+    React.useEffect(() => {
+        fetchWithAuth('/upgrade/status').then(res => {
+            if (res.ok) res.json().then(d => { if (d.tier === 'pro') setActivated(true); });
+        }).catch(() => {});
+    }, []);
+
     const handleActivate = async () => {
         setLoading(true);
         try {
