@@ -7,7 +7,10 @@
  */
 import { test, expect } from '@playwright/test';
 
-const ANTHROPIC_KEY = process.env.TEST_ANTHROPIC_KEY || '<REDACTED_KEY>';
+const ANTHROPIC_KEY = process.env.TEST_ANTHROPIC_KEY;
+if (!ANTHROPIC_KEY) {
+    throw new Error('TEST_ANTHROPIC_KEY env var is required to run onboarding E2E tests');
+}
 
 /** Navigate through steps 1-3 filling required fields (assumes beforeEach already loaded the page clean) */
 async function completeSteps1to3(page: any) {
