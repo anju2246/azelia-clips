@@ -2,7 +2,7 @@
 
 > AI-powered podcast clip generator — part of the **Azelia** suite by [Inminente](https://inminente.co).
 
-[![License](https://img.shields.io/badge/License-MIT_Commons_Clause-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-green.svg)](https://python.org)
 
 ---
@@ -161,7 +161,7 @@ Need a managed, hosted solution? Contact us directly for enterprise/agency prici
 
 ## License
 
-[MIT License + Commons Clause](LICENSE) — Open Source, but **not for commercial sale**.
+[MIT](LICENSE) — Open Source. Usa, modifica, distribuye. Haz lo que necesites con el código.
 
 ### Legal
 
