@@ -26,6 +26,28 @@ Subject to the terms and conditions of this Agreement, You hereby grant to Inmin
 
 You are not expected to provide support for Your Contributions, except to the extent You desire to provide support. You may provide support for free, for a fee, or not at all.
 
-## 6. How to Sign
+## 6. No Warranty
 
-By submitting a Pull Request to this repository, you automatically agree to the terms of this CLA. No further action is required.
+Your Contribution is provided on an "AS IS" basis, without warranties of any kind, express or implied.
+
+## 7. Relicensing Rights
+
+You grant Inminente Podcast the right to distribute Your Contributions under licenses other than the one used by the Project at the time of your contribution, including relicensing to any OSI-approved license or a commercial license. This flexibility exists to protect the long-term sustainability of the Project.
+
+## 8. How to Sign
+
+On your first pull request to this repository, our automated check (CLA Assistant GitHub Action) will post a comment asking you to sign. You sign once by replying with the statement the bot provides, and your signature covers all future contributions.
+
+If you contribute outside GitHub (e.g., via email patches), include this line at the end of your contribution:
+
+```
+I have read the CLA Document and I hereby sign the CLA.
+```
+
+For corporate contributions on behalf of an employer:
+
+```
+I hereby confirm that I am authorized by [Company Name] to enter into this CLA on their behalf, and I sign the CLA on their behalf.
+```
+
+Questions: `hola@azelia.ai`
