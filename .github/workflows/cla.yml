@@ -1,0 +1,42 @@
+name: "CLA Assistant"
+on:
+  issue_comment:
+    types: [created]
+  pull_request_target:
+    types: [opened, closed, synchronize]
+
+# Permissions needed by contributor-assistant/github-action.
+permissions:
+  actions: write
+  contents: write   # if using repo storage for signatures (we do)
+  pull-requests: write
+  statuses: write
+
+jobs:
+  CLAAssistant:
+    runs-on: ubuntu-latest
+    steps:
+      - name: "CLA Assistant"
+        if: (github.event.comment.body == 'recheck' || github.event.comment.body == 'I have read the CLA Document and I hereby sign the CLA') || github.event_name == 'pull_request_target'
+        uses: contributor-assistant/github-action@v2.6.1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          path-to-signatures: 'signatures/v1/cla.json'
+          path-to-document: 'https://github.com/anju2246/azelia-clips/blob/main/CLA.md'
+          branch: 'cla-signatures'
+          allowlist: bot*
+          remote-organization-name: ''
+          remote-repository-name: ''
+          custom-notsigned-prcomment: |
+            Hola 👋 y gracias por tu contribución a Azelia.
+
+            Antes de que podamos revisar este PR necesitamos que firmes el [Contributor License Agreement](https://github.com/anju2246/azelia-clips/blob/main/CLA.md). Es un paso único — tu firma cubre todos tus PRs futuros.
+
+            **Para firmar**, responde este comentario exactamente con:
+
+            ```
+            I have read the CLA Document and I hereby sign the CLA
+            ```
+          custom-pr-sign-comment: 'I have read the CLA Document and I hereby sign the CLA'
+          custom-allsigned-prcomment: '✅ CLA firmado. Listos para review.'
