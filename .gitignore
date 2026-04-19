@@ -81,3 +81,6 @@ _scratch/
 # MCP server config (local only)
 .mcp.json
 .claude/settings.json
+
+# Playwright test artifacts
+web/test-results/
