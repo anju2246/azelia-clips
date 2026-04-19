@@ -122,7 +122,7 @@ Our software integrates with:
 
 ## 9. Open Source Transparency
 
-Azelia Clips is open source software licensed under MIT + Commons Clause. You can review exactly what data is collected by inspecting the source code at [github.com/anju2246/azelia-clips](https://github.com/anju2246/azelia-clips).
+Azelia Clips is open source software licensed under MIT. You can review exactly what data is collected by inspecting the source code at [github.com/anju2246/azelia-clips](https://github.com/anju2246/azelia-clips).
 
 ## 10. Changes to This Policy
 

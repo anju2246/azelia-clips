@@ -14,14 +14,14 @@ By downloading, installing, or using the Software, you agree to these Terms. If 
 
 ## 2. License
 
-The Software is licensed under the **MIT License with Commons Clause** (see [LICENSE](LICENSE)). This means:
+The Software is licensed under the **MIT License** (see [LICENSE](LICENSE)). This means:
 
 - ✅ You may use, copy, modify, and distribute the Software for free
-- ✅ You may use the Software for your personal or business purposes
-- ❌ You may **not** sell the Software, or any product or service whose value derives substantially from the Software's functionality
-- ❌ You may **not** offer the Software as a hosted/managed service to third parties for a fee
+- ✅ You may use the Software for personal or commercial purposes
+- ✅ You may sublicense, sell copies, or build commercial products with it
+- ✅ You may offer it as a hosted/managed service
 
-For details, see the full [LICENSE](LICENSE) file.
+The only obligation is to preserve the copyright notice and the MIT license text in any substantial portion of the Software you redistribute. See the full [LICENSE](LICENSE) file.
 
 ## 3. Account Requirements
 
