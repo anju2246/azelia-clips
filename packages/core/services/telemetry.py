@@ -264,23 +264,40 @@ class TelemetryService:
         self._send_event(event)
 
     def track_consent_change(self, user_id: str, consented: bool):
-        """Records consent state change (for audit trail, always sent regardless of consent)."""
-        if not self.supabase and settings.supabase_url and settings.supabase_key:
-            try:
-                self.supabase = create_client(settings.supabase_url, settings.supabase_key)
-            except Exception:
-                return
+        """Records consent state change (audit trail write, authed server-side).
 
-        if not self.supabase:
-            return
+        Uses the service role key so the UPDATE bypasses RLS for this specific
+        server-side audit write. The user's identity was already verified by
+        require_auth before we got here, so writing to user_id's own row is safe.
+        """
+        svc_key = getattr(settings, "supabase_service_role_key", "") or ""
+        if not (settings.supabase_url and svc_key):
+            # Fallback: try anon client (old behavior) — will typically no-op due to RLS
+            if not self.supabase and settings.supabase_url and settings.supabase_key:
+                try:
+                    self.supabase = create_client(settings.supabase_url, settings.supabase_key)
+                except Exception:
+                    return
+            if not self.supabase:
+                return
+            client = self.supabase
+        else:
+            # Service-role client — authoritative audit write
+            try:
+                client = create_client(settings.supabase_url, svc_key)
+            except Exception as e:
+                print(f"[Telemetry] Service-role client init failed: {e}")
+                return
 
         def _record():
             try:
-                # Update profiles with consent status
-                self.supabase.table("profiles").update({
+                res = client.table("profiles").update({
                     "telemetry_consent": consented,
                     "telemetry_consent_at": _utc_now_iso() if consented else None,
                 }).eq("id", user_id).execute()
+                # Verify the update landed — Supabase returns list of updated rows
+                if not getattr(res, "data", None):
+                    print(f"[Telemetry] consent UPDATE affected 0 rows for user {user_id}")
             except Exception as e:
                 print(f"[Telemetry] Failed to record consent change: {e}")
 

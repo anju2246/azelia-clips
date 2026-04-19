@@ -197,6 +197,19 @@ def _get_yt_db():
             last_synced TEXT
         )
     """)
+    # Idempotent additions for async sync tracking (safe to re-run)
+    for col_def in (
+        "channel_thumbnail TEXT",
+        "sync_status TEXT",               # 'pending' | 'complete' | 'failed' | NULL
+        "sync_started_at TEXT",
+        "sync_completed_at TEXT",
+        "sync_error TEXT",
+        "total_shorts INTEGER DEFAULT 0",
+    ):
+        try:
+            conn.execute(f"ALTER TABLE youtube_connections ADD COLUMN {col_def}")
+        except Exception:
+            pass  # column already exists
     # Keep legacy table alive for backward compat but don't use it
     conn.execute("""
         CREATE TABLE IF NOT EXISTS youtube_sync_meta (
@@ -223,6 +236,90 @@ def _get_user_id_from_auth(authorization: str) -> str | None:
         return None
 
 
+def _mark_sync_pending(user_id: str, channel_id: str, channel_name: str, channel_thumbnail: str):
+    """Write initial sync row so the user sees channel metadata immediately.
+    Preserves existing refresh_token if present (Google only returns it on first consent).
+    """
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    uid = user_id or "__legacy__"
+    conn = _get_yt_db()
+    conn.execute("""
+        INSERT INTO youtube_connections (
+            user_id, channel_id, channel_name, channel_thumbnail,
+            sync_status, sync_started_at, sync_error, total_shorts
+        )
+        VALUES (?, ?, ?, ?, 'pending', ?, NULL, 0)
+        ON CONFLICT(user_id) DO UPDATE SET
+            channel_id = excluded.channel_id,
+            channel_name = excluded.channel_name,
+            channel_thumbnail = excluded.channel_thumbnail,
+            sync_status = 'pending',
+            sync_started_at = excluded.sync_started_at,
+            sync_error = NULL
+    """, (uid, channel_id, channel_name, channel_thumbnail, now))
+    conn.commit()
+    conn.close()
+
+
+def _mark_sync_complete(user_id: str, total_shorts: int):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    uid = user_id or "__legacy__"
+    conn = _get_yt_db()
+    conn.execute("""
+        UPDATE youtube_connections
+        SET sync_status = 'complete',
+            sync_completed_at = ?,
+            total_shorts = ?,
+            last_synced = ?,
+            sync_error = NULL
+        WHERE user_id = ?
+    """, (now, total_shorts, now, uid))
+    conn.commit()
+    conn.close()
+
+
+def _mark_sync_failed(user_id: str, error_msg: str):
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc).isoformat()
+    uid = user_id or "__legacy__"
+    conn = _get_yt_db()
+    conn.execute("""
+        UPDATE youtube_connections
+        SET sync_status = 'failed',
+            sync_completed_at = ?,
+            sync_error = ?
+        WHERE user_id = ?
+    """, (now, (error_msg or "unknown")[:300], uid))
+    conn.commit()
+    conn.close()
+
+
+async def _run_full_sync(access_token: str, channel_id: str, user_id: str, authorization: str | None):
+    """Background task wrapper around _sync_channel.
+    Keeps sync_status row up-to-date regardless of outcome.
+    """
+    try:
+        from server.services.analytics import AnalyticsSync
+        analytics = None
+        if authorization:
+            try:
+                token = authorization.replace("Bearer ", "").strip()
+                analytics = AnalyticsSync(auth_token=token)
+            except Exception:
+                pass
+        result = await _sync_channel(access_token, channel_id, user_id=user_id, analytics=analytics)
+        total = int(result.get("total_shorts", 0)) if isinstance(result, dict) else 0
+        _mark_sync_complete(user_id, total)
+    except Exception as e:
+        import logging, traceback
+        logging.getLogger(__name__).error(
+            f"Background YouTube sync failed for user {user_id}: {type(e).__name__}: {e}\n{traceback.format_exc()[:500]}"
+        )
+        _mark_sync_failed(user_id, f"{type(e).__name__}: {e}")
+
+
 @router.get("/analytics/youtube/status")
 async def get_youtube_status(user: User = Depends(require_auth)):
     """Check if YouTube shorts have been synced (user-scoped)."""
@@ -242,25 +339,75 @@ async def get_youtube_status(user: User = Depends(require_auth)):
         # Read from youtube_connections (user-scoped)
         channel_name = None
         last_synced = None
+        sync_status = None
         if user_id:
             cursor2 = conn.execute(
-                "SELECT channel_name, last_synced FROM youtube_connections WHERE user_id = ?",
+                "SELECT channel_name, last_synced, sync_status FROM youtube_connections WHERE user_id = ?",
                 (user_id,)
             )
             row2 = cursor2.fetchone()
             if row2:
                 channel_name = row2[0]
                 last_synced = row2[1]
-        
+                sync_status = row2[2]
+
         conn.close()
+        # Note: caller may also want sync_status — see /analytics/youtube/sync-status
         return {
             "connected": count > 0 or channel_name is not None,
             "channel_name": channel_name,
             "total_shorts": count,
             "last_synced": last_synced,
+            "sync_status": sync_status,  # 'pending' | 'complete' | 'failed' | None
         }
     except Exception:
         return {"connected": False, "total_shorts": 0}
+
+
+@router.get("/analytics/youtube/sync-status")
+async def get_youtube_sync_status(user: User = Depends(require_auth)):
+    """Current YouTube sync state for this user — used by frontend to poll after OAuth.
+
+    Returns one of:
+      {status: 'none'}                                    # no connection yet
+      {status: 'pending', channel_name, channel_thumbnail, sync_started_at}
+      {status: 'complete', channel_name, total_shorts, last_synced, ...}
+      {status: 'failed', channel_name, error, ...}
+    """
+    try:
+        conn = _get_yt_db()
+        cursor = conn.execute(
+            """
+            SELECT channel_id, channel_name, channel_thumbnail,
+                   sync_status, sync_started_at, sync_completed_at,
+                   sync_error, total_shorts, last_synced
+            FROM youtube_connections
+            WHERE user_id = ?
+            """,
+            (user.id,),
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if not row:
+            return {"status": "none"}
+        (channel_id, channel_name, channel_thumbnail,
+         sync_status, sync_started_at, sync_completed_at,
+         sync_error, total_shorts, last_synced) = row
+        return {
+            "status": sync_status or ("complete" if last_synced else "none"),
+            "channel_id": channel_id,
+            "channel_name": channel_name,
+            "channel_thumbnail": channel_thumbnail,
+            "sync_started_at": sync_started_at,
+            "sync_completed_at": sync_completed_at,
+            "total_shorts": total_shorts or 0,
+            "last_synced": last_synced,
+            "error": sync_error,
+        }
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"sync-status endpoint error: {type(e).__name__}: {e}")
+        return {"status": "none"}
 
 
 @router.post("/analytics/youtube/sync")
@@ -484,11 +631,29 @@ async def sync_youtube_with_code(
                 import logging
                 logging.getLogger(__name__).warning("AnalyticsSync init failed — check configuration")
 
-        # If channel_id provided, sync directly
+        # If channel_id provided, sync directly (fast-return + background task)
         if channel_id:
-            result = await _sync_channel(access_token, channel_id, user_id=user_id, analytics=analytics)
-            return result
-    
+            # Fetch minimal channel metadata so the user sees name/thumbnail immediately
+            ch_res = http_requests.get(f"{YT_API}/channels", params={
+                "part": "snippet", "id": channel_id
+            }, headers=headers)
+            ch_name = ""
+            ch_thumb = ""
+            if ch_res.status_code == 200:
+                items = ch_res.json().get("items", [])
+                if items:
+                    ch_name = items[0]["snippet"]["title"]
+                    ch_thumb = items[0]["snippet"].get("thumbnails", {}).get("default", {}).get("url", "")
+            _mark_sync_pending(user_id, channel_id, ch_name, ch_thumb)
+            import asyncio
+            asyncio.create_task(_run_full_sync(access_token, channel_id, user_id, authorization))
+            return {
+                "connected": True,
+                "channel_name": ch_name,
+                "channel_thumbnail": ch_thumb,
+                "syncing": True,
+            }
+
         # Otherwise, list all accessible channels for the user to pick
         # 1. Get the default "mine" channel
         channels = []
@@ -496,7 +661,7 @@ async def sync_youtube_with_code(
             "part": "snippet,statistics,contentDetails",
             "mine": "true"
         }, headers=headers)
-    
+
         if mine_res.status_code == 200:
             for ch in mine_res.json().get("items", []):
                 thumb = ch["snippet"].get("thumbnails", {}).get("default", {}).get("url", "")
@@ -508,12 +673,20 @@ async def sync_youtube_with_code(
                     "video_count": ch["statistics"].get("videoCount", "0"),
                     "thumbnail": thumb,
                 })
-    
-        # If only 1 channel, sync it automatically
+
+        # If only 1 channel, kick off sync in background and return immediately
         if len(channels) == 1:
-            result = await _sync_channel(access_token, channels[0]["id"], user_id=user_id, analytics=analytics)
-            return result
-    
+            ch0 = channels[0]
+            _mark_sync_pending(user_id, ch0["id"], ch0["title"], ch0["thumbnail"])
+            import asyncio
+            asyncio.create_task(_run_full_sync(access_token, ch0["id"], user_id, authorization))
+            return {
+                "connected": True,
+                "channel_name": ch0["title"],
+                "channel_thumbnail": ch0["thumbnail"],
+                "syncing": True,
+            }
+
         # Multiple channels or none: return them for selection
         return {
             "needs_channel_selection": True,
@@ -704,34 +877,59 @@ async def _sync_channel(access_token: str, channel_id: str, user_id: str = None,
     conn.close()
     
     # --- SUPABASE TELEMETRY SYNC ---
+    # Telemetry enrichment is best-effort: if PostgREST rejects the batch (URL too long,
+    # special chars in titles, etc) the user's YouTube sync must still succeed.
     if user_id and analytics and analytics.Enabled:
-        from packages.core.services.telemetry import telemetry
-        import hashlib
+        try:
+            from packages.core.services.telemetry import telemetry
+            import hashlib
 
-        # Fetch all matching clips_metadata in a single query
-        titles = [s["title"] for s in shorts]
-        res = analytics.client.table("clips_metadata")\
-            .select("video_title, hook_type, sentiment_score")\
-            .in_("video_title", titles)\
-            .execute()
-        clips_by_title = {row["video_title"]: row for row in (res.data or [])}
+            # Batch lookups — PostgREST chokes on very long `in.(...)` URLs
+            clips_by_title: dict = {}
+            titles = [s["title"] for s in shorts]
+            BATCH = 50
+            for i in range(0, len(titles), BATCH):
+                chunk = titles[i:i + BATCH]
+                try:
+                    res = analytics.client.table("clips_metadata")\
+                        .select("video_title, hook_type, sentiment_score")\
+                        .in_("video_title", chunk)\
+                        .execute()
+                    for row in (res.data or []):
+                        clips_by_title[row["video_title"]] = row
+                except Exception as batch_err:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"clips_metadata batch lookup failed (continuing without enrichment): {type(batch_err).__name__}"
+                    )
 
-        for s in shorts:
-            clip_data = clips_by_title.get(s["title"])
-            hook_type = clip_data.get("hook_type") if clip_data else None
-            predicted_score = clip_data.get("sentiment_score") if clip_data else None
+            for s in shorts:
+                clip_data = clips_by_title.get(s["title"])
+                hook_type = clip_data.get("hook_type") if clip_data else None
+                predicted_score = clip_data.get("sentiment_score") if clip_data else None
 
-            title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]
-            telemetry.track_youtube_performance(
-                user_id=user_id,
-                youtube_id=s["video_id"],
-                views=s["view_count"],
-                likes=s["like_count"],
-                comments=s["comment_count"],
-                duration_seconds=s["duration_seconds"],
-                hook_type=hook_type,
-                predicted_score=predicted_score,
-                title_hash=title_hash
+                title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]
+                try:
+                    telemetry.track_youtube_performance(
+                        user_id=user_id,
+                        youtube_id=s["video_id"],
+                        views=s["view_count"],
+                        likes=s["like_count"],
+                        comments=s["comment_count"],
+                        duration_seconds=s["duration_seconds"],
+                        hook_type=hook_type,
+                        predicted_score=predicted_score,
+                        title_hash=title_hash
+                    )
+                except Exception as track_err:
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        f"telemetry.track_youtube_performance failed for {s['video_id']}: {type(track_err).__name__}"
+                    )
+        except Exception as telemetry_err:
+            import logging
+            logging.getLogger(__name__).error(
+                f"Telemetry block crashed (YouTube sync continues): {type(telemetry_err).__name__}: {telemetry_err}"
             )
     
     return {

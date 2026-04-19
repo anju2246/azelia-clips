@@ -6,7 +6,7 @@ Writes directly to Supabase REST API using anon key (RLS must allow user to upda
 """
 
 from datetime import datetime, timezone, timedelta
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Header, status
 from pydantic import BaseModel
 from typing import Optional
 import httpx
@@ -27,11 +27,21 @@ class UpgradeResponse(BaseModel):
 
 
 @router.post("/upgrade/pro", response_model=UpgradeResponse)
-async def activate_pro(user: User = Depends(require_auth)):
+async def activate_pro(
+    user: User = Depends(require_auth),
+    authorization: str = Header(None),
+):
     """
     Activate beta Pro for the authenticated user.
     Sets tier='pro' and pro_expires_at = now + 90 days in their profiles row.
+
+    Uses the user's JWT so RLS (auth.uid() = id) actually lets the UPDATE land.
+    Previously used anon key which silently returned 204 with zero rows affected.
     """
+    user_jwt = (authorization or "").replace("Bearer ", "").strip()
+    if not user_jwt:
+        raise HTTPException(status_code=401, detail="Missing user token")
+
     pro_expires_at = (datetime.now(timezone.utc) + timedelta(days=BETA_DURATION_DAYS)).isoformat()
 
     async with httpx.AsyncClient() as client:
@@ -41,16 +51,25 @@ async def activate_pro(user: User = Depends(require_auth)):
             json={"tier": "pro", "pro_expires_at": pro_expires_at},
             headers={
                 "apikey": settings.supabase_key,
-                "Authorization": f"Bearer {settings.supabase_key}",
+                "Authorization": f"Bearer {user_jwt}",
                 "Content-Type": "application/json",
-                "Prefer": "return=minimal",
+                "Prefer": "return=representation",
             },
         )
 
-    if res.status_code not in (200, 204):
+    if res.status_code >= 400:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Could not activate Pro: {res.text}",
+            detail=f"Could not activate Pro: {res.status_code} {res.text[:200]}",
+        )
+    try:
+        rows = res.json()
+    except Exception:
+        rows = []
+    if not rows:
+        raise HTTPException(
+            status_code=500,
+            detail="Pro activation affected 0 rows — RLS or missing profile row",
         )
 
     return UpgradeResponse(

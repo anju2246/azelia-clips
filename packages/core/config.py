@@ -43,6 +43,11 @@ class Settings(BaseSettings):
         default="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.REDACTED-OLD-ANON-JWT-PAYLOAD.0Y2f5rmMw-jLa17d3XPjmdtQvbXO7dI0AUONzvalLBU",
         description="Azelia Central Supabase anon key (public by design)"
     )
+    supabase_service_role_key: str = Field(
+        default="",
+        alias="SUPABASE_SERVICE_ROLE_KEY",
+        description="Azelia Central Supabase service-role key — KEEP SECRET. Used only for server-side audit writes (consent, upgrade) that the anon key cannot do under RLS.",
+    )
 
     # ── User Transcript DB (Supabase, optional) ─────────────────────────
     # Podcasters can connect their own Supabase if they store transcripts there.
