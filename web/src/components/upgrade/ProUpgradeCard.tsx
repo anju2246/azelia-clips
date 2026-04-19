@@ -29,6 +29,7 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
     const [loading, setLoading] = useState(false);
     const [activated, setActivated] = useState(false);
     const [ytLoading, setYtLoading] = useState(false);
+    const [acceptedTelemetry, setAcceptedTelemetry] = useState(false);
 
     // Check if already Pro on mount (e.g. after returning from YouTube OAuth)
     React.useEffect(() => {
@@ -38,13 +39,22 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
     }, []);
 
     const handleActivate = async () => {
+        if (!acceptedTelemetry) {
+            toast.error('Debes aceptar el intercambio de telemetría para activar Pro.');
+            return;
+        }
         setLoading(true);
         try {
-            await fetchWithAuth('/telemetry/consent', {
+            // Telemetry opt-in is an explicit, user-checked consent — never hidden.
+            const tRes = await fetchWithAuth('/telemetry/consent', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ enabled: true }),
             });
+            if (!tRes.ok) {
+                const err = await tRes.json().catch(() => ({}));
+                throw new Error(err.detail || 'No se pudo registrar el consentimiento de telemetría.');
+            }
 
             const res = await fetchWithAuth('/upgrade/pro', { method: 'POST' });
             if (res.status === 410) {
@@ -165,13 +175,33 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                 </p>
             </div>
 
+            {/* Pro-specific consent — the telemetry opt-in is the "trade" for the free 3 months.
+                 General TyC and Privacy were already accepted at signup; they're not re-asked here. */}
+            <label className="flex items-start gap-2.5 cursor-pointer group">
+                <input
+                    type="checkbox"
+                    checked={acceptedTelemetry}
+                    onChange={e => setAcceptedTelemetry(e.target.checked)}
+                    className="mt-0.5 w-4 h-4 rounded accent-brand-500 cursor-pointer shrink-0"
+                />
+                <span className="text-xs text-zinc-300 leading-relaxed">
+                    Acepto que mis <span className="font-medium text-white">métricas anónimas</span> (scores,
+                    duración, tipo de hooks, rendimiento agregado en YouTube) contribuyan al IC colectivo mientras
+                    esté en Pro. Detalles en la{' '}
+                    <a href="https://azelia.ai/privacy" target="_blank" rel="noopener" className="underline decoration-dotted hover:text-white">
+                        Política de Privacidad
+                    </a>.
+                    Puedo desactivar la telemetría en Ajustes cuando quiera.
+                </span>
+            </label>
+
             <button
                 onClick={handleActivate}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium text-sm py-3 transition-colors"
+                disabled={loading || !acceptedTelemetry}
+                className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm py-3 transition-colors"
             >
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {loading ? 'Activando...' : 'Activar Pro y contribuir al IC'}
+                {loading ? 'Activando...' : 'Activar Pro (3 meses)'}
             </button>
 
             <p className="text-center text-xs text-zinc-500">

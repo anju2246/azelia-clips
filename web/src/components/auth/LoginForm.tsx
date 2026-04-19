@@ -10,9 +10,17 @@ export const LoginForm: React.FC = () => {
     const [fullName, setFullName] = useState('');
     const [isLoading, setIsLoading] = useState(false);
     const [showPassword, setShowPassword] = useState(false);
+    const [acceptedTerms, setAcceptedTerms] = useState(false);
 
     const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault();
+
+        // Mandatory consent on signup — blocks account creation without explicit accept.
+        if (isSignUp && !acceptedTerms) {
+            toast.error('Debes aceptar los Términos y la Política de Privacidad para crear una cuenta.');
+            return;
+        }
+
         setIsLoading(true);
 
         try {
@@ -23,6 +31,9 @@ export const LoginForm: React.FC = () => {
                     options: {
                         data: {
                             full_name: fullName,
+                            // Record consent timestamp in user metadata for audit trail.
+                            terms_accepted_at: new Date().toISOString(),
+                            terms_version: '2026-04',
                         },
                         emailRedirectTo: `${window.location.origin}/auth/callback`
                     }
@@ -174,10 +185,33 @@ export const LoginForm: React.FC = () => {
                         </div>
                     </div>
 
+                    {isSignUp && (
+                        <label className="flex items-start gap-2.5 cursor-pointer pt-2">
+                            <input
+                                type="checkbox"
+                                checked={acceptedTerms}
+                                onChange={e => setAcceptedTerms(e.target.checked)}
+                                className="mt-0.5 w-4 h-4 rounded accent-brand-500 cursor-pointer shrink-0"
+                                required
+                            />
+                            <span className="text-xs text-zinc-400 leading-relaxed">
+                                Acepto los{' '}
+                                <a href="https://azelia.ai/terms" target="_blank" rel="noopener" className="text-white underline decoration-dotted hover:decoration-solid">
+                                    Términos y Condiciones
+                                </a>
+                                {' '}y la{' '}
+                                <a href="https://azelia.ai/privacy" target="_blank" rel="noopener" className="text-white underline decoration-dotted hover:decoration-solid">
+                                    Política de Privacidad
+                                </a>
+                                {' '}de Azelia.
+                            </span>
+                        </label>
+                    )}
+
                     <button
                         type="submit"
-                        disabled={isLoading}
-                        className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-50"
+                        disabled={isLoading || (isSignUp && !acceptedTerms)}
+                        className="w-full py-3 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-2 mt-2 disabled:opacity-40 disabled:cursor-not-allowed"
                     >
                         {isLoading ? (
                             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
