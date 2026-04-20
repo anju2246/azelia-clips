@@ -81,9 +81,9 @@ export const OnboardingWizard: React.FC = () => {
     });
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, keyUrl: string }> = {
-        anthropic: { name: 'Anthropic (Claude)', desc: 'Mejor para curación de contenido largo', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...', keyUrl: 'https://console.anthropic.com/settings/keys' },
-        openai:    { name: 'OpenAI (GPT)',        desc: 'Razonamiento de alta calidad',           field: 'openai_api_key',    modelField: 'openai_model',    ph: 'sk-...',     keyUrl: 'https://platform.openai.com/api-keys' },
-        groq:      { name: 'Groq',                desc: 'Inferencia ultra rápida, tier gratis',   field: 'groq_api_key',      modelField: 'groq_model',      ph: 'gsk_...',    keyUrl: 'https://console.groq.com/keys' },
+        anthropic: { name: 'Anthropic (Claude)', desc: 'Best for long-form content curation', field: 'anthropic_api_key', modelField: 'anthropic_model', ph: 'sk-ant-...', keyUrl: 'https://console.anthropic.com/settings/keys' },
+        openai:    { name: 'OpenAI (GPT)',        desc: 'High-quality reasoning',           field: 'openai_api_key',    modelField: 'openai_model',    ph: 'sk-...',     keyUrl: 'https://platform.openai.com/api-keys' },
+        groq:      { name: 'Groq',                desc: 'Ultra-fast inference, free tier',   field: 'groq_api_key',      modelField: 'groq_model',      ph: 'gsk_...',    keyUrl: 'https://console.groq.com/keys' },
         google:    { name: 'Google (Gemini)',      desc: 'Gemini 2.5 Pro — API key simple',        field: 'google_api_key',    modelField: 'google_model',    ph: 'AIza...',    keyUrl: 'https://aistudio.google.com/apikey' },
     };
 
@@ -119,10 +119,10 @@ export const OnboardingWizard: React.FC = () => {
                 if (!saveRes.ok) {
                     if (saveRes.status === 422) {
                         const err = await saveRes.json().catch(() => ({}));
-                        const msg = err.detail || 'Formato de key inválido';
+                        const msg = err.detail || 'Invalid API key format';
                         setDetectionErrors(prev => ({ ...prev, [providerId]: msg }));
                     } else {
-                        setDetectionErrors(prev => ({ ...prev, [providerId]: 'Error al guardar la key' }));
+                        setDetectionErrors(prev => ({ ...prev, [providerId]: 'Could not save the key' }));
                     }
                     return;
                 }
@@ -137,40 +137,40 @@ export const OnboardingWizard: React.FC = () => {
                     setDetectionErrors(prev => { const n = { ...prev }; delete n[providerId]; return n; });
                     handleUpdate({ [cfg.modelField]: best } as Partial<UpdateSettingsRequest>);
                 } else {
-                    setDetectionErrors(prev => ({ ...prev, [providerId]: 'Key inválida o sin acceso a modelos' }));
+                    setDetectionErrors(prev => ({ ...prev, [providerId]: 'Invalid key or no model access' }));
                 }
             } catch {
-                setDetectionErrors(prev => ({ ...prev, [providerId]: 'No se pudo verificar la key' }));
+                setDetectionErrors(prev => ({ ...prev, [providerId]: 'Could not verify the key' }));
             } finally {
                 setDetectingProvider(null);
             }
         }, 1200);
     };
 
-    const NICHES = ['Negocios & Emprendimiento', 'Comedia', 'Educación & Ciencia', 'Tecnología', 'True Crime', 'Gaming', 'Salud & Fitness', 'Estilo de Vida'];
+    const NICHES = ['Business & Entrepreneurship', 'Comedy', 'Education & Science', 'Technology', 'True Crime', 'Gaming', 'Health & Fitness', 'Lifestyle'];
     const ROLES = [
         { id: 'solo_creator', label: 'Creador Local / Solitario' },
-        { id: 'video_editor', label: 'Editor de Video Freelance' },
+        { id: 'video_editor', label: 'Freelance Video Editor' },
         { id: 'agency', label: 'Agencia (Multi-cliente)' },
-        { id: 'network_producer', label: 'Productor de Network' }
+        { id: 'network_producer', label: 'Network Producer' }
     ];
     const GOALS = [
         { id: 'grow_audience', label: 'Crecer mi Audiencia (Viralidad)' },
-        { id: 'save_time', label: 'Ahorrar Tiempo de Edición' },
+        { id: 'save_time', label: 'Save Editing Time' },
         { id: 'monetize', label: 'Monetizar / Vender Productos' }
     ];
     const REGIONS = [
-        { id: 'Mexico', label: 'México' },
+        { id: 'Mexico', label: 'Mexico' },
         { id: 'Colombia', label: 'Colombia' },
         { id: 'Argentina', label: 'Argentina' },
-        { id: 'Spain', label: 'España' },
+        { id: 'Spain', label: 'Spain' },
         { id: 'USA', label: 'Estados Unidos' },
         { id: 'Chile', label: 'Chile' },
-        { id: 'Peru', label: 'Perú' },
+        { id: 'Peru', label: 'Peru' },
     ];
     const FORMATS = [
         { id: 'interview', label: 'Entrevista (Host + Invitado)' },
-        { id: 'solo', label: 'Solo / Monólogo' },
+        { id: 'solo', label: 'Solo / Monologue' },
         { id: 'co_host', label: 'Co-hosts (2+ presentadores)' },
         { id: 'panel', label: 'Panel (3+ participantes)' },
         { id: 'narrative', label: 'Narrativo / Storytelling' },
@@ -292,7 +292,7 @@ export const OnboardingWizard: React.FC = () => {
                 await fetchWithAuth('/auth/onboarding-complete', { method: 'POST' });
             } catch { /* non-critical — gate will re-check on next login */ }
 
-            toast.success("¡Bienvenido a Azelia Clips!");
+            toast.success("Welcome to Azelia Clips!");
             setShowProCard(true);
 
         } catch (e) {
@@ -337,7 +337,7 @@ export const OnboardingWizard: React.FC = () => {
                 setYtShowPicker(true);
                 toast.success(`Found ${result.channels?.length || 0} channel(s). Pick the one to sync.`, { icon: '📺' });
             } else {
-                toast.success(`¡Conectado! ${result.total_shorts} videos sincronizados de ${result.channel_name}.`, { id: toastId, icon: '🔗' });
+                toast.success(`Connected — ${result.total_shorts} videos synced from ${result.channel_name}.`, { id: toastId, icon: '🔗' });
                 setYtConnected(true);
                 setYtChannelName(result.channel_name);
                 if (!hasSyncedHistorical) {
@@ -408,7 +408,7 @@ export const OnboardingWizard: React.FC = () => {
     };
 
     const handleSocialConnect = (platform: string) => {
-        toast('Próximamente — TikTok integration', { icon: '🔜' });
+        toast('Coming soon — TikTok integration', { icon: '🔜' });
     };
 
     const hasAnyKey = [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.google_api_key].some(
@@ -422,8 +422,8 @@ export const OnboardingWizard: React.FC = () => {
     if (showProCard) return (
         <div className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl space-y-4">
             <div>
-                <h2 className="text-2xl font-bold text-white">¡Ya estás listo!</h2>
-                <p className="text-zinc-400 mt-1">Una última cosa antes de entrar al dashboard.</p>
+                <h2 className="text-2xl font-bold text-white">You're all set!</h2>
+                <p className="text-zinc-400 mt-1">One last thing before you enter the dashboard.</p>
             </div>
             <ProUpgradeCard
                 onActivated={() => window.location.replace('/dashboard')}
@@ -447,13 +447,13 @@ export const OnboardingWizard: React.FC = () => {
             {step === 1 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
-                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Configuremos tu espacio</h1>
-                        <p className="text-zinc-400 mt-2 text-lg">Azelia analiza tus videos localmente. Dile cómo se llama tu proyecto y dónde encontrar el material.</p>
+                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Let's set up your workspace</h1>
+                        <p className="text-zinc-400 mt-2 text-lg">Azelia processes your videos locally. Tell us your project's name and where to find the material.</p>
                     </div>
 
                     <div className="space-y-5 mt-8">
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">Nombre del Podcast</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">Podcast Name</label>
                             <input
                                 type="text"
                                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white placeholder-zinc-600 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 transition-all font-mono"
@@ -464,7 +464,7 @@ export const OnboardingWizard: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">Directorio de Videos Base</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">Base Video Directory</label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
@@ -492,7 +492,7 @@ export const OnboardingWizard: React.FC = () => {
                                                 handleUpdate({ podcast_dir: data.matches[0] });
                                                 toast.success(`${data.count} coincidencias, usando: ${data.matches[0]}`, { id: 'resolve' });
                                             } else {
-                                                toast.error(`No se encontró "${folderName}". Usa el picker manual.`, { id: 'resolve' });
+                                                toast.error(`Could not find "${folderName}". Use the manual picker.`, { id: 'resolve' });
                                                 setShowDirPicker(true);
                                             }
                                         } catch (err: any) {
@@ -505,7 +505,7 @@ export const OnboardingWizard: React.FC = () => {
                                     <FolderOpen className="w-4 h-4" /> Buscar
                                 </button>
                             </div>
-                            <p className="text-xs text-zinc-500 mt-2">Usa el selector nativo o escribe la ruta. Los videos deben estar aquí o en subcarpetas.</p>
+                            <p className="text-xs text-zinc-500 mt-2">Use the native picker or type the path. Videos must live here or in subfolders.</p>
 
                             {/* Fallback: server-side picker */}
                             <DirectoryPicker
@@ -520,10 +520,10 @@ export const OnboardingWizard: React.FC = () => {
 
                     <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
                         <button onClick={handleNext} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">
-                            Saltar (Subiré manuales)
+                            Skip (I'll upload manually)
                         </button>
                         <button onClick={handleNext} disabled={!formData.podcast_name} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all disabled:opacity-50">
-                            Siguiente <ArrowRight className="w-4 h-4" />
+                             Next <ArrowRight className="w-4 h-4" />
                         </button>
                     </div>
                 </div>
@@ -533,13 +533,13 @@ export const OnboardingWizard: React.FC = () => {
             {step === 2 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
-                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Conozcámonos un poco</h1>
-                        <p className="text-zinc-400 mt-2 text-lg">Esta información afina los algoritmos de recomendación de Azelia para tu nicho específico.</p>
+                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Let's get to know you</h1>
+                        <p className="text-zinc-400 mt-2 text-lg">This info tunes Azelia's recommendation algorithms to your specific niche.</p>
                     </div>
 
                     <div className="space-y-6 mt-6">
                         <div>
-                            <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-3"><User className="w-4 h-4 text-brand-400" /> ¿Cuál es tu rol principal?</label>
+                            <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-3"><User className="w-4 h-4 text-brand-400" /> What's your main role??</label>
                             <div className="grid grid-cols-2 gap-3">
                                 {ROLES.map(r => (
                                     <button
@@ -554,7 +554,7 @@ export const OnboardingWizard: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-3"><Target className="w-4 h-4 text-brand-400" /> ¿Cuál es tu objetivo?</label>
+                            <label className="flex items-center gap-2 text-sm font-medium text-zinc-300 mb-3"><Target className="w-4 h-4 text-brand-400" /> What's your goal??</label>
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                                 {GOALS.map(g => (
                                     <button
@@ -569,19 +569,19 @@ export const OnboardingWizard: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Nicho del Contenido</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Content Niche</label>
                             <select
                                 value={profile.content_niche}
                                 onChange={(e) => setProfile({ ...profile, content_niche: e.target.value })}
                                 className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none focus:border-brand-500 outline-none"
                             >
-                                <option value="" disabled>Selecciona un nicho principal...</option>
+                                <option value="" disabled>Select a main niche…</option>
                                 {NICHES.map(n => <option key={n} value={n} className="bg-zinc-900">{n}</option>)}
                             </select>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Región Principal</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Main Region</label>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                                 {REGIONS.map(r => (
                                     <button
@@ -596,7 +596,7 @@ export const OnboardingWizard: React.FC = () => {
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Formato de Episodio</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Episode Format</label>
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                                 {FORMATS.map(f => (
                                     <button
@@ -613,10 +613,10 @@ export const OnboardingWizard: React.FC = () => {
 
                     <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
                         <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
-                            <ArrowLeft className="w-4 h-4" /> Atrás
+                            <ArrowLeft className="w-4 h-4" /> Back
                         </button>
                         <button onClick={handleNext} disabled={!profile.user_role || !profile.primary_goal || !profile.content_niche} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all disabled:opacity-50">
-                            Siguiente <ArrowRight className="w-4 h-4" />
+                             Next <ArrowRight className="w-4 h-4" />
                         </button>
                     </div>
                 </div>
@@ -627,7 +627,7 @@ export const OnboardingWizard: React.FC = () => {
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Expande el Cerebro</h1>
-                        <p className="text-zinc-400 mt-2 text-lg">Conecta tus redes y únete al motor colectivo que hace que los clips sean más virales cada día.</p>
+                        <p className="text-zinc-400 mt-2 text-lg">Connect your channels and join the collective engine that makes clips more viral every day.</p>
                     </div>
 
                     <div className="space-y-6 mt-6">
@@ -636,15 +636,15 @@ export const OnboardingWizard: React.FC = () => {
                             <div className="flex items-start justify-between">
                                 <div className="space-y-1 pr-6">
                                     <h3 className="text-white font-medium flex items-center gap-2">
-                                        <BarChart className="w-4 h-4 text-brand-400" /> Inteligencia Colectiva (Telemetría)
+                                        <BarChart className="w-4 h-4 text-brand-400" /> Collective Intelligence (Telemetry)
                                     </h3>
                                     <p className="text-sm text-zinc-400 leading-relaxed">
-                                        ¿Quieres que tus clips sean cada vez más virales? Azelia aprende de la comunidad. Al unirte, envías datos anónimos sobre métricas de retención y qué hooks logran más vistas en tu nicho.
+                                        Want your clips to trend higher over time? Azelia learns from the community. By opting in, you contribute anonymous data on retention metrics and which hooks earn more views in your niche.
                                         <br /><br />
-                                        <strong className="text-brand-300">¿Por qué activarlo?</strong><br />
+                                        <strong className="text-brand-300">Why enable it??</strong><br />
                                         • Mejoras el algoritmo de tu propio nicho.<br />
                                         • Obtienes prioridad en nuevas funciones "Beta".<br />
-                                        • NUNCA enviamos tus videos, audios ni guiones. Solo números y clasificaciones.
+                                        • We NEVER send your videos, audio, or scripts — only numbers and classifications.
                                     </p>
                                 </div>
                                 <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
@@ -674,7 +674,7 @@ export const OnboardingWizard: React.FC = () => {
                                                 className="px-3 py-1.5 bg-brand-500/20 hover:bg-brand-500/40 border border-brand-500/50 text-brand-300 text-xs rounded-lg transition-colors flex items-center gap-1.5 font-medium"
                                             >
                                                 <Sparkles className="w-3.5 h-3.5" />
-                                                Sync Histórico
+                                                Historical Sync
                                             </button>
                                         ) : (
                                             <div className="px-3 py-1.5 bg-zinc-800/50 border border-white/10 text-zinc-400 text-xs rounded-lg flex items-center gap-1.5 font-medium">
@@ -724,7 +724,7 @@ export const OnboardingWizard: React.FC = () => {
                                     <svg className="w-5 h-5 ml-0.5 text-zinc-200" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" /></svg>
                                     <div>
                                         <div className="text-zinc-200 font-medium text-sm">TikTok Account</div>
-                                        <div className="text-zinc-500 text-xs mt-0.5">Próximamente</div>
+                                        <div className="text-zinc-500 text-xs mt-0.5">Coming soon</div>
                                     </div>
                                 </button>
                             </div>
@@ -733,10 +733,10 @@ export const OnboardingWizard: React.FC = () => {
 
                     <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
                         <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
-                            <ArrowLeft className="w-4 h-4" /> Atrás
+                            <ArrowLeft className="w-4 h-4" /> Back
                         </button>
                         <button onClick={handleNext} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all">
-                            Siguiente <ArrowRight className="w-4 h-4" />
+                             Next <ArrowRight className="w-4 h-4" />
                         </button>
                     </div>
                 </div>
@@ -747,14 +747,14 @@ export const OnboardingWizard: React.FC = () => {
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Conecta tu Inteligencia</h1>
-                        <p className="text-zinc-400 mt-2">Para mantener tus datos privados, Azelia filtra los videos orquestando IAs a través de llaves API locales.</p>
+                        <p className="text-zinc-400 mt-2">To keep your data private, Azelia filters videos by orchestrating AIs through your own local API keys.</p>
                     </div>
 
                     <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-4 flex gap-3 items-start">
                         <Shield className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
                         <div className="text-sm text-amber-200/80 leading-relaxed">
-                            <strong className="text-amber-400 block mb-1">Las APIs gratuitas colapsarán.</strong>
-                            Extraer clips de un podcast de 1 hora requiere enviar más de 500,000 tokens de contexto a velocidad masiva. Los "Free Tiers" de Groq o Anthropic se bloquean a la mitad. Configura llaves API pagas para evitar fallos.
+                            <strong className="text-amber-400 block mb-1">Free tiers will collapse.</strong>
+                            Extracting clips from a 1-hour podcast pushes over 500,000 context tokens at high throughput. Groq and Anthropic free tiers throttle mid-run. Use paid API keys to avoid failures.
                         </div>
                     </div>
 
@@ -771,7 +771,7 @@ export const OnboardingWizard: React.FC = () => {
                                     <div className="px-5 pt-4 pb-3 flex items-center gap-3">
                                         <div className="flex-1">
                                             <label className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">
-                                                {isExtra ? `Proveedor de respaldo ${slotIdx}` : 'Proveedor principal'}
+                                                {isExtra ? `Proveedor de respaldo ${slotIdx}` : 'Primary provider'}
                                             </label>
                                             <select
                                                 value={selectedId}
@@ -878,7 +878,7 @@ export const OnboardingWizard: React.FC = () => {
                             </button>
                         )}
                         <p className="text-xs text-zinc-600 text-center">
-                            El modelo se detecta automáticamente al verificar tu key. Cámbialo en <span className="text-zinc-500">Configuración → IA</span>.
+                            The model is detected automatically when your key is verified. Change it in <span className="text-zinc-500">Settings → AI</span>.
                         </p>
                     </div>
 
@@ -897,13 +897,13 @@ export const OnboardingWizard: React.FC = () => {
                                 </div>
                             </div>
                             <span className="text-sm text-zinc-400 group-hover:text-zinc-300 transition-colors cursor-pointer leading-tight">
-                                He leído y acepto los <a href="https://azeliaclips.com/terms" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Términos y Condiciones</a> y la <a href="https://azeliaclips.com/privacy" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Política de Privacidad</a> de Azelia Clips.
+                                I have read and accept the <a href="https://azeliaclips.com/terms" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Terms and Conditions</a> y la <a href="https://azeliaclips.com/privacy" className="text-brand-400 hover:text-brand-300 underline underline-offset-2">Privacy Policy</a> de Azelia Clips.
                             </span>
                         </label>
 
                         <div className="flex items-center justify-between">
                             <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
-                                <ArrowLeft className="w-4 h-4" /> Atrás
+                                <ArrowLeft className="w-4 h-4" /> Back
                             </button>
                             <div className="flex flex-col items-end gap-1">
                                 <button
@@ -915,7 +915,7 @@ export const OnboardingWizard: React.FC = () => {
                                 </button>
                                 {(!hasAnyKey || !acceptedTerms) && (
                                     <span className="text-xs text-red-400/80 mr-1">
-                                        {!hasAnyKey ? "Ingresa una API Key válida" : "Acepta los términos para continuar"}
+                                        {!hasAnyKey ? "Enter a valid API key" : "Accept the terms to continue"}
                                     </span>
                                 )}
                             </div>
