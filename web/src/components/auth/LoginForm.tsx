@@ -17,7 +17,7 @@ export const LoginForm: React.FC = () => {
 
         // Mandatory consent on signup — blocks account creation without explicit accept.
         if (isSignUp && !acceptedTerms) {
-            toast.error('Debes aceptar los Términos y la Política de Privacidad para crear una cuenta.');
+            toast.error('You must accept the Terms and Privacy Policy to create an account.');
             return;
         }
 
@@ -195,15 +195,15 @@ export const LoginForm: React.FC = () => {
                                 required
                             />
                             <span className="text-xs text-zinc-400 leading-relaxed">
-                                Acepto los{' '}
+                                I accept the{' '}
                                 <a href="https://azelia.ai/terms" target="_blank" rel="noopener" className="text-white underline decoration-dotted hover:decoration-solid">
-                                    Términos y Condiciones
+                                    Terms and Conditions
                                 </a>
                                 {' '}y la{' '}
                                 <a href="https://azelia.ai/privacy" target="_blank" rel="noopener" className="text-white underline decoration-dotted hover:decoration-solid">
-                                    Política de Privacidad
+                                    Privacy Policy
                                 </a>
-                                {' '}de Azelia.
+                                {' '}of Azelia.
                             </span>
                         </label>
                     )}

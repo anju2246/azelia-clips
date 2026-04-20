@@ -25,6 +25,7 @@ const JOB_STORAGE_KEY = 'azelia_active_job_id';
 
 export const DashboardController: React.FC = () => {
     const [userTier, setUserTier] = useState<string | null>(null);
+    const [youtubeConnected, setYoutubeConnected] = useState<boolean>(false);
     const [activeJobId, setActiveJobId] = useState<string | null>(() => {
         // Recover active job from localStorage on mount
         if (typeof window !== 'undefined') {
@@ -43,6 +44,15 @@ export const DashboardController: React.FC = () => {
         fetchWithAuth('/upgrade/status')
             .then(r => r.ok ? r.json() : null)
             .then(d => { if (d) setUserTier(d.tier); })
+            .catch(() => {});
+    }, []);
+
+    // Fetch YouTube connection status so the Pro card doesn't nudge
+    // users who already connected during onboarding.
+    useEffect(() => {
+        fetchWithAuth('/analytics/youtube/status')
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.connected) setYoutubeConnected(true); })
             .catch(() => {});
     }, []);
 
@@ -154,7 +164,11 @@ export const DashboardController: React.FC = () => {
     return (
         <div className="flex flex-col gap-12">
             {userTier === 'free' && (
-                <ProUpgradeCard onActivated={() => setUserTier('pro')} />
+                <ProUpgradeCard
+                    onActivated={() => setUserTier('pro')}
+                    youtubeConnected={youtubeConnected}
+                    onYouTubeConnected={() => setYoutubeConnected(true)}
+                />
             )}
             <YouTubeNudge />
             <LibraryView onProcessEpisode={handleProcessEpisode} />
