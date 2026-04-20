@@ -124,10 +124,10 @@ async def toggle_telemetry_consent(
             target=_backfill_sqlite_history, args=(user.id,), daemon=True, name=f"telemetry_backfill_{user.id}"
         ).start()
 
-    action = "activada" if body.enabled else "desactivada"
+    action = "enabled" if body.enabled else "disabled"
     return ConsentResponse(
         telemetry_enabled=body.enabled,
-        message=f"Telemetría {action}. {'Tus métricas anónimas contribuirán al IC colectivo.' if body.enabled else 'No se enviarán datos.'}",
+        message=f"Telemetry {action}. {'Your anonymous metrics will contribute to the collective IC.' if body.enabled else 'No data will be sent.'}",
     )
 
 

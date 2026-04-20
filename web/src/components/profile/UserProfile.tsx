@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { User, Mail, Camera, Shield, HardDrive, Film, BarChart3, Calendar, ExternalLink, Loader2, LogOut, CreditCard, Sparkles } from 'lucide-react';
+import { User, Mail, Camera, Shield, HardDrive, Film, BarChart3, Calendar, ExternalLink, Loader2, LogOut, CreditCard, Sparkles, Gem, Trophy, Rocket, Award } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { supabase } from '../../lib/supabase';
 
@@ -10,6 +10,9 @@ export const UserProfile: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isSaving, setIsSaving] = useState(false);
     const [ytStatus, setYtStatus] = useState<{ connected: boolean; channel_name: string | null }>({ connected: false, channel_name: null });
+    const [tierInfo, setTierInfo] = useState<{ tier: string; pro_expires_at: string | null }>({ tier: 'free', pro_expires_at: null });
+    const [badges, setBadges] = useState<Array<{badge_id: string; name: string; description: string | null; icon: string | null; color: string | null; rarity: string; awarded_at: string | null}>>([]);
+    const [isDeletingAccount, setIsDeletingAccount] = useState(false);
 
     useEffect(() => {
         loadUser();
@@ -33,18 +36,29 @@ export const UserProfile: React.FC = () => {
             setIsLoading(false);
         }
 
-        // Check YouTube status
+        // Check YouTube status + tier in parallel
         try {
             const { data } = await supabase.auth.getSession();
             const token = data?.session?.access_token;
             if (token) {
                 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
-                const res = await fetch(`${API_BASE}/analytics/youtube/status`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const status = await res.json();
+                const headers = { Authorization: `Bearer ${token}` };
+                const [ytRes, tierRes, badgesRes] = await Promise.all([
+                    fetch(`${API_BASE}/analytics/youtube/status`, { headers }),
+                    fetch(`${API_BASE}/upgrade/status`, { headers }),
+                    fetch(`${API_BASE}/auth/badges`, { headers }),
+                ]);
+                if (ytRes.ok) {
+                    const status = await ytRes.json();
                     setYtStatus({ connected: status.connected, channel_name: status.channel_name });
+                }
+                if (tierRes.ok) {
+                    const t = await tierRes.json();
+                    setTierInfo({ tier: t.tier || 'free', pro_expires_at: t.pro_expires_at || null });
+                }
+                if (badgesRes.ok) {
+                    const b = await badgesRes.json();
+                    if (Array.isArray(b)) setBadges(b);
                 }
             }
         } catch (e) { /* silently fail */ }
@@ -75,12 +89,64 @@ export const UserProfile: React.FC = () => {
         }
     };
 
+    const handleDeleteAccount = async () => {
+        const confirmText = 'ELIMINAR';
+        const typed = window.prompt(
+            `This will PERMANENTLY delete your account, profile, connections, badges, and your server-side API key.\n` +
+            `Aggregated telemetry (already anonymous) cannot be pulled back because it has no link to your identity.\n\n` +
+            `Type "${confirmText}" to confirm:`
+        );
+        if (typed !== confirmText) {
+            toast('Cancelled.', { icon: '✋' });
+            return;
+        }
+        setIsDeletingAccount(true);
+        try {
+            const { data } = await supabase.auth.getSession();
+            const token = data?.session?.access_token;
+            if (!token) throw new Error('Invalid session');
+            const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+            const res = await fetch(`${API_BASE}/auth/account`, {
+                method: 'DELETE',
+                headers: { Authorization: `Bearer ${token}` },
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || `Error ${res.status}`);
+            }
+            toast.success('Account deleted.');
+            await supabase.auth.signOut();
+            window.location.href = '/';
+        } catch (err: any) {
+            toast.error(err.message || 'Could not delete the account');
+            setIsDeletingAccount(false);
+        }
+    };
+
     const email = user?.email || '';
     const avatarUrl = user?.user_metadata?.avatar_url;
     const provider = user?.app_metadata?.provider || 'email';
     const createdAt = user?.created_at;
     const userRole = user?.user_metadata?.role || 'user'; // Try to get role from metadata or db
     const isFounder = userRole === 'founder' || userRole === 'super_admin';
+    const isPro = tierInfo.tier === 'pro';
+    const proExpiresText = (() => {
+        if (!tierInfo.pro_expires_at) return null;
+        try {
+            const d = new Date(tierInfo.pro_expires_at);
+            return d.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' });
+        } catch { return null; }
+    })();
+
+    // Early Adopter: anyone who signed up before public launch (beta cutoff 2026-07-02).
+    // Displayed as a persistent identity badge — doesn't change even after beta ends.
+    const EARLY_ADOPTER_CUTOFF = new Date('2026-07-02T00:00:00Z').getTime();
+    const isEarlyAdopter = (() => {
+        if (!createdAt) return false;
+        try {
+            return new Date(createdAt).getTime() < EARLY_ADOPTER_CUTOFF;
+        } catch { return false; }
+    })();
 
     // Determine auth providers linked
     const identities = user?.identities || [];
@@ -146,7 +212,18 @@ export const UserProfile: React.FC = () => {
                         </div>
                     ) : (
                         <>
-                            <h3 className="text-2xl font-bold text-white">{displayName}</h3>
+                            <div className="flex items-center gap-2.5 justify-center sm:justify-start flex-wrap">
+                                <h3 className="text-2xl font-bold text-white">{displayName}</h3>
+                                {isEarlyAdopter && (
+                                    <span
+                                        title="Signed up during the beta. This badge is permanent."
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-gradient-to-r from-[#eb96ff]/15 to-[#0ea5e9]/15 border border-[#eb96ff]/30 text-[11px] font-mono uppercase tracking-widest text-[#eb96ff]"
+                                    >
+                                        <Gem className="w-3 h-3" />
+                                        Early Adopter
+                                    </span>
+                                )}
+                            </div>
                             <p className="text-zinc-400 flex items-center gap-2 justify-center sm:justify-start mt-1">
                                 <Mail className="w-4 h-4" /> {email}
                             </p>
@@ -213,6 +290,46 @@ export const UserProfile: React.FC = () => {
                             </div>
                         </div>
                     </div>
+                ) : isPro ? (
+                    <div className="bg-gradient-to-br from-brand-900/40 to-emerald-900/10 border border-brand-500/20 rounded-2xl p-6 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 w-64 h-64 bg-brand-500/10 blur-[80px] rounded-full pointer-events-none" />
+                        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
+                            <div className="flex items-start gap-4">
+                                <div className="w-12 h-12 bg-brand-500/20 rounded-xl flex items-center justify-center shrink-0">
+                                    <Sparkles className="w-6 h-6 text-brand-400" />
+                                </div>
+                                <div>
+                                    <div className="flex items-center gap-3 mb-1">
+                                        <h4 className="text-xl font-bold text-white">Azelia Pro — Beta</h4>
+                                        <span className="px-2.5 py-0.5 bg-brand-500 text-black text-xs font-bold rounded-full uppercase tracking-wider">Active</span>
+                                    </div>
+                                    <p className="text-zinc-400 text-sm">
+                                        Full access to the IC Cascade.
+                                    </p>
+                                </div>
+                            </div>
+                            <div className="text-left sm:text-right">
+                                <p className="text-2xl font-bold text-white mb-1">$0<span className="text-sm font-normal text-zinc-500"> /mo</span></p>
+                                {proExpiresText && (
+                                    <p className="text-xs text-brand-400">Hasta {proExpiresText}</p>
+                                )}
+                            </div>
+                        </div>
+                        <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+                            <div className="flex flex-col gap-1">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Storage</span>
+                                <span className="text-white font-medium text-sm">Local Processing</span>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Intelligence</span>
+                                <span className="text-white font-medium text-sm">IC Cascade + BYOK</span>
+                            </div>
+                            <div className="flex flex-col gap-1 sm:text-right">
+                                <span className="text-zinc-400 text-xs uppercase tracking-wider">Support</span>
+                                <span className="text-white font-medium text-sm">Email Priority</span>
+                            </div>
+                        </div>
+                    </div>
                 ) : (
                     <div className="bg-zinc-900/40 border border-white/5 rounded-2xl p-6 relative overflow-hidden">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6 relative z-10">
@@ -251,6 +368,60 @@ export const UserProfile: React.FC = () => {
                     </div>
                 )}
             </section>
+
+            {/* Badges */}
+            {badges.length > 0 && (
+                <section className="mb-6">
+                    <h3 className="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">Badges</h3>
+                    <div className="bg-zinc-900/40 border border-white/5 rounded-2xl p-6">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                            {badges.map(b => {
+                                const Icon = (() => {
+                                    switch ((b.icon || '').toLowerCase()) {
+                                        case 'gem': return Gem;
+                                        case 'sparkles': return Sparkles;
+                                        case 'trophy': return Trophy;
+                                        case 'rocket': return Rocket;
+                                        default: return Award;
+                                    }
+                                })();
+                                const tint = b.color || '#eb96ff';
+                                const rarityLabel = b.rarity === 'legendary' ? 'Legendary'
+                                    : b.rarity === 'rare' ? 'Rare' : 'Common';
+                                return (
+                                    <div
+                                        key={b.badge_id}
+                                        title={b.description || ''}
+                                        className="rounded-xl border p-4 flex flex-col gap-2 bg-gradient-to-br from-zinc-900/50 to-zinc-900/10"
+                                        style={{ borderColor: `${tint}40` }}
+                                    >
+                                        <div className="flex items-center justify-between">
+                                            <div
+                                                className="w-9 h-9 rounded-lg flex items-center justify-center"
+                                                style={{ backgroundColor: `${tint}20` }}
+                                            >
+                                                <Icon className="w-5 h-5" style={{ color: tint }} />
+                                            </div>
+                                            <span
+                                                className="text-[10px] font-mono uppercase tracking-widest"
+                                                style={{ color: `${tint}cc` }}
+                                            >
+                                                {rarityLabel}
+                                            </span>
+                                        </div>
+                                        <div>
+                                            <p className="text-white font-semibold text-sm leading-tight">{b.name}</p>
+                                            {b.description && (
+                                                <p className="text-zinc-400 text-xs mt-1 leading-relaxed">{b.description}</p>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+                </section>
+            )}
 
             {/* Connected Accounts */}
             <section className="mb-6">
@@ -337,12 +508,19 @@ export const UserProfile: React.FC = () => {
                                 <HardDrive className="w-5 h-5 text-red-500" />
                             </div>
                             <div>
-                                <p className="text-red-400 font-medium text-sm">Clear All Generated Data</p>
-                                <p className="text-xs text-red-400/60">Removes all clips, jobs, and intelligence data. This cannot be undone.</p>
+                                <p className="text-red-400 font-medium text-sm">Delete Account</p>
+                                <p className="text-xs text-red-400/60">
+                                    Deletes your account, profile, connections, and badges. Irreversible — the
+                                    aggregated telemetry remains anonymous and cannot be pulled back individually.
+                                </p>
                             </div>
                         </div>
-                        <button className="px-5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-sm text-red-400 font-medium transition-colors whitespace-nowrap">
-                            Clear Data
+                        <button
+                            onClick={handleDeleteAccount}
+                            disabled={isDeletingAccount}
+                            className="px-5 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 rounded-xl text-sm text-red-400 font-medium transition-colors whitespace-nowrap disabled:opacity-50"
+                        >
+                            {isDeletingAccount ? 'Deleting…' : 'Delete Account'}
                         </button>
                     </div>
                 </div>
