@@ -364,6 +364,553 @@ async def get_youtube_status(user: User = Depends(require_auth)):
         return {"connected": False, "total_shorts": 0}
 
 
+# ─── Creator signals extraction (Ticket A) ──────────────────────────
+# Pulls top-performing shorts from local SQLite, sends to Sonnet for
+# pattern extraction, writes anonymous signals to the central IC Cascade
+# with source_type='creator_self' and cohort_hash tied to the user.
+
+_CREATOR_SIGNALS_PROMPT = """You are a podcast clip analyst. I'm giving you the titles and performance metrics of a creator's top-performing YouTube Shorts. Your job is to extract structural patterns the Ranker can use for future clips from this creator.
+
+For each short, infer:
+- hook_type: one of [question, bold_claim, story, data_point, cliffhanger, comparison, challenge, revelation, number_list, contradiction, other]
+- emotional_charge: one of [curious, outraged, inspired, humor, fear, surprise, neutral]
+- duration_bucket: one of [0-30s, 30-45s, 45-60s, 60s+]
+- has_cta: boolean
+- topic_tags: up to 3 concise topic tags, lowercase snake_case
+
+Then synthesize the TOP 5 recurring patterns across the whole batch. Each pattern is one aggregate row.
+
+Return JSON ONLY with this exact shape (no prose, no markdown fences):
+{
+  "patterns": [
+    {
+      "signal_type": "clip_hook" | "emotion_pattern" | "duration_pattern" | "topic_trend",
+      "hook_type"?: string,
+      "emotional_charge"?: string,
+      "duration_bucket"?: string,
+      "topic_tag"?: string,
+      "sample_size": number,
+      "performance_premium": number,
+      "confidence": number,
+      "pattern": object
+    }
+  ]
+}
+
+`performance_premium` = how much more views these clips got vs creator's median (0.0-5.0 range, 1.0=median, >1 is above).
+`confidence` = 0.0-1.0 based on how consistent the pattern is across the batch.
+`pattern` = the structural fields in a JSON object."""
+
+
+def _estimate_extraction_cost(num_shorts: int, anthropic_model: str = "claude-sonnet-4-6") -> dict:
+    """Rough cost estimate for extracting creator signals via Sonnet."""
+    # ~1.5k tokens per short title + stats, plus 4k prompt overhead.
+    input_tokens = num_shorts * 1500 + 4000
+    # Expected ~2500 output tokens for structured JSON with 5 patterns.
+    output_tokens = 2500
+    if "sonnet" in anthropic_model.lower():
+        cost = (input_tokens / 1_000_000) * 3.0 + (output_tokens / 1_000_000) * 15.0
+    elif "opus" in anthropic_model.lower():
+        cost = (input_tokens / 1_000_000) * 15.0 + (output_tokens / 1_000_000) * 75.0
+    else:
+        cost = (input_tokens / 1_000_000) * 1.0 + (output_tokens / 1_000_000) * 5.0
+    return {
+        "num_shorts": num_shorts,
+        "input_tokens_est": input_tokens,
+        "output_tokens_est": output_tokens,
+        "cost_usd_est": round(cost, 3),
+        "model": anthropic_model,
+    }
+
+
+def _get_user_creator_cohort(user_id: str) -> str | None:
+    """Reuse the telemetry cohort_hash so creator signals group with the
+    same user's telemetry events under one one-way identifier."""
+    try:
+        from packages.core.services.telemetry import _cohort_hash as _th
+        return _th(user_id)
+    except Exception:
+        return None
+
+
+@router.get("/analytics/youtube/extract-creator-signals/estimate")
+async def estimate_creator_signals_cost(user: User = Depends(require_auth)):
+    """Return the cost estimate BEFORE the user confirms the run.
+    Frontend shows this in the confirmation modal."""
+    conn = _get_yt_db()
+    cur = conn.execute(
+        "SELECT COUNT(*) FROM youtube_shorts WHERE user_id = ?",
+        (user.id,),
+    )
+    total = cur.fetchone()[0]
+    conn.close()
+
+    from packages.core.config import settings as app_settings
+    batch_size = min(30, total)
+    est = _estimate_extraction_cost(batch_size, app_settings.anthropic_model)
+    est["total_shorts_available"] = total
+    est["batch_size"] = batch_size
+    return est
+
+
+@router.post("/analytics/youtube/extract-creator-signals")
+async def extract_creator_signals(
+    body: dict = Body(default_factory=dict),
+    user: User = Depends(require_auth),
+):
+    """Extract structural patterns from this creator's top shorts and insert
+    them as anonymous signals (`source_type='creator_self'`, `cohort_hash`)
+    into the central IC Cascade. Feeds the Ranker for the user's future
+    pipeline runs plus every other creator in the same niche.
+
+    Body:
+      { "batch_size": 30, "confirmed": true }
+
+    Returns:
+      { status, signals_created, cost_est, cost_actual?, patterns_summary }
+    """
+    if not body.get("confirmed"):
+        raise HTTPException(status_code=400, detail="confirmed=true is required to run")
+
+    from packages.core.config import settings as app_settings
+    api_key = app_settings.anthropic_api_key
+    if not api_key or not api_key.startswith("sk-"):
+        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+
+    batch_size = max(5, min(int(body.get("batch_size") or 30), 50))
+
+    # 1. Pull top shorts by views from local SQLite
+    conn = _get_yt_db()
+    cur = conn.execute(
+        """
+        SELECT video_id, title, duration_seconds, view_count, like_count, comment_count
+        FROM youtube_shorts
+        WHERE user_id = ?
+        ORDER BY view_count DESC
+        LIMIT ?
+        """,
+        (user.id, batch_size),
+    )
+    rows = cur.fetchall()
+    conn.close()
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No YouTube shorts synced yet. Connect YouTube first.")
+
+    shorts_payload = [
+        {
+            "title": r[1],
+            "duration_seconds": r[2],
+            "view_count": r[3],
+            "like_count": r[4],
+            "comment_count": r[5],
+        }
+        for r in rows
+    ]
+
+    # 2. Call Sonnet
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=api_key)
+        user_content = (
+            _CREATOR_SIGNALS_PROMPT
+            + "\n\nSHORTS BATCH:\n"
+            + "\n".join(
+                f"{i+1}. \"{s['title']}\" · dur={s['duration_seconds']}s · views={s['view_count']} · likes={s['like_count']}"
+                for i, s in enumerate(shorts_payload)
+            )
+        )
+        resp = client.messages.create(
+            model=app_settings.anthropic_model or "claude-sonnet-4-6",
+            max_tokens=3000,
+            messages=[{"role": "user", "content": user_content}],
+        )
+        raw = resp.content[0].text if resp.content else ""
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Anthropic call failed: {type(e).__name__}: {e}")
+
+    # 3. Parse the JSON reply
+    import json as _json, re as _re
+    cleaned = _re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=_re.MULTILINE).strip()
+    try:
+        parsed = _json.loads(cleaned)
+        patterns = parsed.get("patterns", [])
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Sonnet returned invalid JSON: {e}")
+
+    if not isinstance(patterns, list) or not patterns:
+        raise HTTPException(status_code=502, detail="No patterns returned by Sonnet")
+
+    # 4. Build signal rows and insert via service role
+    from datetime import datetime, timezone
+    now = datetime.now(timezone.utc)
+    year, week, _ = now.isocalendar()
+    period = f"{year}-W{week:02d}"
+
+    cohort = _get_user_creator_cohort(user.id) or ""
+
+    # Resolve region/language/category from user's profile
+    profile_region = None
+    profile_language = "en"
+    profile_category = None
+    try:
+        svc_key = getattr(app_settings, "supabase_service_role_key", "") or app_settings.supabase_key
+        import httpx as _httpx
+        pr = _httpx.get(
+            f"{app_settings.supabase_url}/rest/v1/profiles",
+            params={"id": f"eq.{user.id}", "select": "preferences,content_niche"},
+            headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+            timeout=5,
+        )
+        if pr.status_code == 200 and pr.json():
+            p = pr.json()[0]
+            prefs = p.get("preferences") or {}
+            profile_region = prefs.get("region")
+            profile_category = (p.get("content_niche") or "").lower().replace(" & ", "_").replace(" ", "_")[:40] or None
+    except Exception:
+        pass
+
+    rows_to_insert = []
+    for pat in patterns:
+        sig_type = pat.get("signal_type", "clip_hook")
+        pattern_obj = pat.get("pattern") or {}
+        if "hook_type" in pat and "hook_type" not in pattern_obj:
+            pattern_obj["hook_type"] = pat["hook_type"]
+        if "emotional_charge" in pat and "emotional_charge" not in pattern_obj:
+            pattern_obj["emotional_charge"] = pat["emotional_charge"]
+        if "topic_tag" in pat and "topic" not in pattern_obj:
+            pattern_obj["topic"] = pat["topic_tag"]
+
+        rows_to_insert.append({
+            "signal_type": sig_type,
+            "utilities": ["clips"],
+            "region": profile_region,
+            "language": profile_language,
+            "category": profile_category,
+            "platform": "youtube",
+            "duration_bucket": pat.get("duration_bucket"),
+            "pattern": pattern_obj,
+            "metric_value": float(pat.get("performance_premium") or 1.0),
+            "metric_type": "performance_premium",
+            "performance_premium": float(pat.get("performance_premium") or 1.0),
+            "sample_size": int(pat.get("sample_size") or batch_size),
+            "confidence": float(pat.get("confidence") or 0.5),
+            "source_type": "creator_self",
+            "cohort_hash": cohort,
+            "is_active": True,
+            "period": period,
+        })
+
+    try:
+        svc_key = getattr(app_settings, "supabase_service_role_key", "") or ""
+        if not svc_key:
+            raise HTTPException(status_code=500, detail="Service role key missing")
+        import httpx as _httpx2
+        ir = _httpx2.post(
+            f"{app_settings.supabase_url}/rest/v1/ic_signals",
+            json=rows_to_insert,
+            headers={
+                "apikey": svc_key,
+                "Authorization": f"Bearer {svc_key}",
+                "Content-Type": "application/json",
+                "Prefer": "return=minimal",
+            },
+            timeout=15,
+        )
+        if ir.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"Insert failed: {ir.status_code} {ir.text[:200]}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Insert error: {e}")
+
+    # 5. Estimated vs actual usage
+    usage = getattr(resp, "usage", None)
+    actual_cost = None
+    if usage:
+        in_t = getattr(usage, "input_tokens", 0) or 0
+        out_t = getattr(usage, "output_tokens", 0) or 0
+        actual_cost = round((in_t / 1_000_000) * 3.0 + (out_t / 1_000_000) * 15.0, 4)
+
+    return {
+        "status": "complete",
+        "signals_created": len(rows_to_insert),
+        "batch_size": batch_size,
+        "cost_est": _estimate_extraction_cost(batch_size, app_settings.anthropic_model),
+        "cost_actual_usd": actual_cost,
+        "patterns_summary": [
+            {k: v for k, v in pat.items() if k in ("signal_type", "hook_type", "emotional_charge", "duration_bucket", "topic_tag", "confidence")}
+            for pat in patterns
+        ],
+    }
+
+
+# ─── Ticket C — Deep Calibration (historical episodes) ──────────────
+# Scans the user's podcast_dir for existing transcript.json files and
+# sends each to Sonnet for deep pattern extraction. Higher signal quality
+# than shorts-only (Ticket A) because full transcripts carry structural
+# arcs, not just titles. More expensive by an order of magnitude.
+
+_DEEP_CALIBRATION_PROMPT = """You are a podcast intelligence analyst.
+
+Given a full episode transcript below, extract the structural patterns that make this creator's work distinctive. Focus on what a clip-ranking system should know to surface their best moments.
+
+Return JSON ONLY (no prose, no markdown fences):
+{
+  "episode_fingerprint": {
+    "dominant_topics": [3 lowercase tags],
+    "emotional_arc": [3-5 segment labels like "curiosity,outrage,inspiration"],
+    "speaking_style": "one of: interview|monologue|dialog|debate|mixed",
+    "pacing": "one of: fast|medium|slow",
+    "average_hook_interval_s": number
+  },
+  "signals": [
+    {
+      "signal_type": "clip_hook" | "emotion_pattern" | "duration_pattern" | "topic_trend" | "temporal_pattern",
+      "pattern": object,
+      "sample_size": number,
+      "performance_premium": number,
+      "confidence": number,
+      "duration_bucket": "0-30s" | "30-45s" | "45-60s" | "60s+"
+    }
+  ]
+}
+
+Limit to the TOP 8 signals. Each should capture a *pattern* (not a one-off moment): e.g. "opens with rhetorical question", "shifts to bold claim at 30-45s", "story → data → CTA sequence"."""
+
+
+def _enumerate_local_transcripts(podcast_dir: str) -> list[dict]:
+    """Walk podcast_dir looking for transcript.json files adjacent to videos.
+    Returns list of {episode_id, transcript_path, size_bytes}."""
+    out: list[dict] = []
+    try:
+        from pathlib import Path as _P
+        root = _P(os.path.expanduser(podcast_dir))
+        if not root.exists():
+            return out
+        for tp in root.rglob("transcript.json"):
+            try:
+                out.append({
+                    "episode_id": tp.parent.name,
+                    "transcript_path": str(tp),
+                    "size_bytes": tp.stat().st_size,
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return out
+
+
+def _estimate_transcript_tokens(size_bytes: int) -> int:
+    """Rough: 1 token ≈ 3.5 bytes in English/Spanish mix. JSON overhead ~15%."""
+    return max(500, int(size_bytes / 4.0))
+
+
+@router.get("/analytics/episodes/deep-calibration/estimate")
+async def estimate_deep_calibration_cost(user: User = Depends(require_auth)):
+    """Scan the user's podcast_dir and return how many transcripts exist
+    plus the total cost estimate for a full deep-calibration pass."""
+    from packages.core.config import settings as app_settings
+    podcast_dir = os.environ.get("PODCAST_DIR") or getattr(app_settings, "podcast_dir", "")
+    if not podcast_dir:
+        return {
+            "available_episodes": 0,
+            "podcast_dir": None,
+            "note": "No podcast_dir configured in .env",
+        }
+
+    transcripts = _enumerate_local_transcripts(podcast_dir)
+    if not transcripts:
+        return {
+            "available_episodes": 0,
+            "podcast_dir": podcast_dir,
+            "note": "No transcript.json files found. Process some episodes first.",
+        }
+
+    total_input = sum(_estimate_transcript_tokens(t["size_bytes"]) for t in transcripts)
+    # ~1500 output tokens per episode
+    total_output = len(transcripts) * 1500
+    # Sonnet 4.6 pricing
+    cost = (total_input / 1_000_000) * 3.0 + (total_output / 1_000_000) * 15.0
+
+    return {
+        "available_episodes": len(transcripts),
+        "podcast_dir": podcast_dir,
+        "input_tokens_est": total_input,
+        "output_tokens_est": total_output,
+        "cost_usd_est": round(cost, 2),
+        "per_episode_avg_usd": round(cost / len(transcripts), 3) if transcripts else 0,
+        "model": app_settings.anthropic_model,
+    }
+
+
+@router.post("/analytics/episodes/deep-calibration")
+async def run_deep_calibration(
+    body: dict = Body(default_factory=dict),
+    user: User = Depends(require_auth),
+):
+    """Run deep calibration in the background. Returns immediately with a
+    job_id; use /analytics/episodes/deep-calibration/status/{job_id} to poll.
+    Body: {confirmed: true, max_episodes?: 20}
+    """
+    if not body.get("confirmed"):
+        raise HTTPException(status_code=400, detail="confirmed=true is required")
+
+    from packages.core.config import settings as app_settings
+    podcast_dir = os.environ.get("PODCAST_DIR") or getattr(app_settings, "podcast_dir", "")
+    if not podcast_dir:
+        raise HTTPException(status_code=400, detail="No podcast_dir configured")
+    if not app_settings.anthropic_api_key or not app_settings.anthropic_api_key.startswith("sk-"):
+        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+
+    transcripts = _enumerate_local_transcripts(podcast_dir)
+    max_eps = int(body.get("max_episodes") or 20)
+    target = transcripts[:max_eps]
+    if not target:
+        raise HTTPException(status_code=400, detail="No transcripts to analyze")
+
+    import uuid as _uuid
+    job_id = str(_uuid.uuid4())
+
+    # In-memory progress tracker (process-lifetime only — OK for this use case)
+    if not hasattr(run_deep_calibration, "_jobs"):
+        run_deep_calibration._jobs = {}  # type: ignore
+    run_deep_calibration._jobs[job_id] = {  # type: ignore
+        "status": "running",
+        "total": len(target),
+        "processed": 0,
+        "signals_created": 0,
+        "errors": [],
+        "cost_actual_usd": 0.0,
+    }
+
+    import asyncio as _asyncio
+    _asyncio.create_task(_deep_calibration_worker(job_id, target, user.id, app_settings))
+
+    return {"job_id": job_id, "episodes_queued": len(target)}
+
+
+async def _deep_calibration_worker(job_id: str, transcripts: list[dict], user_id: str, app_settings) -> None:
+    """Background task. Processes each transcript, extracts signals, inserts."""
+    jobs = run_deep_calibration._jobs  # type: ignore
+    from anthropic import Anthropic
+    import json as _json, re as _re, httpx as _httpx
+    from datetime import datetime, timezone
+
+    client = Anthropic(api_key=app_settings.anthropic_api_key)
+    svc_key = getattr(app_settings, "supabase_service_role_key", "") or ""
+    if not svc_key:
+        jobs[job_id]["status"] = "failed"
+        jobs[job_id]["errors"].append("SUPABASE_SERVICE_ROLE_KEY missing")
+        return
+
+    cohort = _get_user_creator_cohort(user_id) or ""
+    now = datetime.now(timezone.utc)
+    year, week, _ = now.isocalendar()
+    period = f"{year}-W{week:02d}"
+
+    # Resolve profile fields once
+    profile_region = None
+    profile_language = "en"
+    profile_category = None
+    try:
+        pr = _httpx.get(
+            f"{app_settings.supabase_url}/rest/v1/profiles",
+            params={"id": f"eq.{user_id}", "select": "preferences,content_niche"},
+            headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+            timeout=5,
+        )
+        if pr.status_code == 200 and pr.json():
+            p = pr.json()[0]
+            prefs = p.get("preferences") or {}
+            profile_region = prefs.get("region")
+            profile_category = (p.get("content_niche") or "").lower().replace(" & ", "_").replace(" ", "_")[:40] or None
+    except Exception:
+        pass
+
+    total_cost = 0.0
+
+    for t in transcripts:
+        try:
+            with open(t["transcript_path"], "r") as f:
+                transcript_json = f.read()
+            # Cap transcript bytes to keep token cost predictable
+            if len(transcript_json) > 80_000:
+                transcript_json = transcript_json[:80_000] + "\n[TRUNCATED]"
+
+            resp = client.messages.create(
+                model=app_settings.anthropic_model or "claude-sonnet-4-6",
+                max_tokens=2000,
+                messages=[{"role": "user", "content": _DEEP_CALIBRATION_PROMPT + "\n\nTRANSCRIPT:\n" + transcript_json}],
+            )
+            raw = resp.content[0].text if resp.content else ""
+            cleaned = _re.sub(r"^```(?:json)?|```$", "", raw.strip(), flags=_re.MULTILINE).strip()
+            parsed = _json.loads(cleaned)
+
+            usage = getattr(resp, "usage", None)
+            if usage:
+                total_cost += ((getattr(usage, "input_tokens", 0) or 0) / 1_000_000) * 3.0
+                total_cost += ((getattr(usage, "output_tokens", 0) or 0) / 1_000_000) * 15.0
+
+            rows = []
+            for sig in parsed.get("signals", []):
+                rows.append({
+                    "signal_type": sig.get("signal_type", "clip_hook"),
+                    "utilities": ["clips"],
+                    "region": profile_region,
+                    "language": profile_language,
+                    "category": profile_category,
+                    "platform": "episodes",
+                    "duration_bucket": sig.get("duration_bucket"),
+                    "pattern": sig.get("pattern") or {},
+                    "metric_value": float(sig.get("performance_premium") or 1.0),
+                    "metric_type": "performance_premium",
+                    "performance_premium": float(sig.get("performance_premium") or 1.0),
+                    "sample_size": int(sig.get("sample_size") or 1),
+                    "confidence": float(sig.get("confidence") or 0.5),
+                    "source_type": "creator_deep",
+                    "cohort_hash": cohort,
+                    "is_active": True,
+                    "period": period,
+                })
+
+            if rows:
+                ir = _httpx.post(
+                    f"{app_settings.supabase_url}/rest/v1/ic_signals",
+                    json=rows,
+                    headers={
+                        "apikey": svc_key,
+                        "Authorization": f"Bearer {svc_key}",
+                        "Content-Type": "application/json",
+                        "Prefer": "return=minimal",
+                    },
+                    timeout=15,
+                )
+                if ir.status_code < 400:
+                    jobs[job_id]["signals_created"] += len(rows)
+                else:
+                    jobs[job_id]["errors"].append(f"{t['episode_id']}: insert {ir.status_code}")
+
+            jobs[job_id]["processed"] += 1
+            jobs[job_id]["cost_actual_usd"] = round(total_cost, 4)
+        except Exception as e:
+            jobs[job_id]["errors"].append(f"{t['episode_id']}: {type(e).__name__}: {str(e)[:100]}")
+            jobs[job_id]["processed"] += 1
+
+    jobs[job_id]["status"] = "complete"
+
+
+@router.get("/analytics/episodes/deep-calibration/status/{job_id}")
+async def get_deep_calibration_status(job_id: str, user: User = Depends(require_auth)):
+    """Poll the progress of a deep-calibration job."""
+    jobs = getattr(run_deep_calibration, "_jobs", {})
+    job = jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="job not found")
+    return job
+
+
 @router.get("/analytics/youtube/sync-status")
 async def get_youtube_sync_status(user: User = Depends(require_auth)):
     """Current YouTube sync state for this user — used by frontend to poll after OAuth.
