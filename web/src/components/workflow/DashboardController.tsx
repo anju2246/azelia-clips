@@ -5,6 +5,9 @@ import { LiveProcessingWidget } from './LiveProcessingWidget';
 import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
 import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
+import { CreatorSignalsCard } from '../upgrade/CreatorSignalsCard';
+import { DeepCalibrationCard } from '../upgrade/DeepCalibrationCard';
+import { CreditsStatusBanner } from './CreditsStatusBanner';
 import { ClipsApi, SettingsApi } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -163,12 +166,19 @@ export const DashboardController: React.FC = () => {
 
     return (
         <div className="flex flex-col gap-12">
+            <CreditsStatusBanner />
             {userTier === 'free' && (
                 <ProUpgradeCard
                     onActivated={() => setUserTier('pro')}
                     youtubeConnected={youtubeConnected}
                     onYouTubeConnected={() => setYoutubeConnected(true)}
                 />
+            )}
+            {userTier === 'pro' && youtubeConnected && (
+                <CreatorSignalsCard />
+            )}
+            {userTier === 'pro' && (
+                <DeepCalibrationCard />
             )}
             <YouTubeNudge />
             <LibraryView onProcessEpisode={handleProcessEpisode} />

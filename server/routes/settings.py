@@ -203,6 +203,77 @@ async def refresh_models(user: User = Depends(require_auth)):
     models = await model_registry.force_refresh()
     return {"data": [m.dict() for m in models]}
 
+
+# ─── Ticket B — API credits validation ────────────────────────────
+# Probe each configured provider with a minimal billable request so we
+# can warn the user up-front if their key has zero credits (instead of
+# silently failing halfway through a pipeline run).
+
+@router.get("/credits/status")
+async def get_credits_status(user: User = Depends(require_auth)):
+    """Live probe of each configured provider's billing state.
+
+    Returns, per provider: {ok: bool, reason: str|null, model_used: str|null}
+    Cost per probe is negligible (~$0.00001, 1-2 tokens in/out).
+    """
+    results: dict = {}
+
+    # Anthropic
+    if settings.anthropic_api_key and settings.anthropic_api_key.startswith("sk-ant-"):
+        try:
+            from anthropic import Anthropic
+            client = Anthropic(api_key=settings.anthropic_api_key)
+            client.messages.create(
+                model=settings.anthropic_model or "claude-haiku-4-5-20251001",
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+            results["anthropic"] = {"ok": True, "reason": None, "model_used": settings.anthropic_model}
+        except Exception as e:
+            msg = str(e).lower()
+            if "credit" in msg or "balance" in msg or "insufficient" in msg:
+                reason = "credit_balance_too_low"
+            elif "billing" in msg:
+                reason = "billing_not_active"
+            elif "authentication" in msg or "invalid" in msg or "401" in msg:
+                reason = "invalid_key"
+            elif "rate" in msg or "429" in msg:
+                reason = "rate_limited"
+            else:
+                reason = f"{type(e).__name__}"
+            results["anthropic"] = {"ok": False, "reason": reason, "model_used": None}
+    else:
+        results["anthropic"] = {"ok": None, "reason": "not_configured", "model_used": None}
+
+    # OpenAI
+    if settings.openai_api_key and settings.openai_api_key.startswith("sk-"):
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=settings.openai_api_key)
+            client.chat.completions.create(
+                model=settings.openai_model or "gpt-4o-mini",
+                max_tokens=1,
+                messages=[{"role": "user", "content": "hi"}],
+            )
+            results["openai"] = {"ok": True, "reason": None, "model_used": settings.openai_model}
+        except Exception as e:
+            msg = str(e).lower()
+            if "quota" in msg or "insufficient" in msg or "billing" in msg:
+                reason = "credit_balance_too_low"
+            elif "authentication" in msg or "invalid" in msg:
+                reason = "invalid_key"
+            elif "rate" in msg or "429" in msg:
+                reason = "rate_limited"
+            else:
+                reason = f"{type(e).__name__}"
+            results["openai"] = {"ok": False, "reason": reason, "model_used": None}
+    else:
+        results["openai"] = {"ok": None, "reason": "not_configured", "model_used": None}
+
+    # Summary flag — at least one provider works
+    any_ok = any(r.get("ok") is True for r in results.values())
+    return {"any_provider_ok": any_ok, "providers": results}
+
 @router.get("/browse")
 async def browse_directory(path: str = "~", user: User = Depends(require_auth)):
     """
