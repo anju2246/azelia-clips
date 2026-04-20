@@ -9,6 +9,7 @@ Rules:
   5. Source tagged as 'user_telemetry' for IC data origin tracking
 """
 
+import hashlib
 import threading
 import time
 from datetime import datetime, timezone
@@ -21,15 +22,61 @@ from packages.core.config import settings
 # while ensuring consent changes propagate quickly.
 _CONSENT_CACHE_TTL = 300
 
+# Cached cohort salt — fetched once from the central DB on first need.
+# The same value is used to hash user_id → cohort_hash so telemetry is
+# anonymous (GDPR / Habeas Data compliant) yet events from the same user
+# still group together for aggregate analysis.
+_cohort_salt: Optional[str] = None
+_cohort_salt_lock = threading.Lock()
+
 
 def _utc_now_iso() -> str:
     """Return current UTC timestamp as ISO string (Supabase-compatible)."""
     return datetime.now(timezone.utc).isoformat()
 
 
+def _resolve_cohort_salt() -> Optional[str]:
+    """One-shot fetch of the DB-side telemetry salt. Cached after first success."""
+    global _cohort_salt
+    if _cohort_salt is not None:
+        return _cohort_salt
+    with _cohort_salt_lock:
+        if _cohort_salt is not None:
+            return _cohort_salt
+        svc = getattr(settings, "supabase_service_role_key", "") or ""
+        url = getattr(settings, "supabase_url", "") or ""
+        if not (svc and url):
+            return None
+        try:
+            import httpx as _httpx
+            r = _httpx.get(
+                f"{url}/rest/v1/_telemetry_salt",
+                params={"select": "salt", "id": "eq.1"},
+                headers={"apikey": svc, "Authorization": f"Bearer {svc}"},
+                timeout=5,
+            )
+            if r.status_code == 200 and r.json():
+                _cohort_salt = r.json()[0].get("salt")
+                return _cohort_salt
+        except Exception:
+            pass
+        return None
+
+
+def _cohort_hash(user_id: str) -> Optional[str]:
+    """Map a user_id to a one-way cohort_hash. Returns None if salt unavailable
+    — caller must skip the telemetry write in that case to avoid leaking PII."""
+    if not user_id:
+        return None
+    salt = _resolve_cohort_salt()
+    if not salt:
+        return None
+    return hashlib.sha256((user_id + salt).encode()).hexdigest()[:12]
+
+
 class TelemetryEvent(BaseModel):
     event_type: str
-    user_id: str
+    cohort_hash: str
     source: str = "user_telemetry"
     metadata: Dict[str, Any]
 
@@ -179,9 +226,12 @@ class TelemetryService:
             self._normalize_hook_type(h) for h in (hook_types or [])
         ]
 
+        cohort = _cohort_hash(user_id)
+        if not cohort:
+            return
         event = TelemetryEvent(
             event_type="curation_run",
-            user_id=user_id,
+            cohort_hash=cohort,
             metadata={
                 "clips_generated": num_clips_found,
                 "avg_virality_score": round(avg_virality_score, 2),
@@ -244,9 +294,12 @@ class TelemetryService:
         if not self._is_user_consented(user_id):
             return
 
+        cohort = _cohort_hash(user_id)
+        if not cohort:
+            return
         event = TelemetryEvent(
             event_type="clip_signal",
-            user_id=user_id,
+            cohort_hash=cohort,
             metadata={
                 "predicted_score": round(predicted_score, 2),
                 "hook_type": self._normalize_hook_type(hook_type),
@@ -327,9 +380,12 @@ class TelemetryService:
         if not self._is_user_consented(user_id):
             return
 
+        cohort = _cohort_hash(user_id)
+        if not cohort:
+            return
         event = TelemetryEvent(
             event_type="youtube_clip_aggregate",
-            user_id=user_id,
+            cohort_hash=cohort,
             metadata={
                 "platform": "youtube",
                 "youtube_id": youtube_id,
@@ -358,7 +414,7 @@ class TelemetryService:
                     event.metadata["episode_format"] = final_format or "interview"
 
                 self.supabase.table("ic_user_telemetry").insert({
-                    "user_id": user_id,
+                    "cohort_hash": cohort,
                     "podcast_fingerprint": event.metadata.get("title_hash", "unknown_hash"),
                     "category": event.metadata.get("category"),
                     "episode_format": final_format or "interview",

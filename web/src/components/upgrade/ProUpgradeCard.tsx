@@ -40,7 +40,7 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
 
     const handleActivate = async () => {
         if (!acceptedTelemetry) {
-            toast.error('Debes aceptar el intercambio de telemetría para activar Pro.');
+            toast.error('You must accept the telemetry trade to activate Pro.');
             return;
         }
         setLoading(true);
@@ -53,28 +53,28 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
             });
             if (!tRes.ok) {
                 const err = await tRes.json().catch(() => ({}));
-                throw new Error(err.detail || 'No se pudo registrar el consentimiento de telemetría.');
+                throw new Error(err.detail || 'Could not record telemetry consent.');
             }
 
             const res = await fetchWithAuth('/upgrade/pro', { method: 'POST' });
             if (res.status === 410) {
-                toast.error('La beta gratuita ha finalizado. ¡Gracias por el interés!');
+                toast.error('The free beta has ended. Thanks for your interest!');
                 return;
             }
             if (!res.ok) {
                 const err = await res.json();
-                throw new Error(err.detail || 'Error activando Pro');
+                throw new Error(err.detail || 'Error activating Pro');
             }
 
             if (youtubeConnected) {
-                toast.success('¡Pro activado!');
+                toast.success('Pro activated!');
                 onActivated?.();
                 return;
             }
 
             setActivated(true);
         } catch (e: any) {
-            toast.error(e.message || 'No se pudo activar Pro');
+            toast.error(e.message || 'Could not activate Pro');
         } finally {
             setLoading(false);
         }
@@ -88,11 +88,11 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                 .replace('0.0.0.0', 'localhost');
             const resolvedRedirectUri = redirectUri ?? (baseOrigin + '/dashboard/intelligence');
             const res = await fetchWithAuth(`/auth/youtube/authorize?redirect_uri=${encodeURIComponent(resolvedRedirectUri)}`);
-            if (!res.ok) throw new Error('No se pudo iniciar la autorización de YouTube');
+            if (!res.ok) throw new Error('Could not start YouTube authorization');
             const { url } = await res.json();
             window.location.href = url;
         } catch (e: any) {
-            toast.error(e.message || 'Error conectando YouTube');
+            toast.error(e.message || 'Error connecting YouTube');
             setYtLoading(false);
         }
     };
@@ -106,18 +106,18 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                         <CheckCircle2 className="w-5 h-5 text-green-400" />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-white text-sm">¡Pro activado! 3 meses gratis</h3>
-                        <p className="text-xs text-green-400">Acceso completo al IC Cascade</p>
+                        <h3 className="font-semibold text-white text-sm">Pro activated — 3 free months</h3>
+                        <p className="text-xs text-green-400">Full access to the IC Cascade</p>
                     </div>
                 </div>
 
                 <div className="rounded-xl bg-zinc-800/80 border border-red-500/20 p-4 space-y-3">
                     <div className="flex items-center gap-2">
                         <Youtube className="w-4 h-4 text-red-400 shrink-0" />
-                        <p className="text-sm font-medium text-white">Potencia tu IC con YouTube Analytics</p>
+                        <p className="text-sm font-medium text-white">Power your IC with YouTube Analytics</p>
                     </div>
                     <p className="text-xs text-zinc-400 leading-relaxed">
-                        El IC Cascade cruza tus clips con el <span className="text-zinc-200 font-medium">rendimiento real de tu canal</span> — retención, CTR y patrones de tu audiencia. Sin ese historial, el análisis trabaja a ciegas.
+                        The IC Cascade cross-references your clips with the <span className="text-zinc-200 font-medium">real performance of your channel</span> — retention, CTR, and audience patterns. Without that history, the analysis runs blind.
                     </p>
                     <button
                         onClick={handleConnectYouTube}
@@ -125,7 +125,7 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                         className="w-full flex items-center justify-center gap-2 rounded-xl bg-red-600 hover:bg-red-500 disabled:opacity-60 text-white font-medium text-sm py-2.5 transition-colors"
                     >
                         {ytLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Youtube className="w-4 h-4" />}
-                        {ytLoading ? 'Redirigiendo...' : 'Conectar canal de YouTube'}
+                        {ytLoading ? 'Redirecting…' : 'Connect YouTube channel'}
                     </button>
                 </div>
 
@@ -134,7 +134,7 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                         onClick={() => onActivated?.()}
                         className="w-full flex items-center justify-center gap-1.5 text-xs text-zinc-500 hover:text-zinc-400 transition-colors py-1"
                     >
-                        Ir al dashboard sin conectar <ArrowRight className="w-3 h-3" />
+                        Go to dashboard without connecting <ArrowRight className="w-3 h-3" />
                     </button>
                 )}
             </div>
@@ -148,16 +148,16 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                     <Sparkles className="w-5 h-5 text-brand-400" />
                 </div>
                 <div>
-                    <h3 className="font-semibold text-white text-sm">Azelia Pro — Beta gratuita</h3>
-                    <p className="text-xs text-zinc-400">3 meses sin costo</p>
+                    <h3 className="font-semibold text-white text-sm">Azelia Pro — Free Beta</h3>
+                    <p className="text-xs text-zinc-400">3 months at no cost</p>
                 </div>
             </div>
 
             <ul className="space-y-2.5">
                 {[
-                    { icon: BarChart2, text: 'IC Cascade — señales de mercado en tiempo real' },
-                    { icon: Zap,       text: 'Patrones de hooks y duración de los top podcasts' },
-                    { icon: BarChart2, text: 'Comparativa de tu contenido vs. el mercado' },
+                    { icon: BarChart2, text: 'IC Cascade — market signals in real time' },
+                    { icon: Zap,       text: 'Hook and duration patterns from top podcasts' },
+                    { icon: BarChart2, text: 'Compare your content against the market' },
                 ].map(({ icon: Icon, text }) => (
                     <li key={text} className="flex items-start gap-2.5">
                         <Icon className="w-4 h-4 text-brand-400 mt-0.5 shrink-0" />
@@ -169,9 +169,9 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
             <div className="flex items-start gap-2.5 rounded-xl bg-zinc-800/60 border border-white/5 p-3.5">
                 <Shield className="w-4 h-4 text-zinc-400 mt-0.5 shrink-0" />
                 <p className="text-xs text-zinc-400 leading-relaxed">
-                    <span className="text-zinc-300 font-medium">El trueque:</span> A cambio del acceso Pro,
-                    tus métricas anónimas (scores, duración, tipo de hooks) contribuyen al pool colectivo
-                    que alimenta el IC de todos. Nunca se envía audio, texto ni datos personales.
+                    <span className="text-zinc-300 font-medium">The trade:</span> In exchange for Pro access,
+                    your anonymous metrics (scores, duration, hook types) contribute to the collective pool
+                    that powers the IC for everyone. We never send audio, text, or personal data.
                 </p>
             </div>
 
@@ -185,13 +185,13 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                     className="mt-0.5 w-4 h-4 rounded accent-brand-500 cursor-pointer shrink-0"
                 />
                 <span className="text-xs text-zinc-300 leading-relaxed">
-                    Acepto que mis <span className="font-medium text-white">métricas anónimas</span> (scores,
-                    duración, tipo de hooks, rendimiento agregado en YouTube) contribuyan al IC colectivo mientras
-                    esté en Pro. Detalles en la{' '}
+                    I agree that my <span className="font-medium text-white">anonymous metrics</span> (scores,
+                    duration, hook types, aggregate YouTube performance) contribute to the collective IC while
+                    I am on Pro. Details in the{' '}
                     <a href="https://azelia.ai/privacy" target="_blank" rel="noopener" className="underline decoration-dotted hover:text-white">
-                        Política de Privacidad
+                        Privacy Policy
                     </a>.
-                    Puedo desactivar la telemetría en Ajustes cuando quiera.
+                    I can disable telemetry from Settings anytime.
                 </span>
             </label>
 
@@ -201,11 +201,11 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm py-3 transition-colors"
             >
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {loading ? 'Activando...' : 'Activar Pro (3 meses)'}
+                {loading ? 'Activating…' : 'Activar Pro (3 meses)'}
             </button>
 
             <p className="text-center text-xs text-zinc-500">
-                Sin tarjeta de crédito · Cancela cuando quieras
+                No credit card · Cancel anytime
             </p>
         </div>
     );

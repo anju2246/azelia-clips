@@ -27,20 +27,23 @@ class UpgradeResponse(BaseModel):
 
 
 @router.post("/upgrade/pro", response_model=UpgradeResponse)
-async def activate_pro(
-    user: User = Depends(require_auth),
-    authorization: str = Header(None),
-):
+async def activate_pro(user: User = Depends(require_auth)):
     """
     Activate beta Pro for the authenticated user.
     Sets tier='pro' and pro_expires_at = now + 90 days in their profiles row.
 
-    Uses the user's JWT so RLS (auth.uid() = id) actually lets the UPDATE land.
-    Previously used anon key which silently returned 204 with zero rows affected.
+    Uses the service role key because profiles.tier / pro_expires_at are
+    guarded by the enforce_profile_column_restrictions trigger (see migration
+    20260403000002). The trigger raises unless auth.uid() IS NULL — which it
+    is when service role calls. user.id is trusted here because require_auth
+    already verified the caller's JWT server-side.
     """
-    user_jwt = (authorization or "").replace("Bearer ", "").strip()
-    if not user_jwt:
-        raise HTTPException(status_code=401, detail="Missing user token")
+    svc_key = getattr(settings, "supabase_service_role_key", "") or ""
+    if not svc_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Server misconfiguration: SUPABASE_SERVICE_ROLE_KEY is required for Pro activation.",
+        )
 
     pro_expires_at = (datetime.now(timezone.utc) + timedelta(days=BETA_DURATION_DAYS)).isoformat()
 
@@ -50,8 +53,8 @@ async def activate_pro(
             params={"id": f"eq.{user.id}"},
             json={"tier": "pro", "pro_expires_at": pro_expires_at},
             headers={
-                "apikey": settings.supabase_key,
-                "Authorization": f"Bearer {user_jwt}",
+                "apikey": svc_key,
+                "Authorization": f"Bearer {svc_key}",
                 "Content-Type": "application/json",
                 "Prefer": "return=representation",
             },
@@ -69,47 +72,68 @@ async def activate_pro(
     if not rows:
         raise HTTPException(
             status_code=500,
-            detail="Pro activation affected 0 rows — RLS or missing profile row",
+            detail="Pro activation affected 0 rows — profile missing for user.id",
         )
 
     return UpgradeResponse(
         tier="pro",
         pro_expires_at=pro_expires_at,
         telemetry_enabled=True,
-        message="¡Pro activado! Tienes 3 meses de acceso completo al IC Cascade.",
+        message="Pro activated — 3 months of full IC Cascade access.",
     )
 
 
 @router.get("/upgrade/status")
 async def get_upgrade_status(user: User = Depends(optional_auth)):
-    """Returns current tier and Pro expiry. Reads directly from Supabase (anon key + RLS)."""
-    from supabase import create_client
-    from datetime import datetime, timezone
+    """Returns current tier and Pro expiry for the authenticated user.
 
-    if not user or not settings.supabase_url or not settings.supabase_key:
+    Reads via the service role key because the anon client is blocked from
+    reading arbitrary profiles.* fields under RLS. user.id is trusted — it
+    came from a server-verified JWT (optional_auth decodes + validates).
+    """
+    from datetime import datetime, timezone
+    import httpx as _httpx
+
+    if not user or not settings.supabase_url:
         return {"tier": "free", "pro_expires_at": None, "telemetry_enabled": False}
 
-    try:
-        sb = create_client(settings.supabase_url, settings.supabase_key)
-        # Use user's JWT for RLS-scoped read (anon key is safe here — only reads own row)
-        result = sb.table("profiles").select(
-            "tier, pro_expires_at, telemetry_consent"
-        ).eq("id", user.id).execute()
+    svc_key = getattr(settings, "supabase_service_role_key", "") or settings.supabase_key
 
-        if not result.data:
+    try:
+        async with _httpx.AsyncClient() as client:
+            r = await client.get(
+                f"{settings.supabase_url}/rest/v1/profiles",
+                params={
+                    "id": f"eq.{user.id}",
+                    "select": "tier,pro_expires_at,telemetry_consent",
+                },
+                headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+                timeout=10,
+            )
+        if r.status_code != 200:
+            return {"tier": "free", "pro_expires_at": None, "telemetry_enabled": False}
+        data = r.json()
+        if not data:
             return {"tier": "free", "pro_expires_at": None, "telemetry_enabled": False}
 
-        row = result.data[0]
+        row = data[0]
         pro_expires_at = row.get("pro_expires_at")
 
-        # Client-side expiry check (DB trigger handles the authoritative enforcement)
-        if row["tier"] == "pro" and pro_expires_at:
-            expires = datetime.fromisoformat(pro_expires_at)
-            if expires < datetime.now(timezone.utc):
-                return {"tier": "free", "pro_expires_at": None, "telemetry_enabled": row.get("telemetry_consent", False)}
+        # Client-side expiry check (DB trigger handles authoritative enforcement).
+        if row.get("tier") == "pro" and pro_expires_at:
+            try:
+                expires = datetime.fromisoformat(pro_expires_at.replace("Z", "+00:00"))
+                if expires < datetime.now(timezone.utc):
+                    return {
+                        "tier": "free",
+                        "pro_expires_at": None,
+                        "telemetry_enabled": row.get("telemetry_consent", False),
+                    }
+            except Exception:
+                pass
 
         return {
-            "tier": row["tier"],
+            "tier": row.get("tier", "free"),
             "pro_expires_at": pro_expires_at,
             "telemetry_enabled": row.get("telemetry_consent", False),
         }
