@@ -6,7 +6,6 @@ import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
 import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 import { CreatorSignalsCard } from '../upgrade/CreatorSignalsCard';
-import { DeepCalibrationCard } from '../upgrade/DeepCalibrationCard';
 import { CreditsStatusBanner } from './CreditsStatusBanner';
 import { ClipsApi, SettingsApi } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
@@ -174,13 +173,10 @@ export const DashboardController: React.FC = () => {
                     onYouTubeConnected={() => setYoutubeConnected(true)}
                 />
             )}
-            {/* Creator Signals + Deep Calibration are available to all users
-                with a valid API key — they use the user's own key and benefit
-                both the user (personal calibration via cohort_hash) and the
-                collective IC. Gating by YT connection / transcripts presence
-                happens inside each card. */}
+            {/* Creator Signals extracted from the user's own shorts — feeds
+                the Clips Ranker. Available to all users with a valid API key.
+                Long-form episode analysis lives in Azelia Studio, not Clips. */}
             {youtubeConnected && <CreatorSignalsCard />}
-            <DeepCalibrationCard />
             <YouTubeNudge />
             <LibraryView onProcessEpisode={handleProcessEpisode} />
 
