@@ -67,7 +67,7 @@ export const ClipReviewCard: React.FC<ClipReviewCardProps> = ({ clip, jobId, onA
                 {/* Review badge below title */}
                 {isReview && (
                     <div className="bg-yellow-500/15 text-yellow-400 text-[11px] font-bold px-2.5 py-1.5 rounded-md border border-yellow-500/30 mb-3 flex items-center gap-1.5 w-max">
-                        ⚠ Requiere Revisión
+                        ⚠ Requires Review
                     </div>
                 )}
 

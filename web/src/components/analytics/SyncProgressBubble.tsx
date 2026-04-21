@@ -101,7 +101,7 @@ export const SyncProgressBubble: React.FC<SyncProgressBubbleProps> = ({ jobId, o
 
                     <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-white truncate">
-                            {isError ? 'Error en análisis' : isFinished ? '¡Análisis completo!' : 'Analizando histórico...'}
+                            {isError ? 'Analysis error' : isFinished ? 'Analysis complete!' : 'Analyzing history…'}
                         </p>
                         {!expanded && (
                             <p className="text-xs text-zinc-500 truncate">{job.message}</p>

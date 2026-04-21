@@ -93,9 +93,9 @@ export const ClipReviewList: React.FC = () => {
                 setSelectedClipIndex(updatedClips.length > 0 ? updatedClips.length - 1 : null);
             }
             setTrashVersion(v => v + 1);
-            toast.success('Clip rechazado (se eliminará en 30 días)');
+            toast.success('Clip rejected (will be deleted in 30 days)');
         } catch (error: any) {
-            toast.error(error.message || 'Error al rechazar clip');
+            toast.error(error.message || 'Error rejecting clip');
         }
     };
 
@@ -222,7 +222,7 @@ export const ClipReviewList: React.FC = () => {
                                         {item.filename}
                                     </h3>
                                     <p className="text-xs text-zinc-500 mb-4">
-                                        {item.clips_generated} clips extráidos
+                                        {item.clips_generated} clips extracted
                                     </p>
 
                                     <div className="mt-auto pt-4">

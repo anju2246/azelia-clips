@@ -26,7 +26,7 @@ import "../styles/global.css";
                 const statusEl = document.getElementById("status")!;
 
                 if (!code) {
-                    statusEl.innerHTML = `<p class="text-red-400">No se recibió el código de autorización.</p>`;
+                    statusEl.innerHTML = `<p class="text-red-400">Authorization code not received.</p>`;
                     setTimeout(() => window.location.replace("/dashboard"), 2000);
                     return;
                 }
@@ -34,7 +34,7 @@ import "../styles/global.css";
                 try {
                     const { data } = await supabase.auth.getSession();
                     const token = data?.session?.access_token;
-                    if (!token) throw new Error("Sesión expirada — inicia sesión de nuevo");
+                    if (!token) throw new Error("Session expired — sign in again");
 
                     const origin = window.location.origin
                         .replace("127.0.0.1", "localhost")

@@ -357,11 +357,11 @@ export const YouTubeConnect: React.FC = () => {
                                     onClick={() => setShowRetroactiveModal(true)}
                                     className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-brand-500/20 hover:bg-brand-500/30 border border-brand-500/50 text-brand-300 rounded-xl font-medium transition-colors shadow-lg shadow-brand-500/10 cursor-pointer"
                                 >
-                                    <Sparkles className="w-4 h-4" /> Sync Histórico
+                                    <Sparkles className="w-4 h-4" /> Historical Sync
                                 </button>
                             ) : (
                                 <div className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-zinc-800/50 border border-white/10 text-zinc-400 rounded-xl font-medium">
-                                    <CheckCircle2 className="w-4 h-4 text-brand-500" /> Historial Procesado
+                                    <CheckCircle2 className="w-4 h-4 text-brand-500" /> History processed
                                 </div>
                             )}
                             <button

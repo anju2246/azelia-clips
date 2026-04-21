@@ -58,7 +58,7 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                 }
             });
             
-            if (!res.ok) throw new Error('Falló la sincronización histórica');
+            if (!res.ok) throw new Error('Historical sync failed');
             
             const data = await res.json();
             const jobId = data.job_id;
@@ -69,7 +69,7 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                 onSuccess(jobId);
             }
         } catch (err: any) {
-            setError(err.message || 'Error procesando videos');
+            setError(err.message || 'Error processing videos');
             setSyncing(false);
         }
     };
@@ -90,39 +90,39 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                     </div>
 
                     <h2 className="text-2xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent mb-3">
-                        Nutrir Inteligencia desde el Día 1
+                        Seed Intelligence from Day One
                     </h2>
                             <p className="text-zinc-400 text-sm leading-relaxed mb-6">
-                                Azelia ha detectado tus videos pasados en YouTube. Analicemos tus Shorts anteriores usando <strong>{estimate?.model || 'tu IA'}</strong> para entender inmediatamente qué <em>Hooks</em> y formatos resuenan con tu audiencia.
+                                Azelia detected your past YouTube videos. Let's analyze your previous Shorts using <strong>{estimate?.model || 'your AI'}</strong> to immediately understand which <em>hooks</em> and formats resonate with your audience.
                             </p>
 
                             {loading ? (
                                 <div className="flex flex-col items-center justify-center py-8 text-zinc-500 gap-3">
                                     <Loader2 className="w-8 h-8 animate-spin text-brand-500" />
-                                    <span className="text-sm">Calculando tokens y costos en tiempo real...</span>
+                                    <span className="text-sm">Calculating tokens and costs in real time…</span>
                                 </div>
                             ) : estimate?.total_shorts === 0 ? (
                                 <div className="p-4 bg-zinc-900/50 rounded-xl border border-white/5 text-center">
-                                    <p className="text-zinc-400 text-sm">No encontramos Shorts en el historial o ya fueron analizados.</p>
+                                    <p className="text-zinc-400 text-sm">No Shorts found in history or they've already been analyzed.</p>
                                 </div>
                             ) : (
                                 <div className="space-y-4">
                                     <div className="p-4 bg-black/40 border border-white/5 rounded-xl flex items-center justify-between">
                                         <div className="text-sm">
-                                            <span className="text-zinc-400">Shorts a procesar:</span>
+                                            <span className="text-zinc-400">Shorts to process:</span>
                                         </div>
                                         <div className="bg-brand-500/10 text-brand-400 font-bold px-3 py-1 rounded-lg text-sm border border-brand-500/20">
                                             {estimate?.total_shorts} videos
                                         </div>
                                     </div>
-                                    
+
                                     <div className="p-4 bg-black/40 border border-white/5 rounded-xl">
                                         <div className="flex justify-between items-center mb-1">
-                                            <span className="text-sm text-zinc-400">Costo Estimado LLM:</span>
-                                            <span className="text-lg font-mono text-emerald-400">${estimate?.estimated_cost_usd < 0.01 ? '< 0,01' : estimate?.estimated_cost_usd?.toFixed(2).replace('.', ',')} USD</span>
+                                            <span className="text-sm text-zinc-400">Estimated LLM cost:</span>
+                                            <span className="text-lg font-mono text-emerald-400">${estimate?.estimated_cost_usd < 0.01 ? '< 0.01' : estimate?.estimated_cost_usd?.toFixed(2)} USD</span>
                                         </div>
                                         <div className="text-[10px] text-zinc-600 flex justify-between">
-                                            <span>Modelo: {estimate?.model}</span>
+                                            <span>Model: {estimate?.model}</span>
                                             <span>${estimate?.cost_per_1M_tokens}/1M tokens</span>
                                         </div>
                                     </div>
@@ -140,7 +140,7 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                                             disabled={syncing}
                                             className="px-6 py-3 rounded-xl border border-white/10 text-zinc-400 hover:text-white hover:bg-white/5 font-medium transition-all disabled:opacity-50"
                                         >
-                                            Omitir (Quedar en cero)
+                                            Skip (start from zero)
                                         </button>
                                         <button
                                             onClick={handleSync}
@@ -148,15 +148,15 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                                             className="flex-1 bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold py-3 rounded-xl hover:from-brand-500 transition-all shadow-lg shadow-brand-500/20 flex items-center justify-center gap-2 disabled:opacity-50"
                                         >
                                             {syncing ? (
-                                                <><Loader2 className="w-5 h-5 animate-spin" /> Analizando el Histórico...</>
+                                                <><Loader2 className="w-5 h-5 animate-spin" /> Analyzing history…</>
                                             ) : (
-                                                <><Sparkles className="w-5 h-5" /> Iniciar Análisis</>
+                                                <><Sparkles className="w-5 h-5" /> Start analysis</>
                                             )}
                                         </button>
                                     </div>
                                     {syncing && (
                                         <p className="text-xs text-center text-zinc-500 mt-2">
-                                            Esto puede tardar unos minutos dependiendo de las descargas y el LLM.
+                                            This may take a few minutes depending on downloads and the LLM.
                                         </p>
                                     )}
                                 </div>

@@ -222,7 +222,7 @@ export const ClipPlayerModal: React.FC<ClipPlayerModalProps> = ({
                     {/* Review Badge */}
                     {isReview && (
                         <div className="bg-yellow-500/15 text-yellow-400 text-xs font-bold px-3 py-2 rounded-lg border border-yellow-500/30 mb-4 flex items-center gap-2">
-                            ⚠ Requiere Revisión Manual
+                            ⚠ Requires Manual Review
                         </div>
                     )}
 
@@ -234,7 +234,7 @@ export const ClipPlayerModal: React.FC<ClipPlayerModalProps> = ({
 
                     {/* Duration info */}
                     <div className="text-xs text-zinc-500 mb-6">
-                        Duración: <span className="text-zinc-300">{currentClip.duration}s</span>
+                        Duration: <span className="text-zinc-300">{currentClip.duration}s</span>
                     </div>
 
                     {/* Divider */}
@@ -244,10 +244,10 @@ export const ClipPlayerModal: React.FC<ClipPlayerModalProps> = ({
                     <div className="flex flex-col gap-3 mt-4 relative">
                         {showRejectConfirm ? (
                             <div className="absolute inset-0 z-10 bg-zinc-900/95 backdrop-blur-md rounded-xl p-4 flex flex-col justify-center border border-yellow-500/30">
-                                <p className="text-sm font-semibold text-center mb-3">¿Rechazar este clip?</p>
+                                <p className="text-sm font-semibold text-center mb-3">Reject this clip?</p>
                                 <div className="flex gap-2">
-                                    <button onClick={() => setShowRejectConfirm(false)} className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors">Cancelar</button>
-                                    <button onClick={() => { setShowRejectConfirm(false); onReject(currentClip.id); }} className="flex-1 py-1.5 bg-red-500 hover:bg-red-400 text-white rounded-lg text-xs font-bold transition-colors">Rechazar</button>
+                                    <button onClick={() => setShowRejectConfirm(false)} className="flex-1 py-1.5 bg-white/10 hover:bg-white/20 rounded-lg text-xs font-medium transition-colors">Cancel</button>
+                                    <button onClick={() => { setShowRejectConfirm(false); onReject(currentClip.id); }} className="flex-1 py-1.5 bg-red-500 hover:bg-red-400 text-white rounded-lg text-xs font-bold transition-colors">Reject</button>
                                 </div>
                             </div>
                         ) : null}

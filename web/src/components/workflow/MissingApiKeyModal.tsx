@@ -34,12 +34,12 @@ export const MissingApiKeyModal: React.FC<MissingApiKeyModalProps> = ({ isOpen, 
                 ai_provider_order: [provider.id, ...['anthropic', 'openai', 'groq', 'vertex'].filter(p => p !== provider.id)],
             };
             await SettingsApi.updateSettings(update as any);
-            toast.success('¡API Key guardada! Ya puedes procesar videos.');
+            toast.success('API key saved. You can now process videos.');
             setApiKey('');
             setSelectedProvider('');
             onKeySaved();
         } catch (e: any) {
-            toast.error(e.message || 'Error guardando la API Key');
+            toast.error(e.message || 'Error saving the API key');
         } finally {
             setSaving(false);
         }
@@ -55,8 +55,8 @@ export const MissingApiKeyModal: React.FC<MissingApiKeyModalProps> = ({ isOpen, 
                             <AlertTriangle className="w-5 h-5 text-amber-500" />
                         </div>
                         <div>
-                            <h3 className="text-white font-semibold">API Key Requerida</h3>
-                            <p className="text-xs text-zinc-500">Necesitas al menos una llave de IA para procesar videos</p>
+                            <h3 className="text-white font-semibold">API Key Required</h3>
+                            <p className="text-xs text-zinc-500">You need at least one AI key to process videos</p>
                         </div>
                     </div>
                     <button onClick={onClose} className="text-zinc-500 hover:text-white transition-colors p-1 rounded-lg hover:bg-white/5">
@@ -67,8 +67,8 @@ export const MissingApiKeyModal: React.FC<MissingApiKeyModalProps> = ({ isOpen, 
                 {/* Body */}
                 <div className="px-6 py-5 space-y-4">
                     <p className="text-sm text-zinc-400 leading-relaxed">
-                        Azelia utiliza modelos de IA para analizar, curar y extraer los mejores momentos de tus videos. 
-                        Selecciona un proveedor y pega tu API Key para comenzar.
+                        Azelia uses AI models to analyze, curate, and extract the best moments from your videos.
+                        Pick a provider and paste your API key to get started.
                     </p>
 
                     {/* Provider Selection */}
@@ -99,7 +99,7 @@ export const MissingApiKeyModal: React.FC<MissingApiKeyModalProps> = ({ isOpen, 
                                     rel="noreferrer"
                                     className="text-[10px] text-brand-400 hover:text-brand-300 underline underline-offset-2 flex items-center gap-1"
                                 >
-                                    Obtener llave <ArrowRight className="w-3 h-3" />
+                                    Get a key <ArrowRight className="w-3 h-3" />
                                 </a>
                             </div>
                             <div className="relative">
@@ -116,7 +116,7 @@ export const MissingApiKeyModal: React.FC<MissingApiKeyModalProps> = ({ isOpen, 
                                 />
                             </div>
                             <p className="text-xs text-zinc-600">
-                                Se guarda en tu <code className="text-zinc-500">.env</code> local — nunca sale de tu máquina.
+                                Stored in your local <code className="text-zinc-500">.env</code> — never leaves your machine.
                             </p>
                         </div>
                     )}
@@ -128,14 +128,14 @@ export const MissingApiKeyModal: React.FC<MissingApiKeyModalProps> = ({ isOpen, 
                         onClick={onClose}
                         className="text-sm text-zinc-500 hover:text-white transition-colors"
                     >
-                        Cancelar
+                        Cancel
                     </button>
                     <button
                         onClick={handleSave}
                         disabled={!apiKey.trim() || apiKey.length < 20 || saving}
                         className="flex items-center gap-2 px-5 py-2.5 bg-gradient-to-r from-brand-600 to-brand-500 text-white font-semibold rounded-xl hover:from-brand-500 transition-all disabled:opacity-50 disabled:cursor-not-allowed text-sm shadow-lg shadow-brand-500/20"
                     >
-                        {saving ? 'Guardando...' : 'Guardar y Continuar'}
+                        {saving ? 'Saving…' : 'Save and continue'}
                     </button>
                 </div>
             </div>
