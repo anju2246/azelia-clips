@@ -174,12 +174,13 @@ export const DashboardController: React.FC = () => {
                     onYouTubeConnected={() => setYoutubeConnected(true)}
                 />
             )}
-            {userTier === 'pro' && youtubeConnected && (
-                <CreatorSignalsCard />
-            )}
-            {userTier === 'pro' && (
-                <DeepCalibrationCard />
-            )}
+            {/* Creator Signals + Deep Calibration are available to all users
+                with a valid API key — they use the user's own key and benefit
+                both the user (personal calibration via cohort_hash) and the
+                collective IC. Gating by YT connection / transcripts presence
+                happens inside each card. */}
+            {youtubeConnected && <CreatorSignalsCard />}
+            <DeepCalibrationCard />
             <YouTubeNudge />
             <LibraryView onProcessEpisode={handleProcessEpisode} />
 

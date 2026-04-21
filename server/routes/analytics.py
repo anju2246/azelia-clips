@@ -402,18 +402,32 @@ Return JSON ONLY with this exact shape (no prose, no markdown fences):
 `pattern` = the structural fields in a JSON object."""
 
 
-def _estimate_extraction_cost(num_shorts: int, anthropic_model: str = "claude-sonnet-4-6") -> dict:
-    """Rough cost estimate for extracting creator signals via Sonnet."""
+# Default Anthropic model for Ticket A (classification over shorts metadata).
+# Haiku 4.5 handles this task as well as Sonnet and costs ~3x less.
+# Users can override via body.model in the POST endpoint.
+_CREATOR_SIGNALS_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+
+def _estimate_extraction_cost(num_shorts: int, anthropic_model: str = _CREATOR_SIGNALS_DEFAULT_MODEL) -> dict:
+    """Rough cost estimate for extracting creator signals.
+
+    Pricing per M tokens (as of 2026-04):
+      - Haiku 4.5: $1 in / $5 out
+      - Sonnet 4.6: $3 in / $15 out
+      - Opus 4.7: $15 in / $75 out
+    """
     # ~1.5k tokens per short title + stats, plus 4k prompt overhead.
     input_tokens = num_shorts * 1500 + 4000
     # Expected ~2500 output tokens for structured JSON with 5 patterns.
     output_tokens = 2500
-    if "sonnet" in anthropic_model.lower():
-        cost = (input_tokens / 1_000_000) * 3.0 + (output_tokens / 1_000_000) * 15.0
-    elif "opus" in anthropic_model.lower():
-        cost = (input_tokens / 1_000_000) * 15.0 + (output_tokens / 1_000_000) * 75.0
-    else:
-        cost = (input_tokens / 1_000_000) * 1.0 + (output_tokens / 1_000_000) * 5.0
+    m = anthropic_model.lower()
+    if "opus" in m:
+        in_rate, out_rate = 15.0, 75.0
+    elif "sonnet" in m:
+        in_rate, out_rate = 3.0, 15.0
+    else:  # haiku / default
+        in_rate, out_rate = 1.0, 5.0
+    cost = (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
     return {
         "num_shorts": num_shorts,
         "input_tokens_est": input_tokens,
@@ -434,9 +448,13 @@ def _get_user_creator_cohort(user_id: str) -> str | None:
 
 
 @router.get("/analytics/youtube/extract-creator-signals/estimate")
-async def estimate_creator_signals_cost(user: User = Depends(require_auth)):
+async def estimate_creator_signals_cost(
+    model: str | None = None,
+    user: User = Depends(require_auth),
+):
     """Return the cost estimate BEFORE the user confirms the run.
-    Frontend shows this in the confirmation modal."""
+    Frontend shows this in the confirmation modal.
+    Accepts ?model=... query to preview cost at a different model."""
     conn = _get_yt_db()
     cur = conn.execute(
         "SELECT COUNT(*) FROM youtube_shorts WHERE user_id = ?",
@@ -445,11 +463,17 @@ async def estimate_creator_signals_cost(user: User = Depends(require_auth)):
     total = cur.fetchone()[0]
     conn.close()
 
-    from packages.core.config import settings as app_settings
+    chosen_model = model or _CREATOR_SIGNALS_DEFAULT_MODEL
     batch_size = min(30, total)
-    est = _estimate_extraction_cost(batch_size, app_settings.anthropic_model)
+    est = _estimate_extraction_cost(batch_size, chosen_model)
     est["total_shorts_available"] = total
     est["batch_size"] = batch_size
+    # Also return the costs across all available models so the UI can show a picker.
+    est["model_options"] = {
+        "claude-haiku-4-5-20251001": _estimate_extraction_cost(batch_size, "claude-haiku-4-5-20251001")["cost_usd_est"],
+        "claude-sonnet-4-6":        _estimate_extraction_cost(batch_size, "claude-sonnet-4-6")["cost_usd_est"],
+        "claude-opus-4-7":          _estimate_extraction_cost(batch_size, "claude-opus-4-7")["cost_usd_est"],
+    }
     return est
 
 
@@ -508,7 +532,10 @@ async def extract_creator_signals(
         for r in rows
     ]
 
-    # 2. Call Sonnet
+    # 2. Call Anthropic. Default = Haiku (cheap, good enough for classification).
+    #    User can override via body.model; validation is lax — Anthropic will
+    #    reject an unknown model ID and we'll surface that 502.
+    chosen_model = (body.get("model") or _CREATOR_SIGNALS_DEFAULT_MODEL).strip()
     try:
         from anthropic import Anthropic
         client = Anthropic(api_key=api_key)
@@ -521,7 +548,7 @@ async def extract_creator_signals(
             )
         )
         resp = client.messages.create(
-            model=app_settings.anthropic_model or "claude-sonnet-4-6",
+            model=chosen_model,
             max_tokens=3000,
             messages=[{"role": "user", "content": user_content}],
         )
@@ -624,19 +651,27 @@ async def extract_creator_signals(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Insert error: {e}")
 
-    # 5. Estimated vs actual usage
+    # 5. Estimated vs actual usage — rate tied to the model actually used.
     usage = getattr(resp, "usage", None)
     actual_cost = None
     if usage:
         in_t = getattr(usage, "input_tokens", 0) or 0
         out_t = getattr(usage, "output_tokens", 0) or 0
-        actual_cost = round((in_t / 1_000_000) * 3.0 + (out_t / 1_000_000) * 15.0, 4)
+        m = chosen_model.lower()
+        if "opus" in m:
+            in_rate, out_rate = 15.0, 75.0
+        elif "sonnet" in m:
+            in_rate, out_rate = 3.0, 15.0
+        else:
+            in_rate, out_rate = 1.0, 5.0
+        actual_cost = round((in_t / 1_000_000) * in_rate + (out_t / 1_000_000) * out_rate, 4)
 
     return {
         "status": "complete",
         "signals_created": len(rows_to_insert),
         "batch_size": batch_size,
-        "cost_est": _estimate_extraction_cost(batch_size, app_settings.anthropic_model),
+        "model_used": chosen_model,
+        "cost_est": _estimate_extraction_cost(batch_size, chosen_model),
         "cost_actual_usd": actual_cost,
         "patterns_summary": [
             {k: v for k, v in pat.items() if k in ("signal_type", "hook_type", "emotional_charge", "duration_bucket", "topic_tag", "confidence")}
