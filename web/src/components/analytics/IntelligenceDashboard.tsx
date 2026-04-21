@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { TrendingUp, Users, Activity, Loader2, BarChart3, Clock, Mic2, Zap, Film, ArrowUpRight } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
+import { CreatorSignalsCard } from '../upgrade/CreatorSignalsCard';
 
 interface PipelineStats {
     totalClips: number;
@@ -16,9 +17,26 @@ export const IntelligenceDashboard: React.FC = () => {
     const [stats, setStats] = useState<PipelineStats | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [hasData, setHasData] = useState(false);
+    const [youtubeConnected, setYoutubeConnected] = useState(false);
 
     useEffect(() => {
         loadStats();
+        // Separate call — YT status decides whether to show the
+        // CreatorSignalsCard (shorts-to-IC-Cascade enrichment flow).
+        (async () => {
+            try {
+                const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+                const { data: session } = await supabase.auth.getSession();
+                if (!session?.session?.access_token) return;
+                const res = await fetch(`${API_BASE}/analytics/youtube/status`, {
+                    headers: { Authorization: `Bearer ${session.session.access_token}` },
+                });
+                if (res.ok) {
+                    const d = await res.json();
+                    if (d?.connected) setYoutubeConnected(true);
+                }
+            } catch { /* ignore — card just won't render */ }
+        })();
     }, []);
 
     const loadStats = async () => {
@@ -65,9 +83,14 @@ export const IntelligenceDashboard: React.FC = () => {
     if (!hasData) {
         return (
             <div className="space-y-6">
+                {/* Creator Signals opt-in — primary action in /intelligence when
+                    YouTube is connected but no clips yet. Feeds IC Cascade before
+                    the user processes their first episode. */}
+                {youtubeConnected && <CreatorSignalsCard />}
+
                 {/* Hero Empty State */}
                 <div className="relative bg-zinc-900/40 border border-white/5 rounded-2xl p-10 text-center overflow-hidden">
-                    <div className="absolute inset-0 bg-gradient-to-br from-brand-500/5 via-transparent to-purple-500/5 pointer-events-none"></div>
+                    <div className="absolute inset-0 bg-gradient-to-br from-white/[0.03] via-transparent to-purple-500/5 pointer-events-none"></div>
                     <div className="relative z-10">
                         <div className="w-16 h-16 mx-auto mb-6 bg-brand-500/10 rounded-2xl flex items-center justify-center">
                             <Zap className="w-8 h-8 text-brand-400" />
@@ -134,6 +157,11 @@ export const IntelligenceDashboard: React.FC = () => {
     // Real data view
     return (
         <div className="space-y-6">
+            {/* Creator Signals opt-in — also visible in the data view.
+                Keeps the enrichment action discoverable once the user has
+                some pipeline history. */}
+            {youtubeConnected && <CreatorSignalsCard />}
+
             {/* Stats Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {/* Global Average Score */}

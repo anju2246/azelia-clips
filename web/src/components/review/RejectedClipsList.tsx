@@ -41,11 +41,11 @@ export const RejectedClipsList: React.FC<RejectedClipsListProps> = ({ jobId, onR
     const handleRestore = async (filename: string) => {
         try {
             await ClipsApi.restoreClip(jobId, filename);
-            toast.success('Clip restaurado a revisión');
+            toast.success('Clip restored to review');
             await loadClips();
             onRestored();
         } catch (e) {
-            toast.error('Error al restaurar el clip');
+            toast.error('Could not restore the clip');
         }
     };
 
@@ -63,9 +63,9 @@ export const RejectedClipsList: React.FC<RejectedClipsListProps> = ({ jobId, onR
                 <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
                     <Trash2 className="w-8 h-8 text-red-500/50" />
                 </div>
-                <h3 className="text-xl font-bold text-white mb-2">La papelera está vacía</h3>
+                <h3 className="text-xl font-bold text-white mb-2">The trash is empty</h3>
                 <p className="text-zinc-500 max-w-sm mx-auto">
-                    Los clips que rechaces aparecerán aquí. Se eliminarán automáticamente del servidor después de 30 días.
+                    Clips you reject will show up here. They're automatically removed from the server after 30 days.
                 </p>
             </div>
         );
@@ -79,10 +79,10 @@ export const RejectedClipsList: React.FC<RejectedClipsListProps> = ({ jobId, onR
                 </div>
                 <div>
                     <h3 className="text-xl font-bold text-white">
-                        Papelera de Reciclaje
+                        Trash
                     </h3>
                     <p className="text-sm text-zinc-500">
-                        Se eliminarán automáticamente después de 30 días.
+                        Automatically deleted after 30 days.
                     </p>
                 </div>
                 <div className="ml-auto bg-red-500/20 text-red-400 text-xs font-medium px-3 py-1 rounded-full">
@@ -130,7 +130,7 @@ const RejectedClipCard: React.FC<{ clip: RejectedClip, onRestore: () => void, on
                 
                 <div className="absolute top-2 left-2 flex flex-col gap-1 pointer-events-none">
                     <div className="bg-black/80 backdrop-blur-md text-red-400 text-[10px] font-bold px-2 py-1 rounded border border-red-500/30">
-                        Se borra en {clip.days_remaining} días
+                        Deletes in {clip.days_remaining} days
                     </div>
                 </div>
                 <div className="absolute top-2 right-2 pointer-events-none">
@@ -144,10 +144,10 @@ const RejectedClipCard: React.FC<{ clip: RejectedClip, onRestore: () => void, on
                 <button 
                     onClick={onRestore}
                     className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 hover:text-white rounded-lg transition-colors border border-zinc-700 flex items-center gap-1.5 shrink-0"
-                    title="Restaurar a revisión"
+                    title="Restore to review"
                 >
                     <RotateCcw className="w-3.5 h-3.5" />
-                    <span className="text-[10px] font-medium pr-1">Restaurar</span>
+                    <span className="text-[10px] font-medium pr-1">Restore</span>
                 </button>
             </div>
         </div>

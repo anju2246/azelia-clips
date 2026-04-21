@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useCallback, useMemo } from 'react';
-import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2, BarChart3, Shield } from 'lucide-react';
+import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, ChevronUp, ChevronDown, CheckCircle2, BarChart3, Shield, FlaskConical } from 'lucide-react';
 import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '../../lib/api';
 import { DirectoryPicker } from './DirectoryPicker';
 import { useAIModels } from '../../hooks/useAIModels';
@@ -25,6 +25,18 @@ export const SettingsForm: React.FC = () => {
 
     // Live model registry from provider APIs
     const { groupedModels, loading: modelsLoading, refetch: refetchModels } = useAIModels();
+
+    // Settings are grouped into 4 tabs so the 500+ line form isn't an infinite scroll.
+    // Tab IDs intentionally match the section order in the JSX below; changing them
+    // requires updating the `activeTab === '...'` checks wrapping each <section>.
+    type TabId = 'workspace' | 'pipeline' | 'integrations' | 'privacy';
+    const [activeTab, setActiveTab] = useState<TabId>('workspace');
+    const TABS: Array<{ id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }> = [
+        { id: 'workspace',    label: 'Workspace',    icon: FolderOpen },
+        { id: 'pipeline',     label: 'Pipeline',     icon: Key },
+        { id: 'integrations', label: 'Integrations', icon: Database },
+        { id: 'privacy',      label: 'Privacy',      icon: Shield },
+    ];
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, orProvider: 'meta' | 'openai' | 'anthropic' | 'google', fallbackModels: { id: string, label: string }[] }> = {
         'groq': {
@@ -189,9 +201,31 @@ export const SettingsForm: React.FC = () => {
                 <p className="text-zinc-500 mt-2">Configure local intelligence paths, API keys, and pipeline behaviors.</p>
             </div>
 
+            {/* Tab navigation — keeps the long form scannable without refactoring
+                the underlying state machine. Each <section> below is wrapped in a
+                `activeTab === '...'` gate so only one group is visible at a time. */}
+            <div className="mb-8 flex items-center gap-1 p-1 bg-zinc-900/60 border border-white/5 rounded-xl w-fit">
+                {TABS.map(t => {
+                    const Icon = t.icon;
+                    const isActive = activeTab === t.id;
+                    return (
+                        <button
+                            key={t.id}
+                            type="button"
+                            onClick={() => setActiveTab(t.id)}
+                            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${isActive ? 'bg-brand-500/20 text-white border border-brand-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
+                        >
+                            <Icon className="w-4 h-4" />
+                            {t.label}
+                        </button>
+                    );
+                })}
+            </div>
+
             <form onSubmit={handleSave} className="space-y-8">
 
-                {/* Core Settings */}
+                {/* Core Settings — Workspace tab */}
+                {activeTab === 'workspace' && (<>
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center gap-2">
                         <FolderOpen className="w-5 h-5 text-brand-400" />
@@ -199,7 +233,9 @@ export const SettingsForm: React.FC = () => {
                     </div>
                     <div className="p-6 space-y-6">
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">Podcast Name</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                Podcast Name <span className="text-red-400">*</span>
+                            </label>
                             <input
                                 type="text"
                                 value={formData.podcast_name ?? settings?.podcast_name ?? ''}
@@ -209,7 +245,9 @@ export const SettingsForm: React.FC = () => {
                             />
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-2">Podcast Root Directory</label>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2">
+                                Podcast Root Directory <span className="text-red-400">*</span>
+                            </label>
                             <div className="flex gap-2">
                                 <input
                                     type="text"
@@ -276,7 +314,11 @@ export const SettingsForm: React.FC = () => {
                     </div>
                 </section>
 
-                {/* API Keys */}
+                {/* end of Workspace tab wrapper */}
+                </>)}
+
+                {/* Pipeline tab */}
+                {activeTab === 'pipeline' && (<>
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center justify-between">
                         <div className="flex items-center gap-2">
@@ -423,7 +465,11 @@ export const SettingsForm: React.FC = () => {
                     </div>
                 </section>
 
-                {/* Transcript Source (User's own Supabase — optional) */}
+                {/* end of Pipeline tab wrapper */}
+                </>)}
+
+                {/* Integrations tab */}
+                {activeTab === 'integrations' && (<>
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center gap-2">
                         <Database className="w-5 h-5 text-emerald-400" />
@@ -456,7 +502,7 @@ export const SettingsForm: React.FC = () => {
                     </div>
                 </section>
 
-                {/* Experimental Features */}
+                {/* Experimental Features — still Integrations tab */}
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden p-6 flex items-center justify-between">
                     <div>
                         <h3 className="font-semibold text-white flex items-center gap-2">
@@ -476,7 +522,11 @@ export const SettingsForm: React.FC = () => {
                     </button>
                 </section>
 
-                {/* Telemetry & Collective Intelligence */}
+                {/* End of Integrations tab wrapper */}
+                </>)}
+
+                {/* Privacy tab */}
+                {activeTab === 'privacy' && (<>
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="p-6">
                         <div className="flex items-start justify-between">
@@ -535,8 +585,9 @@ export const SettingsForm: React.FC = () => {
                         </div>
                     </div>
                 </section>
+                </>)}
 
-                {/* Auto-Save Status Indicator */}
+                {/* Auto-Save Status Indicator — always visible across all tabs. */}
                 <div className="sticky bottom-6 flex justify-end">
                     <div className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 ${saveStatus === 'saving' ? 'bg-brand-600/20 text-brand-400 border border-brand-500/30' :
                         saveStatus === 'saved' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :

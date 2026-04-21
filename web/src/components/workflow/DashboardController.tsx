@@ -5,8 +5,8 @@ import { LiveProcessingWidget } from './LiveProcessingWidget';
 import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
 import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
-import { CreatorSignalsCard } from '../upgrade/CreatorSignalsCard';
 import { CreditsStatusBanner } from './CreditsStatusBanner';
+import { FirstVisitHint } from './FirstVisitHint';
 import { ClipsApi, SettingsApi } from '../../lib/api';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
@@ -163,23 +163,27 @@ export const DashboardController: React.FC = () => {
         );
     }
 
+    const scrollToUpload = () => {
+        if (typeof document === 'undefined') return;
+        const el = document.getElementById('upload-zone');
+        if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    };
+
     return (
         <div className="flex flex-col gap-12">
+            {/* 0. First-visit acknowledgment — recognizes completed onboarding.
+                NEVER asks the user to reconfigure. Shown once, then dismissed
+                permanently via profiles.first_dashboard_visit_at. */}
+            <FirstVisitHint onScrollToUpload={scrollToUpload} />
+
+            {/* 1. Alerts first — credits banner only shows when something's wrong. */}
             <CreditsStatusBanner />
-            {userTier === 'free' && (
-                <ProUpgradeCard
-                    onActivated={() => setUserTier('pro')}
-                    youtubeConnected={youtubeConnected}
-                    onYouTubeConnected={() => setYoutubeConnected(true)}
-                />
-            )}
-            {/* Creator Signals extracted from the user's own shorts — feeds
-                the Clips Ranker. Available to all users with a valid API key.
-                Long-form episode analysis lives in Azelia Studio, not Clips. */}
-            {youtubeConnected && <CreatorSignalsCard />}
-            <YouTubeNudge />
+
+            {/* 2. Primary workflow: library of processed episodes. This is the
+                main reason the user opens the dashboard. */}
             <LibraryView onProcessEpisode={handleProcessEpisode} />
 
+            {/* 3. Divider + manual upload fallback. */}
             <div className="relative">
                 <div className="absolute inset-0 flex items-center" aria-hidden="true">
                     <div className="w-full border-t border-white/5"></div>
@@ -189,16 +193,32 @@ export const DashboardController: React.FC = () => {
                 </div>
             </div>
 
-            <UploadZone
-                onJobStarted={handleUploadProcess}
-                requireApiKey={() => {
-                    if (hasApiKey === false) {
-                        setShowApiKeyModal(true);
-                        return false;
-                    }
-                    return true;
-                }}
-            />
+            <div id="upload-zone">
+                <UploadZone
+                    onJobStarted={handleUploadProcess}
+                    requireApiKey={() => {
+                        if (hasApiKey === false) {
+                            setShowApiKeyModal(true);
+                            return false;
+                        }
+                        return true;
+                    }}
+                />
+            </div>
+
+            {/* 4. YouTube nudge — only surfaces when NOT connected yet. */}
+            <YouTubeNudge />
+
+            {/* 5. Secondary: upgrade path for free-tier users. */}
+            {userTier === 'free' && (
+                <ProUpgradeCard
+                    onActivated={() => setUserTier('pro')}
+                    youtubeConnected={youtubeConnected}
+                    onYouTubeConnected={() => setYoutubeConnected(true)}
+                />
+            )}
+            {/* Note: CreatorSignalsCard lives in /dashboard/intelligence now —
+                it's an IC Cascade enrichment workflow, not a primary action. */}
 
             <MissingApiKeyModal
                 isOpen={showApiKeyModal}

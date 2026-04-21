@@ -81,7 +81,7 @@ export const CreditsStatusBanner: React.FC = () => {
     const allBroken = !status.any_provider_ok;
 
     return (
-        <div className={`rounded-2xl border p-5 space-y-3 ${allBroken ? 'border-red-500/30 bg-red-500/5' : 'border-amber-500/30 bg-amber-500/5'}`}>
+        <div className={`rounded-2xl border p-5 space-y-3 ${allBroken ? 'border-red-500/50 bg-red-500/10' : 'border-amber-500/50 bg-amber-500/10'}`}>
             {problems.map(({ provider, s }) => {
                 const copy = s.reason ? REASON_COPY[s.reason] : null;
                 const severityColor = copy?.severity === 'error' ? 'text-red-400' : 'text-amber-400';
