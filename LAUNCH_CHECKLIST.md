@@ -25,9 +25,15 @@
 ## 2. Backend
 
 ### `server/routes/upgrade.py`
-- `BETA_DURATION_DAYS = 90` — the "3 months Pro" promo. When launch is confirmed:
-  - Either extend this for users who signup close to launch (grandfather them), or
-  - Migrate to a paid model and retire this promo entirely.
+- **Pro offer model (updated 2026-04-20):** 3-month redemption window grants
+  12 months of Pro. Controlled by three constants:
+  - `PRO_DURATION_DAYS = 365` (12 months granted per redemption)
+  - `REDEMPTION_WINDOW_DAYS = 90` (3 months to redeem)
+  - `BETA_START = datetime(2026, 5, 6, ...)` — **UPDATE this to the real public
+    launch date** when confirmed. All other dates derive from it.
+- Paid Pro pricing activates at least 3 months AFTER
+  `BETA_START + REDEMPTION_WINDOW_DAYS`. Put billing system development
+  behind that date.
 
 ### Telemetry consent wording (`packages/core/services/telemetry.py`)
 - References to "beta" in `track_consent_change` response messages should be
@@ -43,14 +49,17 @@
   long-term; the client computation is redundant once badges live in the DB).
 
 ### `web/src/components/upgrade/ProUpgradeCard.tsx`
-- Copy still says "Beta gratuita" and "3 meses". Update when pricing is finalized.
+- Copy aligned with redemption model ("3-month window to redeem 12 months of Pro",
+  button "Redeem 12 months of Pro"). Update when pricing is finalized post-window.
 
 ---
 
 ## 4. Legal / landing
 
 ### `celia-clips-landing/astro-landing/src/pages/terms.astro`
-- Section 5 "Pro — beta gratuita" describes the trade. Revisit wording when beta ends.
+- Section 5 "Pro — beta redemption program" describes the 3-month redemption
+  window + 12 months of Pro + telemetry consent. Update wording when beta ends
+  and paid pricing activates.
 
 ### `celia-clips-landing/astro-landing/src/pages/privacy.astro`
 - "Vigente desde abril de 2026" — update the effective date if the policy changes

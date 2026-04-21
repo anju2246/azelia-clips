@@ -1,8 +1,15 @@
 """
 Upgrade Routes — Free → Pro activation.
 
-Beta Pro: free 3-month trial. No payment required.
-Writes directly to Supabase REST API using anon key (RLS must allow user to update own row).
+Beta Pro model (effective 2026-04-20):
+- During the BETA, users have a 3-month REDEMPTION WINDOW to claim Pro.
+- Claiming Pro during that window grants 12 MONTHS of full access.
+- Users who don't redeem inside the window remain on Free; Pro
+  pricing activates 3 months after the redemption window closes.
+
+Redemption window start is configured via the BETA_START constant
+below. When the actual launch date is confirmed, update that single
+value (see LAUNCH_CHECKLIST.md §7). Everything else derives from it.
 """
 
 from datetime import datetime, timezone, timedelta
@@ -16,7 +23,23 @@ from packages.core.config import settings
 
 router = APIRouter()
 
-BETA_DURATION_DAYS = 90  # 3 months
+# Duration of Pro access once redeemed (12 months).
+PRO_DURATION_DAYS = 365
+
+# Length of the window within which users can redeem Pro (3 months).
+REDEMPTION_WINDOW_DAYS = 90
+
+# Placeholder start of the public redemption window. UPDATE this when
+# the Show HN launch date is locked. Before this date the endpoint
+# still accepts redemptions (helpful for pre-launch dogfooding); after
+# BETA_START + REDEMPTION_WINDOW_DAYS the endpoint returns 410.
+BETA_START = datetime(2026, 5, 6, tzinfo=timezone.utc)
+
+
+def _redemption_window_open(now: datetime) -> bool:
+    """Inside the redemption window a POST /upgrade/pro is allowed."""
+    closes = BETA_START + timedelta(days=REDEMPTION_WINDOW_DAYS)
+    return now <= closes
 
 
 class UpgradeResponse(BaseModel):
@@ -30,7 +53,10 @@ class UpgradeResponse(BaseModel):
 async def activate_pro(user: User = Depends(require_auth)):
     """
     Activate beta Pro for the authenticated user.
-    Sets tier='pro' and pro_expires_at = now + 90 days in their profiles row.
+
+    Grants 12 months of Pro access when the user redeems inside the
+    3-month redemption window. Returns 410 Gone once the window has
+    closed (caller should show a "redemption window closed" UI).
 
     Uses the service role key because profiles.tier / pro_expires_at are
     guarded by the enforce_profile_column_restrictions trigger (see migration
@@ -38,6 +64,13 @@ async def activate_pro(user: User = Depends(require_auth)):
     is when service role calls. user.id is trusted here because require_auth
     already verified the caller's JWT server-side.
     """
+    now = datetime.now(timezone.utc)
+    if not _redemption_window_open(now):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail="The Pro redemption window has closed.",
+        )
+
     svc_key = getattr(settings, "supabase_service_role_key", "") or ""
     if not svc_key:
         raise HTTPException(
@@ -45,7 +78,7 @@ async def activate_pro(user: User = Depends(require_auth)):
             detail="Server misconfiguration: SUPABASE_SERVICE_ROLE_KEY is required for Pro activation.",
         )
 
-    pro_expires_at = (datetime.now(timezone.utc) + timedelta(days=BETA_DURATION_DAYS)).isoformat()
+    pro_expires_at = (now + timedelta(days=PRO_DURATION_DAYS)).isoformat()
 
     async with httpx.AsyncClient() as client:
         res = await client.patch(
@@ -79,8 +112,28 @@ async def activate_pro(user: User = Depends(require_auth)):
         tier="pro",
         pro_expires_at=pro_expires_at,
         telemetry_enabled=True,
-        message="Pro activated — 3 months of full IC Cascade access.",
+        message="Pro activated — 12 months of full IC Cascade access.",
     )
+
+
+@router.get("/upgrade/redemption")
+async def get_redemption_info():
+    """Public endpoint (no auth required) describing the beta redemption window.
+
+    Used by the UI to show 'Pro redemption window — X days left' copy and to
+    disable the activate button once the window closes.
+    """
+    now = datetime.now(timezone.utc)
+    closes = BETA_START + timedelta(days=REDEMPTION_WINDOW_DAYS)
+    days_remaining = max(0, (closes - now).days)
+    return {
+        "beta_start": BETA_START.isoformat(),
+        "window_days": REDEMPTION_WINDOW_DAYS,
+        "closes_at": closes.isoformat(),
+        "days_remaining": days_remaining,
+        "is_open": now <= closes,
+        "pro_duration_days": PRO_DURATION_DAYS,
+    }
 
 
 @router.get("/upgrade/status")
