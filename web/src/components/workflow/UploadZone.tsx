@@ -1,8 +1,25 @@
 import React, { useState, useRef } from 'react';
-import { Upload, X, Settings2, Video, HardDrive } from 'lucide-react';
+import { Upload, X, Settings2, Video, HardDrive, Zap, Sliders } from 'lucide-react';
 import { ClipsApi, type ProcessRequest, type ProcessLocalRequest } from '../../lib/api';
 import toast from 'react-hot-toast';
 import { FilePicker } from './FilePicker';
+
+// Preset profiles surface the most common config choices upfront so users
+// don't have to hunt for the advanced Config panel. Quick = the default we
+// ship; Custom reveals the full panel for power users.
+type PresetId = 'quick' | 'custom';
+const PRESETS: Record<PresetId, { label: string; blurb: string; config: Partial<ProcessRequest> }> = {
+    quick: {
+        label: 'Quick',
+        blurb: '30–90s, score ≥ 70 — good default for most podcasts.',
+        config: { min_duration: 30, max_duration: 90, min_score: 70 },
+    },
+    custom: {
+        label: 'Custom',
+        blurb: 'Fine-tune duration, score threshold, and transcription source.',
+        config: {},
+    },
+};
 
 interface UploadZoneProps {
     onJobStarted: (jobId: string) => void;
@@ -16,7 +33,9 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApi
     const [isPickerOpen, setIsPickerOpen] = useState(false);
     const [isHovering, setIsHovering] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [showConfig, setShowConfig] = useState(false);
+    const [preset, setPreset] = useState<PresetId>('quick');
+    // Config panel is only shown when the user explicitly picks Custom.
+    const showConfig = preset === 'custom';
 
     // Default configuration
     const [config, setConfig] = useState<ProcessRequest>({
@@ -140,20 +159,42 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApi
                             {localVideoPath ? 'Linked Local Path' : file ? `${(file.size / (1024 * 1024)).toFixed(2)} MB` : ''}
                         </p>
 
+                        {/* Preset picker — the most common decision surfaced up-front.
+                            Switching to Custom reveals the Config panel below. */}
+                        <div className="w-full max-w-md mx-auto mb-6">
+                            <div className="grid grid-cols-2 gap-2 p-1 bg-zinc-900/60 border border-white/5 rounded-xl">
+                                {(Object.keys(PRESETS) as PresetId[]).map(id => {
+                                    const p = PRESETS[id];
+                                    const Icon = id === 'quick' ? Zap : Sliders;
+                                    const isActive = preset === id;
+                                    return (
+                                        <button
+                                            key={id}
+                                            type="button"
+                                            onClick={() => {
+                                                setPreset(id);
+                                                if (id === 'quick') {
+                                                    setConfig(prev => ({ ...prev, ...PRESETS.quick.config }));
+                                                }
+                                            }}
+                                            className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${isActive ? 'bg-brand-500/20 text-white border border-brand-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
+                                        >
+                                            <Icon className="w-4 h-4" />
+                                            {p.label}
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                            <p className="text-xs text-zinc-500 mt-2 text-center">{PRESETS[preset].blurb}</p>
+                        </div>
+
                         <div className="flex items-center gap-4">
-                            <button
-                                onClick={() => setShowConfig(!showConfig)}
-                                className="px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white border border-zinc-700 rounded-xl font-medium transition-colors flex items-center gap-2 cursor-pointer"
-                            >
-                                <Settings2 className="w-4 h-4" />
-                                Config
-                            </button>
                             <button
                                 onClick={handleProcess}
                                 disabled={isProcessing}
                                 className="px-8 py-2.5 bg-brand-600 hover:bg-brand-500 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                             >
-                                {isProcessing ? 'Starting...' : 'Process Video'}
+                                {isProcessing ? 'Starting…' : 'Process Video'}
                             </button>
                         </div>
                     </div>

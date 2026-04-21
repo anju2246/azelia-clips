@@ -118,40 +118,57 @@ export const ClipReviewList: React.FC = () => {
         <div className="w-full">
             {jobId && (
                 <>
+                    {/* Breadcrumb — keeps the user oriented when navigating from
+                        History → Job → Trash. Clicking the first segment goes home. */}
+                    <nav className="flex items-center gap-2 text-xs font-mono uppercase tracking-widest text-zinc-500 mb-4">
+                        <button
+                            onClick={() => {
+                                const url = new URL(window.location.href);
+                                url.searchParams.delete('job');
+                                window.history.pushState({}, '', url.toString());
+                                setJobId(null);
+                                setJob(null);
+                                setSelectedClipIndex(null);
+                                setShowTrash(false);
+                            }}
+                            className="hover:text-white transition-colors"
+                        >
+                            History
+                        </button>
+                        <span className="text-zinc-700">/</span>
+                        <span className={showTrash ? 'hover:text-white transition-colors cursor-pointer' : 'text-zinc-300'}
+                            onClick={showTrash ? () => setShowTrash(false) : undefined}
+                        >
+                            Job #{jobId.slice(0, 8)}
+                        </span>
+                        {showTrash && (
+                            <>
+                                <span className="text-zinc-700">/</span>
+                                <span className="text-zinc-300">Trash</span>
+                            </>
+                        )}
+                    </nav>
+
                     <div className="flex items-center justify-between mb-8">
                         <div>
-                            <button
-                                onClick={() => {
-                                    const url = new URL(window.location.href);
-                                    url.searchParams.delete('job');
-                                    window.history.pushState({}, '', url.toString());
-                                    setJobId(null);
-                                    setJob(null);
-                                    setSelectedClipIndex(null);
-                                    setShowTrash(false);
-                                }}
-                                className="text-brand-400 text-sm flex items-center gap-1 hover:text-brand-300 mb-2 w-max transition-colors"
-                            >
-                                <ArrowLeft className="w-4 h-4" /> Volver al Historial
-                            </button>
                             <h2 className="text-3xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-400">
                                 Review Clips
                             </h2>
                             <p className="text-zinc-500 mt-1">
-                                {clips.length} clips generados
+                                {clips.length} clips generated
                             </p>
                         </div>
-                        
+
                         <button
                             onClick={() => setShowTrash(!showTrash)}
                             className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium ${
-                                showTrash 
-                                    ? 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 hover:text-white' 
+                                showTrash
+                                    ? 'bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 hover:text-white'
                                     : 'bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10'
                             }`}
                         >
                             {showTrash ? <ArrowLeft className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
-                            {showTrash ? 'Volver a Clips' : 'Ver Papelera'}
+                            {showTrash ? 'Back to clips' : 'View trash'}
                         </button>
                     </div>
 
