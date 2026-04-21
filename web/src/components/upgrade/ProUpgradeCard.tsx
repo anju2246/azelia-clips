@@ -106,7 +106,7 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                         <CheckCircle2 className="w-5 h-5 text-green-400" />
                     </div>
                     <div>
-                        <h3 className="font-semibold text-white text-sm">Pro activated — 3 free months</h3>
+                        <h3 className="font-semibold text-white text-sm">Pro activated — 12 months</h3>
                         <p className="text-xs text-green-400">Full access to the IC Cascade</p>
                     </div>
                 </div>
@@ -148,8 +148,8 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                     <Sparkles className="w-5 h-5 text-brand-400" />
                 </div>
                 <div>
-                    <h3 className="font-semibold text-white text-sm">Azelia Pro — Free Beta</h3>
-                    <p className="text-xs text-zinc-400">3 months at no cost</p>
+                    <h3 className="font-semibold text-white text-sm">Azelia Pro — Beta Redemption</h3>
+                    <p className="text-xs text-zinc-400">3-month window to redeem 12 months of Pro</p>
                 </div>
             </div>
 
@@ -175,8 +175,9 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                 </p>
             </div>
 
-            {/* Pro-specific consent — the telemetry opt-in is the "trade" for the free 3 months.
-                 General TyC and Privacy were already accepted at signup; they're not re-asked here. */}
+            {/* Pro-specific consent — the telemetry opt-in is the "trade" for
+                redeeming 12 months of Pro during the 3-month beta window.
+                General Terms and Privacy were accepted at signup; not re-asked. */}
             <label className="flex items-start gap-2.5 cursor-pointer group">
                 <input
                     type="checkbox"
@@ -186,8 +187,8 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                 />
                 <span className="text-xs text-zinc-300 leading-relaxed">
                     I agree that my <span className="font-medium text-white">anonymous metrics</span> (scores,
-                    duration, hook types, aggregate YouTube performance) contribute to the collective IC while
-                    I am on Pro. Details in the{' '}
+                    duration, hook types, aggregate YouTube performance) contribute to the collective IC
+                    while I am on Pro. Details in the{' '}
                     <a href="https://azelia.ai/privacy" target="_blank" rel="noopener" className="underline decoration-dotted hover:text-white">
                         Privacy Policy
                     </a>.
@@ -201,7 +202,7 @@ export const ProUpgradeCard: React.FC<ProUpgradeCardProps> = ({ onActivated, you
                 className="w-full flex items-center justify-center gap-2 rounded-xl bg-brand-500 hover:bg-brand-400 disabled:opacity-40 disabled:cursor-not-allowed text-white font-medium text-sm py-3 transition-colors"
             >
                 {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4" />}
-                {loading ? 'Activating…' : 'Activar Pro (3 meses)'}
+                {loading ? 'Activating…' : 'Redeem 12 months of Pro'}
             </button>
 
             <p className="text-center text-xs text-zinc-500">
