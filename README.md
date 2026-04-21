@@ -20,6 +20,45 @@ Azelia Clips takes a podcast episode and outputs ready-to-post vertical clips wi
 podcast.mp4 (60 min) → 5 vertical clips (30-90s each) + subtitles + captions
 ```
 
+## Cost transparency
+
+Azelia is **BYOK** — you pay the AI provider directly, nothing routes through us.
+Typical cost per 60-minute episode:
+
+| Provider + model                    | Input $/M | Output $/M | Est. per episode |
+|-------------------------------------|-----------|------------|------------------|
+| Anthropic Claude Haiku 4.5          | $1.00     | $5.00      | **~$0.07–$0.15** |
+| Anthropic Claude Sonnet 4.6         | $3.00     | $15.00     | **~$0.40–$0.80** |
+| Anthropic Claude Opus 4.7           | $15.00    | $75.00     | ~$2.00–$4.00     |
+| OpenAI GPT-4o                       | $2.50     | $10.00     | ~$0.30–$0.70     |
+| OpenAI GPT-4o Mini                  | $0.15     | $0.60      | ~$0.04–$0.08     |
+| Groq Llama 3.3 70B (free tier)      | $0        | $0         | $0 (rate-limited) |
+
+Transcription runs locally via Whisper/MLX-Whisper (Apple Silicon optimized) —
+**zero API cost**. The multi-agent pipeline (Finder → Critic → Ranker) sends
+~50k input + ~15k output tokens to the LLM you choose.
+
+Default is Haiku — switch to Sonnet in Settings → Pipeline if you want
+sharper curation at a higher cost. Nothing is called without your key.
+
+## Azelia Clips vs. the alternatives
+
+|                        | Azelia Clips           | OpusClip / Vizard | Descript                |
+|------------------------|------------------------|-------------------|-------------------------|
+| License                | **MIT — open source**  | Proprietary       | Proprietary             |
+| Runtime                | **Self-hosted, local** | Cloud only        | Cloud + desktop         |
+| Pricing model          | **BYOK (~$0.10/ep)**   | $15–80 / month    | $12–40 / month          |
+| Your video stays local | **Yes, by default**    | Uploaded to cloud | Uploaded to cloud       |
+| Data for training      | **Opt-in anonymous**   | Depends (ToS)     | Depends (ToS)           |
+| Multi-agent curation   | **Yes (3 agents)**     | Single model      | Single model            |
+| Configurable prompts   | **Yes**                | No                | Limited                 |
+| Swap providers         | **Any BYOK**           | No                | No                      |
+
+Trade-offs Azelia doesn't try to hide: you need a local machine capable of
+running Whisper (Apple Silicon or NVIDIA GPU recommended for speed), you
+manage your own API keys, and you are responsible for your inference costs.
+In exchange you keep control of your pipeline and your content.
+
 ## Quick Start
 
 ### Install
