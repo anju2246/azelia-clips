@@ -34,9 +34,24 @@ class YouTubeHistoricalExtractor:
 
     SUPABASE_SYNC_ENABLED = True
 
-    def __init__(self, telemetry_service: TelemetryService):
+    # Default model for retroactive analysis. Haiku handles the classification task
+    # well enough and costs ~5x less than Sonnet (~$0.32 vs $1.60 per 500 shorts).
+    DEFAULT_ANTHROPIC_MODEL = "claude-haiku-4-5-20251001"
+
+    def __init__(
+        self,
+        telemetry_service: TelemetryService,
+        anthropic_model: Optional[str] = None,
+        output_language: str = "English",
+    ):
         self.telemetry = telemetry_service
         self.llm = get_llm()
+        self.anthropic_model = anthropic_model or self.DEFAULT_ANTHROPIC_MODEL
+        # Human-readable language label (e.g. "Spanish", "Japanese"). Used in
+        # the `Respond in X` instruction at the top of the analysis prompt so
+        # `retention_analysis` and `growth_driver` values end up in the
+        # creator's language — consistent with the live clip pipeline.
+        self.output_language = output_language or "English"
 
     async def fetch_transcript(self, video_id: str) -> Tuple[Optional[str], str]:
         """Fetch transcript via API first, fall back to yt-dlp + whisper."""
@@ -161,6 +176,38 @@ class YouTubeHistoricalExtractor:
         logger.info("Fetched analytics for %d/%d videos", len(analytics_map), len(video_ids))
         return analytics_map
 
+    async def _call_anthropic(self, system_prompt: str, user_prompt: str, temperature: float = 0.1) -> str:
+        """Direct Anthropic call using the chosen model.
+
+        Historical analysis deliberately uses its own model choice (Haiku by default)
+        so the user can trade cost vs. quality without changing the global `anthropic_model`
+        that drives the live clips pipeline.
+        """
+        from packages.core.config import settings as _settings
+
+        api_key = getattr(_settings, "anthropic_api_key", "") or ""
+        if not api_key:
+            raise RuntimeError("Anthropic API key not configured — retroactive sync needs Anthropic.")
+
+        try:
+            from anthropic import Anthropic
+        except ImportError as e:
+            raise RuntimeError(f"anthropic SDK not installed: {e}")
+
+        client = Anthropic(api_key=api_key)
+        # Anthropic SDK is sync; wrap in a thread to avoid blocking the event loop.
+        def _run():
+            resp = client.messages.create(
+                model=self.anthropic_model,
+                max_tokens=1500,
+                temperature=temperature,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+            return resp.content[0].text if resp.content else ""
+
+        return await asyncio.to_thread(_run)
+
     async def analyze_video(self, video: dict) -> Optional[dict]:
         """Fetches transcript and prompts LLM for IC analysis (Stage 1: Structural Extraction)."""
         video_id = video.get("video_id")
@@ -198,27 +245,30 @@ class YouTubeHistoricalExtractor:
             if analytics.get("estimatedMinutesWatched"):
                 metrics_context += f"\n- Minutos Totales Vistos: {analytics['estimatedMinutesWatched']:.1f}"
 
-        system_prompt = """Eres un Analista de Audiencias experto en YouTube Shorts.
-Analiza este YouTube Short histórico combinando su transcripción con las métricas de rendimiento reales.
-Devuelve SOLO un JSON con estos campos (sin markdown, sin explicación):
-{
+        system_prompt = f"""You are an audience analyst specialised in YouTube Shorts.
+
+⚠️ OUTPUT LANGUAGE: Respond in {self.output_language}. The free-text fields
+(`retention_analysis`, `growth_driver`, and each `core_topics` entry) MUST be
+written in {self.output_language}. The enum values for `hook_type`,
+`emotional_charge`, and `episode_format` stay in English as shown.
+
+Analyze this historical YouTube Short by combining its transcript with the real
+performance metrics. Return ONLY a JSON object with these fields (no markdown,
+no prose):
+{{
   "hook_type": "question|storytelling|surprising_fact|controversial_statement|negative_frame|tutorial|weak",
   "emotional_charge": "inspirational|urgent|comedic|outrage|educational|empathetic",
   "engagement_potential": 1-10,
   "core_topics": ["topic1", "topic2"],
   "episode_format": "solo|interview|co_host|panel|narrative",
-  "retention_analysis": "Una frase explicando por qué este video retuvo o no a la audiencia",
-  "growth_driver": "Una frase sobre si este video atrajo suscriptores y por qué"
-}"""
+  "retention_analysis": "One sentence explaining why this video did or did not retain the audience",
+  "growth_driver": "One sentence about whether this video attracted subscribers and why"
+}}"""
 
-        user_prompt = f"Título Original: {title}{metrics_context}\n\nTRANSCRIPT:\n{transcript}"
+        user_prompt = f"Original Title: {title}{metrics_context}\n\nTRANSCRIPT:\n{transcript}"
 
         try:
-            result_json = await self.llm.generate(
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                temperature=0.1,
-            )
+            result_json = await self._call_anthropic(system_prompt, user_prompt, temperature=0.1)
 
             # Strip markdown fences if present
             if result_json.startswith("```"):
@@ -341,7 +391,29 @@ Devuelve SOLO un JSON con estos campos (sin markdown, sin explicación):
 
         _report(15, f"🎬 {len(short_ids)} shorts detectados. Obteniendo analíticas de YouTube...")
         analytics_map = await self.fetch_youtube_analytics(creds, channel_id, short_ids)
-        _report(25, f"📊 Analíticas obtenidas. Iniciando análisis con IA...")
+        _report(25, f"📊 Analíticas obtenidas. Filtrando shorts ya analizados...")
+
+        # Skip shorts that already have an LLM analysis in our local SQLite —
+        # re-running historical sync should NEVER re-bill the creator for
+        # content we already processed.
+        try:
+            _abspath = os.path.abspath(self.YT_DB_PATH)
+            _c = sqlite3.connect(_abspath)
+            placeholders = ",".join(["?"] * len(short_ids)) if short_ids else ""
+            if placeholders:
+                _rows = _c.execute(
+                    f"SELECT video_id FROM youtube_shorts WHERE user_id=? AND video_id IN ({placeholders}) AND llm_analysis IS NOT NULL AND llm_analysis != ''",
+                    (user_id, *short_ids),
+                ).fetchall()
+                _analyzed = {r[0] for r in _rows}
+            else:
+                _analyzed = set()
+            _c.close()
+            if _analyzed:
+                short_ids = [v for v in short_ids if v not in _analyzed]
+                _report(26, f"⏭️  Saltando {len(_analyzed)} shorts ya analizados. Quedan {len(short_ids)}.")
+        except Exception as _filter_err:
+            logger.warning("Could not filter already-analyzed shorts: %s", _filter_err)
 
         # Set total in JobStore for accurate percentage
         if _store and job_id:

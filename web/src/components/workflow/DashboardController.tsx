@@ -8,6 +8,7 @@ import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 import { CreditsStatusBanner } from './CreditsStatusBanner';
 import { FirstVisitHint } from './FirstVisitHint';
 import { ClipsApi, SettingsApi } from '../../lib/api';
+import { getPipelineDefaults } from '../../lib/pipelineDefaults';
 import { supabase } from '../../lib/supabase';
 import toast from 'react-hot-toast';
 
@@ -130,13 +131,7 @@ export const DashboardController: React.FC = () => {
         guardWithApiKey(async () => {
             const loadingToast = toast.loading('Starting episode processing...');
             try {
-                const response = await ClipsApi.processEpisode(episodeNum, {
-                    min_duration: 30,
-                    max_duration: 90,
-                    min_score: 70,
-                    subtitle_style: 'highlight',
-                    transcription_source: 'local_whisper'
-                });
+                const response = await ClipsApi.processEpisode(episodeNum, getPipelineDefaults());
                 toast.success('Episode processing started!', { id: loadingToast });
                 setAndPersistJobId(response.id);
             } catch (error: any) {

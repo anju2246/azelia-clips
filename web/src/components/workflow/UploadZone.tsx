@@ -1,6 +1,7 @@
 import React, { useState, useRef } from 'react';
 import { Upload, X, Settings2, Video, HardDrive, Zap, Sliders } from 'lucide-react';
 import { ClipsApi, type ProcessRequest, type ProcessLocalRequest } from '../../lib/api';
+import { getPipelineDefaults, savePipelineDefaults } from '../../lib/pipelineDefaults';
 import toast from 'react-hot-toast';
 import { FilePicker } from './FilePicker';
 
@@ -37,14 +38,14 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApi
     // Config panel is only shown when the user explicitly picks Custom.
     const showConfig = preset === 'custom';
 
-    // Default configuration
-    const [config, setConfig] = useState<ProcessRequest>({
-        min_duration: 30,
-        max_duration: 90,
-        min_score: 70,
-        subtitle_style: 'highlight',
-        transcription_source: 'local_whisper'
-    });
+    // When Quick is selected we ALWAYS send the Quick preset values — the
+    // user picked "Quick" expecting the shipped defaults, not their last
+    // Custom tuning. When Custom is selected we hydrate from their persisted
+    // tuning so adjustments stick between runs.
+    const [config, setConfig] = useState<ProcessRequest>(() => ({
+        ...getPipelineDefaults(),
+        ...PRESETS.quick.config,
+    }));
 
     const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -70,6 +71,16 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApi
         const loadingToast = toast.loading(file ? 'Uploading file to local engine (this may take a moment)...' : 'Starting local process...');
 
         try {
+            // Persist Custom config so subsequent runs (library, episodes) use the user's tuned values.
+            if (preset === 'custom') {
+                savePipelineDefaults({
+                    min_duration: config.min_duration,
+                    max_duration: config.max_duration,
+                    min_score: config.min_score,
+                    subtitle_style: config.subtitle_style,
+                    transcription_source: config.transcription_source,
+                });
+            }
             let response;
             if (localVideoPath) {
                 const req: ProcessLocalRequest = { ...config, video_path: localVideoPath };
@@ -174,7 +185,11 @@ export const UploadZone: React.FC<UploadZoneProps> = ({ onJobStarted, requireApi
                                             onClick={() => {
                                                 setPreset(id);
                                                 if (id === 'quick') {
+                                                    // Reset to the shipped Quick values — never inherit Custom state.
                                                     setConfig(prev => ({ ...prev, ...PRESETS.quick.config }));
+                                                } else {
+                                                    // Switching to Custom hydrates from the user's last tuned run.
+                                                    setConfig(prev => ({ ...prev, ...getPipelineDefaults() }));
                                                 }
                                             }}
                                             className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all ${isActive ? 'bg-brand-500/20 text-white border border-brand-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent'}`}

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Play, Folder, CheckCircle, AlertCircle, Loader2, Upload } from 'lucide-react';
+import { getPipelineDefaults } from '../../lib/pipelineDefaults';
 
 interface Episode {
     id: string;
@@ -40,20 +41,20 @@ export default function EpisodeList() {
         setProcessingId(`EP${epNumber}`);
         try {
             // Get settings from LocalStorage
-            const transcriptionSource = localStorage.getItem('azelia_transcription_source') || 'local_whisper';
             const supabaseUrl = localStorage.getItem('azelia_supabase_url') || '';
             const supabaseKey = localStorage.getItem('azelia_supabase_key') || '';
             const assemblyKey = localStorage.getItem('azelia_assemblyai_key') || '';
-            // Default score/style if not set (though SettingsDashboard doesn't save these to LS yet, we should use defaults)
-            // TODO: Ensure SettingsDashboard saves min_score to LS if we want it global
+            const defaults = getPipelineDefaults();
 
             const res = await fetch(`${API_URL}/episodes/${epNumber}/process`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
-                    min_score: 70, // TODO: Read from settings if available
-                    subtitle_style: 'highlight', // TODO: Read from settings
-                    transcription_source: transcriptionSource,
+                    min_score: defaults.min_score,
+                    min_duration: defaults.min_duration,
+                    max_duration: defaults.max_duration,
+                    subtitle_style: defaults.subtitle_style,
+                    transcription_source: defaults.transcription_source,
                     supabase_url: supabaseUrl,
                     supabase_key: supabaseKey,
                     assemblyai_key: assemblyKey

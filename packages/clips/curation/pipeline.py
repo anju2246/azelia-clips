@@ -1,5 +1,5 @@
 import json
-from typing import List
+from typing import List, Optional
 from rich.console import Console
 
 from packages.clips.transcription.transcriber import Transcript
@@ -55,31 +55,39 @@ class CurationPipeline:
             
         return 'invalid'
 
-    def _apply_performance_bonus(self, clip: CuratedClip) -> CuratedClip:
-        """Applies Inminente YouTube analytics performance heuristics."""
+    def _apply_performance_bonus(self, clip: CuratedClip, config: Optional[CurationConfig] = None) -> CuratedClip:
+        """Generic post-ranking bonus: duration + category.
+
+        The Spanish-keyword topic bonuses that used to live here were
+        Inminente-specific and contradicted the podcast-aware pipeline (a
+        business podcast was getting +3 for mentions of 'trabajo' regardless
+        of niche). They're now gated behind `config.content_niche == ''` —
+        i.e., applied only when the pipeline has no podcast identity at all.
+        """
         bonus = 0
-        
-        # DURATION BONUS
+
+        # DURATION BONUS (universal — mirrors YouTube's platform-level preferences)
         if 30 <= clip.duration <= 40: bonus += 5
         elif 40 < clip.duration <= 60: bonus += 3
         elif 25 <= clip.duration < 30: bonus += 2
         elif clip.duration > 90: bonus -= 3
-        
-        # CATEGORY BONUS
+
+        # CATEGORY BONUS (universal)
         cat = clip.category.lower()
         if 'emotional' in cat or 'story' in cat: bonus += 4
         elif 'insight' in cat: bonus += 1
-        
-        # TOPIC BONUS
-        combined_text = (clip.title + " " + clip.summary).lower()
-        if any(kw in combined_text for kw in ["carrera", "equivoqué", "trabajo", "profesión", "cambiar de rumbo"]):
-            bonus += 3
-        if any(kw in combined_text for kw in ["niño", "infancia", "cuando era pequeño", "nostalgia", "interior"]):
-            bonus += 2
-        if any(kw in combined_text for kw in ["recordar", "legado", "propósito", "sentido de vida"]):
-            bonus += 2
-            
-        # Apply bonus safely
+
+        # Legacy topic keywords only if no podcast identity set — prevents
+        # them from biasing niche-specific podcasts.
+        if config is None or not config.content_niche:
+            combined_text = (clip.title + " " + clip.summary).lower()
+            if any(kw in combined_text for kw in ["carrera", "equivoqué", "trabajo", "profesión", "cambiar de rumbo"]):
+                bonus += 3
+            if any(kw in combined_text for kw in ["niño", "infancia", "cuando era pequeño", "nostalgia", "interior"]):
+                bonus += 2
+            if any(kw in combined_text for kw in ["recordar", "legado", "propósito", "sentido de vida"]):
+                bonus += 2
+
         clip.virality_score.optimal_duration = max(0, min(10, clip.virality_score.optimal_duration + bonus))
         return clip
 
@@ -114,19 +122,20 @@ class CurationPipeline:
             
         console.print(f"[green]✓ Finder proposed {len(candidates)} candidates.[/green]")
 
-        # 2. CRITIC
+        # 2. CRITIC (receives config so it can reject off-topic clips for this podcast)
         approved_critics = self.critic.evaluate_candidates(
-            candidates, transcript, min_duration, max_duration
+            candidates, transcript, min_duration, max_duration, config=config
         )
         if not approved_critics:
             console.print("[yellow]Phase 2 (Critic) rejected all candidates.[/yellow]")
             return []
-            
+
         console.print(f"[green]✓ Critic approved {len(approved_critics)} candidates.[/green]")
 
-        # 3. RANKER
-        # Need top_n logic inside ranker, or we ask ranker to score all approved clips and we sort them
-        ranked_clips = self.ranker.rank_clips(approved_critics, transcript, top_n=len(approved_critics))
+        # 3. RANKER (receives config to blend IC Cascade signals + creator_self)
+        ranked_clips = self.ranker.rank_clips(
+            approved_critics, transcript, top_n=len(approved_critics), config=config
+        )
         
         # Post-Processing
         final_clips = []
@@ -139,7 +148,7 @@ class CurationPipeline:
             if val_status == 'invalid':
                 continue
                 
-            clip = self._apply_performance_bonus(clip)
+            clip = self._apply_performance_bonus(clip, config=config)
             final_clips.append(clip)
             
         # Sort by total score
@@ -151,9 +160,13 @@ class CurationPipeline:
             
         # Cap captions to only the exported/top ones to save tokens
         if episode_number > 0 and final_clips:
+            # Forward language + podcast identity so the caption generator
+            # respects the output-language instruction too.
             cap_config = CurationConfig(
                 podcast_name=podcast_name,
                 guest_name=guest_name,
+                language=config.language if config else "",
+                content_niche=config.content_niche if config else "",
             )
             final_clips = self.ranker.generate_captions(
                 final_clips, transcript, episode_number, cap_config

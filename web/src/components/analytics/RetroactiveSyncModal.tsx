@@ -8,39 +8,48 @@ interface RetroactiveSyncModalProps {
     onSuccess?: (jobId: string) => void;
 }
 
+type RetroactiveModel = 'claude-haiku-4-5-20251001' | 'claude-sonnet-4-6' | 'claude-opus-4-7';
+
+const MODEL_LABELS: Record<RetroactiveModel, { short: string; blurb: string }> = {
+    'claude-haiku-4-5-20251001': { short: 'Haiku 4.5', blurb: 'Cheapest. Good enough for classification.' },
+    'claude-sonnet-4-6':         { short: 'Sonnet 4.6', blurb: 'Best quality/cost balance.' },
+    'claude-opus-4-7':           { short: 'Opus 4.7',  blurb: 'Top quality. ~15× Haiku cost.' },
+};
+
 export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOpen, onClose, onSuccess }) => {
     const [loading, setLoading] = useState(false);
     const [estimate, setEstimate] = useState<any>(null);
     const [error, setError] = useState('');
     const [syncing, setSyncing] = useState(false);
+    const [model, setModel] = useState<RetroactiveModel>('claude-haiku-4-5-20251001');
 
     useEffect(() => {
         if (isOpen) {
-            fetchEstimate();
+            fetchEstimate(model);
         }
-    }, [isOpen]);
+    }, [isOpen, model]);
 
-    const fetchEstimate = async () => {
+    const fetchEstimate = async (chosenModel: RetroactiveModel) => {
         setLoading(true);
         setError('');
         try {
             const { data: { session } } = await supabase.auth.getSession();
-            const res = await fetch('/api/analytics/youtube/historical/estimate', {
+            const res = await fetch(`/api/analytics/youtube/historical/estimate?model=${encodeURIComponent(chosenModel)}`, {
                 headers: {
                     'Authorization': session ? `Bearer ${session.access_token}` : ''
                 }
             });
-            
+
             if (!res.ok) throw new Error('Failed to fetch estimate');
             const data = await res.json();
             setEstimate(data);
-            
+
             // Auto close if nothing to sync
             if (data.total_shorts === 0) {
                 setTimeout(onClose, 2000);
             }
         } catch (err: any) {
-            setError(err.message || 'Error calculando costos');
+            setError(err.message || 'Could not calculate costs');
         } finally {
             setLoading(false);
         }
@@ -54,8 +63,10 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
             const res = await fetch('/api/analytics/youtube/historical/sync', {
                 method: 'POST',
                 headers: {
-                    'Authorization': session ? `Bearer ${session.access_token}` : ''
-                }
+                    'Authorization': session ? `Bearer ${session.access_token}` : '',
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ model }),
             });
             
             if (!res.ok) throw new Error('Historical sync failed');
@@ -93,7 +104,7 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                         Seed Intelligence from Day One
                     </h2>
                             <p className="text-zinc-400 text-sm leading-relaxed mb-6">
-                                Azelia detected your past YouTube videos. Let's analyze your previous Shorts using <strong>{estimate?.model || 'your AI'}</strong> to immediately understand which <em>hooks</em> and formats resonate with your audience.
+                                Azelia detected your past YouTube videos. Analyze your previous Shorts to immediately understand which <em>hooks</em> and formats resonate with your audience. Choose a model based on how you want to trade cost vs. quality.
                             </p>
 
                             {loading ? (
@@ -116,14 +127,37 @@ export const RetroactiveSyncModal: React.FC<RetroactiveSyncModalProps> = ({ isOp
                                         </div>
                                     </div>
 
-                                    <div className="p-4 bg-black/40 border border-white/5 rounded-xl">
-                                        <div className="flex justify-between items-center mb-1">
-                                            <span className="text-sm text-zinc-400">Estimated LLM cost:</span>
-                                            <span className="text-lg font-mono text-emerald-400">${estimate?.estimated_cost_usd < 0.01 ? '< 0.01' : estimate?.estimated_cost_usd?.toFixed(2)} USD</span>
+                                    <div className="p-4 bg-black/40 border border-white/5 rounded-xl space-y-3">
+                                        <div>
+                                            <p className="text-xs text-zinc-500 uppercase tracking-widest mb-2">Model</p>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {(Object.keys(MODEL_LABELS) as RetroactiveModel[]).map(m => {
+                                                    const opt = MODEL_LABELS[m];
+                                                    const cost = estimate?.model_options?.[m];
+                                                    const active = model === m;
+                                                    return (
+                                                        <button
+                                                            key={m}
+                                                            type="button"
+                                                            disabled={syncing}
+                                                            onClick={() => setModel(m)}
+                                                            className={`p-2.5 rounded-lg border text-left transition-all ${active ? 'border-brand-500/50 bg-brand-500/10 text-white' : 'border-white/10 text-zinc-400 hover:border-white/20 hover:bg-white/5'}`}
+                                                        >
+                                                            <div className="text-xs font-semibold">{opt.short}</div>
+                                                            <div className="text-[10px] text-emerald-400 font-mono mt-0.5">
+                                                                {typeof cost === 'number' ? (cost < 0.01 ? '< $0.01' : `$${cost.toFixed(2)}`) : '—'}
+                                                            </div>
+                                                        </button>
+                                                    );
+                                                })}
+                                            </div>
+                                            <p className="text-[10px] text-zinc-600 mt-1.5">{MODEL_LABELS[model].blurb}</p>
                                         </div>
-                                        <div className="text-[10px] text-zinc-600 flex justify-between">
-                                            <span>Model: {estimate?.model}</span>
-                                            <span>${estimate?.cost_per_1M_tokens}/1M tokens</span>
+                                        <div className="flex justify-between items-center pt-2 border-t border-white/5">
+                                            <span className="text-sm text-zinc-400">Estimated cost:</span>
+                                            <span className="text-lg font-mono text-emerald-400">
+                                                {estimate?.estimated_cost_usd < 0.01 ? '< $0.01' : `$${estimate?.estimated_cost_usd?.toFixed(2)} USD`}
+                                            </span>
                                         </div>
                                     </div>
 
