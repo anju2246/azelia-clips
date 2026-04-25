@@ -127,13 +127,9 @@ export const SettingsForm: React.FC = () => {
             setFormData({
                 podcast_name: data.podcast_name,
                 podcast_dir: data.podcast_dir,
-                generate_teasers: data.generate_teasers,
             });
             if (data.ai_provider_order && data.ai_provider_order.length > 0) {
                 setProviderOrder(data.ai_provider_order);
-            }
-            if (data.generate_teasers !== undefined) {
-                setFormData(prev => ({ ...prev, generate_teasers: data.generate_teasers }));
             }
             // Mark ready for auto-save after React settles
             setTimeout(() => { readyForAutoSaveRef.current = true; }, 500);
@@ -500,26 +496,6 @@ export const SettingsForm: React.FC = () => {
                             />
                         </div>
                     </div>
-                </section>
-
-                {/* Experimental Features — still Integrations tab */}
-                <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden p-6 flex items-center justify-between">
-                    <div>
-                        <h3 className="font-semibold text-white flex items-center gap-2">
-                            Generate Teasers & Intros <span className="text-[10px] bg-brand-500/20 text-brand-400 px-2 py-0.5 rounded uppercase tracking-widest border border-brand-500/30">Beta</span>
-                        </h3>
-                        <p className="text-sm text-zinc-500 mt-1">Automatically stitch the best hook to the start of the full episode.</p>
-                    </div>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            const currentVal = formData.generate_teasers ?? settings?.generate_teasers ?? false;
-                            setFormData(prev => ({ ...prev, generate_teasers: !currentVal }));
-                        }}
-                        className={`cursor-pointer transition-colors ${(formData.generate_teasers ?? settings?.generate_teasers ?? false) ? 'text-brand-500' : 'text-zinc-600'}`}
-                    >
-                        {(formData.generate_teasers ?? settings?.generate_teasers ?? false) ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
-                    </button>
                 </section>
 
                 {/* End of Integrations tab wrapper */}
