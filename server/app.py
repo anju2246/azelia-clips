@@ -8,6 +8,7 @@ from server.routes.analytics import router as analytics_router
 from server.routes.auth import router as auth_router
 from server.routes.telemetry_routes import router as telemetry_router
 from server.routes.upgrade import router as upgrade_router
+from server.routes.taxonomy import router as taxonomy_router
 from packages.core.config import settings
 
 from packages.core.db.engine import init_db
@@ -76,6 +77,7 @@ app.include_router(analytics_router, prefix="/api")
 app.include_router(auth_router, prefix="/api")
 app.include_router(telemetry_router, prefix="/api")
 app.include_router(upgrade_router, prefix="/api")
+app.include_router(taxonomy_router, prefix="/api")
 
 @app.get("/api/health")
 def health_check():
