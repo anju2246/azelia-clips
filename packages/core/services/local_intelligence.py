@@ -123,17 +123,27 @@ class LocalIntelligenceService:
             # 1. Check cache first (ic_user_intelligence table with TTL)
             cached = self._get_cached_intelligence(user_id)
             if cached:
-                # If cached result has IC signals, verify user still has Pro tier.
-                # Pro may have expired during the 7-day cache window.
+                # If cached result has podintel_public IC signals, verify user
+                # still has Pro tier — podintel is Pro-only. creator_self hints
+                # are Free-eligible and must survive the strip.
                 if cached.get("ic_signals_count", 0) > 0:
                     tier = self._get_user_tier(user_id)
                     if tier != "pro":
                         cached.pop("ic_signals_count", None)
                         cached.pop("blend_weights", None)
-                        # Strip IC hints (they were prepended after local patterns)
-                        local_count = cached.get("based_on_runs", 0)
-                        all_patterns = cached.get("high_retention_patterns", [])
-                        cached["high_retention_patterns"] = all_patterns[:max(1, local_count)]
+                        # Drop hints prefixed "NICHE SIGNAL" (podintel_public)
+                        # but keep "CREATOR SELF" hints — those describe the
+                        # user's own content patterns and are free-tier OK.
+                        all_patterns = cached.get("high_retention_patterns", []) or []
+                        cached["high_retention_patterns"] = [
+                            p for p in all_patterns
+                            if not str(p).startswith("NICHE SIGNAL")
+                        ]
+
+                # Always re-blend creator_self on cache hit — their own
+                # signals may have been extracted AFTER the cache was written.
+                cached = self._blend_with_creator_self(cached, user_id)
+
                 console.print(
                     f"[green]✓[/green] Local Intelligence: "
                     f"{len(cached.get('high_retention_patterns', []))} patterns loaded "
@@ -155,7 +165,12 @@ class LocalIntelligenceService:
             else:
                 result = self._generate_basic_intelligence(aggregated, user_id)
 
-            # 4. IC Cascade: blend market signals for Pro users
+            # 4a. Creator-self signals (always, free or pro). These are the user's
+            #     OWN patterns extracted from their YouTube via the Creator Signals
+            #     flow, so they should inform every run for that user.
+            result = self._blend_with_creator_self(result, user_id)
+
+            # 4b. IC Cascade: blend market signals for Pro users
             tier = self._get_user_tier(user_id)
             if tier in ("pro", "cloud", "enterprise"):
                 result = self._blend_with_ic(result, user_id)
@@ -364,15 +379,20 @@ class LocalIntelligenceService:
             best_hook, best_score = sorted_hooks[0]
             overall_avg = sum(hook_avgs.values()) / len(hook_avgs)
 
+            # Patterns are fed INTO the Ranker system prompt, which already
+            # has the `Respond in {output_language}` instruction up top — so
+            # the LLM will translate these English hints into the creator's
+            # language as part of its output. Keep them in English to avoid
+            # mixing languages inside the prompt.
             patterns.append(
-                f"Hooks de tipo '{best_hook}' tienen el mejor rendimiento "
-                f"(score promedio: {best_score}, basado en {hook_counts.get(best_hook, 0)} clips)"
+                f"'{best_hook}' hooks perform best "
+                f"(avg score: {best_score}, based on {hook_counts.get(best_hook, 0)} clips)"
             )
 
             if len(sorted_hooks) > 1:
                 second_hook, second_score = sorted_hooks[1]
                 patterns.append(
-                    f"Segundo mejor: hooks '{second_hook}' "
+                    f"Second-best hook type: '{second_hook}' "
                     f"(score: {second_score}, {hook_counts.get(second_hook, 0)} clips)"
                 )
 
@@ -381,20 +401,20 @@ class LocalIntelligenceService:
                 worst_hook, worst_score = sorted_hooks[-1]
                 if worst_score < overall_avg * 0.85:
                     patterns.append(
-                        f"Evitar hooks de tipo '{worst_hook}' "
-                        f"(score: {worst_score}, significativamente debajo del promedio {overall_avg:.1f})"
+                        f"Avoid '{worst_hook}' hooks "
+                        f"(score: {worst_score}, significantly below the average {overall_avg:.1f})"
                     )
 
         # Duration insights
         if optimal_dur:
             formats.append(
-                f"Duración óptima para tus clips: {optimal_dur['min']}-{optimal_dur['max']} segundos"
+                f"Optimal clip duration: {optimal_dur['min']}-{optimal_dur['max']} seconds"
             )
 
         # Category preferences
         if top_cats:
             formats.append(
-                f"Tus categorías con mejor retención: {', '.join(top_cats[:2])}"
+                f"Top-retention categories: {', '.join(top_cats[:2])}"
             )
 
         return {
@@ -681,18 +701,21 @@ Respond ONLY with valid JSON matching this schema:
         Pure templates, no LLM calls. $0 cost.
         Raw signals NEVER reach the user — only these hints.
         """
+        # Hints are fed INTO agent system prompts that already enforce the
+        # creator's output language. Keeping these templates in English avoids
+        # a second layer of translation and keeps one source of truth.
         TEMPLATES = {
-            "clip_hook": "Prioriza hooks de tipo '{hook_type}' — alto impacto en tu categoría",
-            "emotion_pattern": "Busca momentos con tono '{emotional_charge}' — destaca en tu segmento",
-            "duration_pattern": "Duración óptima para tu categoría: {duration_bucket}",
-            "temporal_pattern": "Mejor momento para publicar: {publish_day} a las {publish_hour}h",
-            "cta_effect": "Incluir CTA mejora engagement en tu segmento",
-            "topic_trend": "El tema '{topic_display}' está generando tracción",
+            "clip_hook": "Prioritize '{hook_type}' hooks — high impact in your category",
+            "emotion_pattern": "Look for moments with a '{emotional_charge}' tone — they stand out in your segment",
+            "duration_pattern": "Optimal duration for your category: {duration_bucket}",
+            "temporal_pattern": "Best time to publish: {publish_day} at {publish_hour}h",
+            "cta_effect": "Adding a CTA improves engagement in your segment",
+            "topic_trend": "The topic '{topic_display}' is gaining traction",
         }
 
         TREND_PREFIX = {
-            "rising": "TENDENCIA AL ALZA: ",
-            "falling": "TENDENCIA A LA BAJA: ",
+            "rising": "TRENDING UP: ",
+            "falling": "TRENDING DOWN: ",
         }
 
         hints = []
@@ -734,6 +757,88 @@ Respond ONLY with valid JSON matching this schema:
             hints.append(hint)
 
         return hints
+
+    def _fetch_creator_self_signals(self, user_id: str = "", cohort_hash: str = "", limit: int = 6) -> list:
+        """Pull ic_signals where source_type='creator_self' for the given cohort.
+
+        Accepts either a user_id (hash derived here) or a pre-computed cohort
+        (used by the Ranker which already has one on the CurationConfig).
+        Central implementation — the Ranker and local_intelligence both call it.
+        """
+        try:
+            if not cohort_hash:
+                if not user_id:
+                    return []
+                from packages.core.services.telemetry import _cohort_hash as _ch
+                cohort_hash = _ch(user_id) or ""
+            if not cohort_hash or not self._supabase:
+                return []
+            result = (
+                self._supabase.table("ic_signals")
+                .select("signal_type, pattern, performance_premium, confidence, duration_bucket")
+                .eq("source_type", "creator_self")
+                .eq("cohort_hash", cohort_hash)
+                .eq("is_active", True)
+                .order("performance_premium", desc=True)
+                .limit(limit)
+                .execute()
+            )
+            return result.data or []
+        except Exception as e:
+            console.print(f"[dim][LI] creator_self fetch skipped: {e}[/dim]")
+            return []
+
+    def fetch_creator_self_hints(self, user_id: str = "", cohort_hash: str = "", limit: int = 6) -> List[str]:
+        """Public API: prompt-ready creator_self hints. Used by Ranker."""
+        signals = self._fetch_creator_self_signals(user_id=user_id, cohort_hash=cohort_hash, limit=limit)
+        return self._creator_self_to_hints(signals)
+
+    @staticmethod
+    def _creator_self_to_hints(signals: list) -> List[str]:
+        """Render creator_self signals as prompt-ready hints.
+
+        Uses a 'CREATOR SELF' prefix so downstream agents can recognize and
+        weight these higher than niche-wide (podintel_public) signals.
+        """
+        hints: List[str] = []
+        for s in signals:
+            pat = s.get("pattern") or {}
+            hook = pat.get("hook_type")
+            emo = pat.get("emotional_charge")
+            pp = s.get("performance_premium") or 1.0
+            if not hook:
+                continue
+            line = f"CREATOR SELF · Prefer '{hook}'"
+            if emo:
+                line += f" ({emo})"
+            line += f" — ×{float(pp):.2f} premium in your own past shorts."
+            hints.append(line)
+        return hints
+
+    def _blend_with_creator_self(self, local_result: Dict, user_id: str) -> Dict:
+        """Merge creator_self signals into high_retention_patterns.
+
+        Placed AHEAD of the existing patterns so the agents see these first —
+        they describe the creator's own past wins and carry more weight than
+        generic or niche-wide signals.
+        """
+        signals = self._fetch_creator_self_signals(user_id)
+        if not signals:
+            return local_result
+        hints = self._creator_self_to_hints(signals)
+        if not hints:
+            return local_result
+
+        existing = local_result.get("high_retention_patterns", []) or []
+        # Dedupe against anything already present.
+        existing_lower = {p.lower() for p in existing}
+        new_hints = [h for h in hints if h.lower() not in existing_lower]
+        local_result["high_retention_patterns"] = new_hints + existing
+        local_result["creator_self_count"] = len(new_hints)
+        console.print(
+            f"[dim]   🎯 Creator-self signals: {len(new_hints)} hints merged[/dim]"
+        )
+        return local_result
 
     def _blend_with_ic(self, local_result: Dict, user_id: str) -> Dict:
         """

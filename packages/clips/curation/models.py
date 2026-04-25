@@ -15,7 +15,20 @@ class CurationConfig(BaseModel):
     podcast_name: str = Field(default="Podcast", description="Name of the podcast")
     guest_name: str = Field(default="", description="Name of the guest (if applicable)")
     target_audience: str = Field(default="General", description="Target audience of the content")
-    
+
+    # Podcast identity fields (from profiles table, collected in onboarding).
+    # All optional — absent fields mean we fall back to generic viral heuristics.
+    # Values are normalized via packages/core/taxonomy.py before reaching this
+    # model, so interpolation into PostgREST filters downstream is safe.
+    content_niche: str = Field(default="", description="User's niche id (e.g., business, comedy, health_fitness).")
+    user_role: str = Field(default="", description="Role: host, producer, solo creator, etc.")
+    primary_goal: str = Field(default="", description="Primary goal: audience_growth, revenue, community, etc.")
+    region: str = Field(default="", description="ISO 3166-1 alpha-2 country code.")
+    episode_format: str = Field(default="", description="Episode format: solo, interview, panel, narrative.")
+    language: str = Field(default="", description="ISO 639-1 language code of the podcast content.")
+    is_pro_tier: bool = Field(default=False, description="True if user has an active Pro subscription. Gates podintel_public signals.")
+    user_cohort_hash: str = Field(default="", description="One-way hash of user id — keys creator_self signals.")
+
     # Intelligence Driven Parameters
     high_retention_patterns: List[str] = Field(
         default_factory=list,
@@ -26,21 +39,64 @@ class CurationConfig(BaseModel):
          description="Formats the audience prefers (e.g., 'Controversial debates', 'Personal vulnerability')."
     )
     brand_voice: str = Field(default="Casual, authentic and engaging", description="The brand's voice and tone.")
-    
+
+    def has_podcast_identity(self) -> bool:
+        return any([self.content_niche, self.primary_goal, self.episode_format])
+
+    def get_podcast_context_block(self) -> str:
+        """Return the podcast-identity block injected into agent prompts.
+
+        One single English version — the prompt itself is English, and the
+        top-of-prompt `Respond in {output_language}` instruction makes the
+        LLM translate the podcast-context reasoning to the user's language
+        in its output. Keeping this in English avoids mixing languages
+        inside the system prompt, which was confusing Claude on non-Spanish
+        podcasts in the previous implementation.
+        Returns empty string when no identity fields are set.
+        """
+        if not self.has_podcast_identity():
+            return ""
+
+        parts = []
+        if self.content_niche:
+            parts.append(f"niche: {self.content_niche}")
+        if self.episode_format:
+            parts.append(f"episode format: {self.episode_format}")
+        if self.region:
+            parts.append(f"region: {self.region}")
+        if self.primary_goal:
+            parts.append(f"primary goal: {self.primary_goal}")
+
+        header = "## Podcast context\n"
+        body = "This podcast is about " + ", ".join(parts) + "."
+        guidance = (
+            "\nPrioritize clips that fit this podcast's topic identity. "
+            "Deprioritize generic viral moments (jokes, tangents, off-topic stories) "
+            "that would not serve an audience coming for this niche. "
+            "A clip that is 'viral' but off-topic for this podcast should be rejected."
+        )
+        return header + body + guidance
+
     def get_intelligence_prompt_addendum(self) -> str:
         """Returns a formatted string of the intelligence rules to append to system prompts."""
         lines = []
+
+        podcast_ctx = self.get_podcast_context_block()
+        if podcast_ctx:
+            lines.append(podcast_ctx)
+            lines.append("")
+
         if self.high_retention_patterns:
             lines.append("## Proven High-Retention Patterns:")
             lines.append("Based on historical data, these patterns work best for this content:")
             for p in self.high_retention_patterns:
                 lines.append(f"- {p}")
-        
+
         if self.preferred_clip_formats:
             lines.append("\n## Preferred Audience Formats:")
             for f in self.preferred_clip_formats:
                 lines.append(f"- {f}")
-                
+
         return "\n".join(lines)
 
 class ViralityScore(BaseModel):

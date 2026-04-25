@@ -176,11 +176,13 @@ class FinderAgent:
             signals_summary = self._extract_signals_summary(chunk)
             chunk_text = self._format_transcript(chunk)
             
+            from packages.core.taxonomy import language_label as _lang_label
             system_prompt = FINDER_SYSTEM.format(
                 podcast_name=config.podcast_name,
                 intelligence_addendum=config.get_intelligence_prompt_addendum(),
                 min_duration=min_duration,
-                max_duration=max_duration
+                max_duration=max_duration,
+                output_language=_lang_label(config.language),
             )
             
             finder_template = self.prompt_manager.get_finder_prompt()

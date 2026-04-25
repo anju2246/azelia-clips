@@ -1,21 +1,49 @@
 ---
 import DashboardLayout from "../../layouts/DashboardLayout.astro";
-import { IntelligenceDashboard } from "../../components/analytics/IntelligenceDashboard";
+import { MyPipelineStats } from "../../components/analytics/IntelligenceDashboard";
+import { MyContentIntelligence } from "../../components/analytics/MyContentIntelligence";
+import { NicheBenchmark } from "../../components/analytics/NicheBenchmark";
 import { YouTubeConnect } from "../../components/analytics/YouTubeConnect";
 ---
 
-<DashboardLayout title="Local Intelligence">
-    <div class="mb-8">
+<DashboardLayout title="Intelligence">
+    <div class="mb-10">
         <h1 class="text-3xl font-bold tracking-tight text-white mb-2">
-            Local Intelligence
+            Intelligence
         </h1>
         <p class="text-zinc-400">
-            Insights derived from your generated clips and connected platforms.
+            A creator dashboard that combines your real YouTube data, your own content patterns, and what Azelia is predicting — kept separate so you always know what a number means.
         </p>
     </div>
 
-    <IntelligenceDashboard client:load />
+    <!-- 1. My Channel — real YouTube metrics + connect/sync actions. -->
+    <section class="mb-12">
+        <h2 class="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">
+            My channel
+        </h2>
+        <YouTubeConnect client:load />
+    </section>
 
-    <h2 class="text-xl font-bold text-white mt-12 mb-6">Integrations</h2>
-    <YouTubeConnect client:load />
+    <!-- 2. What works for my audience — signals extracted from the creator's own
+         shorts using their own API tokens. This is where the Creator Signals
+         spend becomes legible to the user. -->
+    <section class="mb-12">
+        <h2 class="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">
+            What works for my audience
+        </h2>
+        <MyContentIntelligence client:load />
+    </section>
+
+    <!-- 3. My Pipeline — what Azelia is predicting and producing locally. -->
+    <section class="mb-12">
+        <h2 class="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">
+            My pipeline
+        </h2>
+        <MyPipelineStats client:load />
+    </section>
+
+    <!-- 4. How I compare — anonymous cohort benchmark. Collapsed by default. -->
+    <section class="mb-12">
+        <NicheBenchmark client:load />
+    </section>
 </DashboardLayout>

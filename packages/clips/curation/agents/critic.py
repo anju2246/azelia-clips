@@ -1,12 +1,12 @@
 import json
-from typing import List
+from typing import List, Optional
 from rich.console import Console
 
 from packages.clips.transcription.transcriber import Transcript
 from packages.core.llm_provider import get_llm
 from packages.clips.curation.prompts import CRITIC_SYSTEM
 from packages.clips.curation.prompt_manager import PromptManager
-from packages.clips.curation.models import FinderCandidate, CriticResponse, CriticClip
+from packages.clips.curation.models import FinderCandidate, CriticResponse, CriticClip, CurationConfig
 
 console = Console()
 
@@ -29,21 +29,23 @@ class CriticAgent:
         return "\n".join(lines)
 
     def evaluate_candidates(
-        self, 
-        candidates: List[FinderCandidate], 
+        self,
+        candidates: List[FinderCandidate],
         transcript: Transcript,
         min_duration: int = 25,
-        max_duration: int = 90
+        max_duration: int = 90,
+        config: Optional[CurationConfig] = None,
     ) -> List[CriticClip]:
         """Critiques the candidates and returns only the approved ones."""
         if not candidates:
             return []
-            
+
+        config = config or CurationConfig()
         transcript_text = self._format_transcript(transcript)
-        
+
         # Convert candidates to JSON string for the prompt
         candidates_json = json.dumps([c.model_dump() for c in candidates], indent=2)
-        
+
         critic_template = self.prompt_manager.get_critic_prompt()
         critic_prompt = critic_template.format(
             candidates_json=candidates_json,
@@ -51,11 +53,14 @@ class CriticAgent:
             min_duration=min_duration,
             max_duration=max_duration,
         )
-        
+
         try:
+            from packages.core.taxonomy import language_label as _lang_label
             formatted_system_prompt = CRITIC_SYSTEM.format(
                 min_duration=min_duration,
-                max_duration=max_duration
+                max_duration=max_duration,
+                podcast_context=config.get_podcast_context_block(),
+                output_language=_lang_label(config.language),
             )
             
             response_raw = self._llm.chat(

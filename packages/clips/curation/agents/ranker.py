@@ -64,21 +64,107 @@ class RankerAgent:
                 text.append(seg.text)
         return " ".join(text)
 
+    def _fetch_ic_signals_for_config(self, config: CurationConfig) -> List[str]:
+        """Fetch creator_self + podintel_public signals as prompt-ready hints.
+
+        creator_self signals (from THIS user's cohort) are weighted higher —
+        they describe patterns that work for this specific podcaster. When no
+        cohort or niche is known, returns an empty list and the ranker falls
+        back to generic heuristics.
+        """
+        if not config.content_niche and not config.user_cohort_hash:
+            return []
+        try:
+            from packages.core.config import settings as _settings
+            from packages.core.taxonomy import is_valid_niche as _is_valid_niche
+            svc_key = getattr(_settings, "supabase_service_role_key", "") or getattr(_settings, "supabase_key", "")
+            if not svc_key or not getattr(_settings, "supabase_url", ""):
+                return []
+            import httpx
+
+            hints: List[str] = []
+
+            # 1. creator_self — this podcaster's own patterns. Highest weight.
+            # Delegated to local_intelligence so schema changes only need one edit.
+            if config.user_cohort_hash:
+                try:
+                    from packages.core.services.local_intelligence import local_intelligence
+                    hints.extend(
+                        local_intelligence.fetch_creator_self_hints(
+                            cohort_hash=config.user_cohort_hash, limit=6
+                        )
+                    )
+                except Exception as _e_self:
+                    console.print(f"[dim]   creator_self hints unavailable: {type(_e_self).__name__}[/dim]")
+
+            # 2. podintel_public — niche-wide signals for this category.
+            # Pro-tier only (mirrors `local_intelligence._blend_with_ic`).
+            # Free-tier users still get CREATOR SELF hints above.
+            # Niche is validated against the canonical taxonomy so a
+            # malicious profile value can't inject PostgREST operators.
+            if config.content_niche and config.is_pro_tier and _is_valid_niche(config.content_niche):
+                rp = httpx.get(
+                    f"{_settings.supabase_url}/rest/v1/ic_signals",
+                    params={
+                        "select": "pattern,performance_premium,confidence,signal_type",
+                        "source_type": "eq.podintel_public",
+                        "category": f"eq.{config.content_niche}",
+                        "is_active": "eq.true",
+                        "order": "performance_premium.desc,confidence.desc",
+                        "limit": "4",
+                    },
+                    headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+                    timeout=5,
+                )
+                if rp.status_code == 200:
+                    for row in rp.json() or []:
+                        pat = row.get("pattern") or {}
+                        hook = pat.get("hook_type")
+                        pp = row.get("performance_premium") or 1.0
+                        if hook:
+                            hints.append(
+                                f"NICHE SIGNAL · '{hook}' tends to outperform in your niche"
+                                f" (×{float(pp):.2f}) — supplementary weight."
+                            )
+
+            return hints[:10]
+        except Exception as e:
+            console.print(f"[dim]   IC signal fetch for ranker skipped ({type(e).__name__}: {e}).[/dim]")
+            return []
+
+    def _build_ranker_addendum(self, config: CurationConfig) -> str:
+        """Combine podcast context + IC signal hints into the system addendum."""
+        parts: List[str] = []
+        ctx = config.get_podcast_context_block()
+        if ctx:
+            parts.append(ctx)
+        ic_hints = self._fetch_ic_signals_for_config(config)
+        if ic_hints:
+            parts.append("## IC Cascade signals")
+            parts.append("Patterns learned from this creator (CREATOR SELF) take precedence over niche signals (NICHE SIGNAL).")
+            parts.extend(f"- {h}" for h in ic_hints)
+        if config.high_retention_patterns:
+            parts.append("## Proven high-retention patterns (local intelligence):")
+            parts.extend(f"- {p}" for p in config.high_retention_patterns)
+        return "\n".join(parts)
+
     def rank_clips(
-        self, 
-        approved_clips: List[CriticClip], 
+        self,
+        approved_clips: List[CriticClip],
         transcript: Transcript,
-        top_n: int = 5
+        top_n: int = 5,
+        config: Optional[CurationConfig] = None,
     ) -> List[CuratedClip]:
         """Assigns detailed scores to the approved clips."""
         if not approved_clips:
             return []
-            
+
+        config = config or CurationConfig()
         transcript_text = self._format_transcript(transcript)
         signals_summary = self._extract_signals_summary(transcript)
-        
+
         approved_json = json.dumps([c.model_dump() for c in approved_clips], indent=2)
-        
+
         ranker_template = self.prompt_manager.get_ranker_prompt()
         ranker_prompt = ranker_template.format(
             approved_json=approved_json,
@@ -86,10 +172,16 @@ class RankerAgent:
             signals_summary=signals_summary,
             top_n=top_n
         )
-        
+
         try:
+            from packages.core.taxonomy import language_label as _lang_label
+            ranker_system_formatted = RANKER_SYSTEM.format(
+                top_n=top_n,
+                intelligence_addendum=self._build_ranker_addendum(config),
+                output_language=_lang_label(config.language),
+            )
             response_raw = self._llm.chat(
-                system_prompt=RANKER_SYSTEM,
+                system_prompt=ranker_system_formatted,
                 user_message=ranker_prompt,
                 temperature=self.temperature,
                 response_format=RankerResponse
@@ -139,9 +231,11 @@ class RankerAgent:
         config = config or CurationConfig()
         caption_template = self.prompt_manager.get_caption_prompt()
         
+        from packages.core.taxonomy import language_label as _lang_label
         system_prompt = CAPTION_GENERATOR_SYSTEM.format(
             podcast_name=config.podcast_name,
-            podcast_name_nospace=config.podcast_name.replace(" ", "")
+            podcast_name_nospace=config.podcast_name.replace(" ", ""),
+            output_language=_lang_label(config.language),
         )
         
         # SEQUENTIAL execution is critical to avoid API rate limits

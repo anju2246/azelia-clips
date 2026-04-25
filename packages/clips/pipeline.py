@@ -23,6 +23,96 @@ from packages.core.utils import run_ffmpeg, validate_video
 console = Console()
 
 
+def _load_user_profile_context(user_id: str | None) -> dict:
+    """Fetch podcast-identity fields from the Supabase `profiles` row.
+
+    Returns an empty dict on any failure — callers fall back to generic heuristics
+    so the pipeline never breaks because of onboarding gaps.
+    """
+    if not user_id or user_id == "anonymous":
+        return {}
+    try:
+        from packages.core.config import settings as _settings
+        svc_key = getattr(_settings, "supabase_service_role_key", "") or getattr(_settings, "supabase_key", "")
+        if not svc_key or not getattr(_settings, "supabase_url", ""):
+            return {}
+        import httpx
+        r = httpx.get(
+            f"{_settings.supabase_url}/rest/v1/profiles",
+            params={
+                "id": f"eq.{user_id}",
+                "select": "content_niche,user_role,primary_goal,preferences,tier,pro_expires_at",
+                "limit": "1",
+            },
+            headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+            timeout=5,
+        )
+        if r.status_code != 200:
+            # Distinguish auth/config failures (401/403) from "not onboarded yet".
+            # Without this the pipeline degrades to generic heuristics silently.
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "profile_context fetch returned HTTP %s for user %s — pipeline will use generic heuristics.",
+                r.status_code, user_id,
+            )
+            return {}
+        rows = r.json() or []
+        if not rows:
+            return {}
+        row = rows[0]
+        prefs = row.get("preferences") or {}
+        # Normalize via the shared taxonomy. Anything that doesn't map to a
+        # known id becomes "" — that's safe because CurationConfig skips the
+        # niche-wide IC query when content_niche is empty, falling back to
+        # generic heuristics. It also neutralizes any PostgREST-filter-
+        # injection attempts a user could have snuck into their own profile.
+        from packages.core.taxonomy import (
+            normalize_niche as _norm_niche,
+            normalize_country as _norm_country,
+            normalize_language as _norm_lang,
+        )
+        raw_niche = row.get("content_niche") or prefs.get("content_niche") or ""
+        raw_region = prefs.get("region") or ""
+        raw_language = prefs.get("language") or ""
+
+        # Pro tier gate — used downstream by the Ranker to decide whether
+        # to fetch podintel_public (niche-wide) signals. Mirrors the check
+        # in local_intelligence._get_user_tier (pro + non-expired).
+        is_pro_tier = False
+        try:
+            tier = (row.get("tier") or "").lower()
+            if tier == "pro":
+                from datetime import datetime, timezone
+                exp = row.get("pro_expires_at")
+                if exp:
+                    exp_dt = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
+                    is_pro_tier = exp_dt > datetime.now(timezone.utc)
+            elif tier in ("cloud", "enterprise", "founder", "super_admin"):
+                is_pro_tier = True
+        except Exception:
+            is_pro_tier = False
+
+        ctx = {
+            "content_niche": _norm_niche(raw_niche),
+            "user_role": (row.get("user_role") or prefs.get("user_role") or "").strip()[:40],
+            "primary_goal": (row.get("primary_goal") or prefs.get("primary_goal") or "").strip()[:40],
+            "region": _norm_country(raw_region),
+            "episode_format": (prefs.get("episode_format") or "").strip()[:30],
+            "language": _norm_lang(raw_language),
+            "is_pro_tier": is_pro_tier,
+        }
+        # Cohort hash (reuses the same one-way hash as telemetry + creator signals)
+        try:
+            from packages.core.services.telemetry import _cohort_hash as _ch
+            ctx["cohort_hash"] = _ch(user_id) or ""
+        except Exception:
+            ctx["cohort_hash"] = ""
+        return ctx
+    except Exception as e:
+        console.print(f"[dim]   Profile context load failed ({type(e).__name__}: {e}) — using generic heuristics.[/dim]")
+        return {}
+
+
 @dataclass
 class EpisodeConfig:
     """Configuration for a single episode to process."""
@@ -266,16 +356,28 @@ class BatchProcessor:
             
             curator = CurationPipeline()
             from packages.core.config import settings
-            
+
             # Local Intelligence: Fetch user's personalized patterns (ephemeral, in-memory only)
             from packages.core.services.local_intelligence import local_intelligence
             from packages.clips.curation.models import CurationConfig
             li_patterns = local_intelligence.get_user_patterns(self.user_id)
-            
+
+            # Podcast identity — pulled from profiles so the agents can be
+            # podcast-aware instead of applying generic viral heuristics.
+            profile_ctx = _load_user_profile_context(self.user_id)
+
             curation_config = CurationConfig(
                 podcast_name=settings.podcast_name,
                 high_retention_patterns=li_patterns.get("high_retention_patterns", []),
                 preferred_clip_formats=li_patterns.get("preferred_clip_formats", []),
+                content_niche=profile_ctx.get("content_niche", ""),
+                user_role=profile_ctx.get("user_role", ""),
+                primary_goal=profile_ctx.get("primary_goal", ""),
+                region=profile_ctx.get("region", ""),
+                episode_format=profile_ctx.get("episode_format", ""),
+                language=profile_ctx.get("language", ""),
+                is_pro_tier=bool(profile_ctx.get("is_pro_tier", False)),
+                user_cohort_hash=profile_ctx.get("cohort_hash", ""),
             )
             
             curated_clips = curator.curate(

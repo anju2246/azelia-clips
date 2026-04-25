@@ -404,8 +404,37 @@ Return JSON ONLY with this exact shape (no prose, no markdown fences):
 
 # Default Anthropic model for Ticket A (classification over shorts metadata).
 # Haiku 4.5 handles this task as well as Sonnet and costs ~3x less.
-# Users can override via body.model in the POST endpoint.
+# Users can override via body.model in the POST endpoint — constrained by
+# _ALLOWED_ANTHROPIC_MODELS below so an authed user cannot force arbitrary
+# (potentially expensive) model IDs onto the server's Anthropic budget.
 _CREATOR_SIGNALS_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+
+# Allowlist of Anthropic models any endpoint in this file may invoke on the
+# user's behalf. Protects against someone scripting POSTs with `model=opus...`
+# to drain the shared key. Keep this in sync with the frontend modal pickers.
+_ALLOWED_ANTHROPIC_MODELS = frozenset({
+    "claude-haiku-4-5-20251001",
+    "claude-sonnet-4-6",
+    "claude-opus-4-7",
+})
+
+
+def _resolve_anthropic_model(requested: str | None, fallback: str = _CREATOR_SIGNALS_DEFAULT_MODEL) -> str:
+    """Return a model ID from the allowlist; 400 on anything else.
+
+    Accepts None/empty (→ fallback) and exact matches. Rejects everything
+    else loudly so an attacker or a stale frontend can't push unknown IDs
+    through to Anthropic.
+    """
+    if not requested:
+        return fallback
+    chosen = requested.strip()
+    if chosen not in _ALLOWED_ANTHROPIC_MODELS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported model '{chosen}'. Allowed: {sorted(_ALLOWED_ANTHROPIC_MODELS)}",
+        )
+    return chosen
 
 
 def _estimate_extraction_cost(num_shorts: int, anthropic_model: str = _CREATOR_SIGNALS_DEFAULT_MODEL) -> dict:
@@ -463,7 +492,7 @@ async def estimate_creator_signals_cost(
     total = cur.fetchone()[0]
     conn.close()
 
-    chosen_model = model or _CREATOR_SIGNALS_DEFAULT_MODEL
+    chosen_model = _resolve_anthropic_model(model)
     batch_size = min(30, total)
     est = _estimate_extraction_cost(batch_size, chosen_model)
     est["total_shorts_available"] = total
@@ -535,7 +564,7 @@ async def extract_creator_signals(
     # 2. Call Anthropic. Default = Haiku (cheap, good enough for classification).
     #    User can override via body.model; validation is lax — Anthropic will
     #    reject an unknown model ID and we'll surface that 502.
-    chosen_model = (body.get("model") or _CREATOR_SIGNALS_DEFAULT_MODEL).strip()
+    chosen_model = _resolve_anthropic_model(body.get("model"))
     try:
         from anthropic import Anthropic
         client = Anthropic(api_key=api_key)
@@ -577,6 +606,7 @@ async def extract_creator_signals(
     cohort = _get_user_creator_cohort(user.id) or ""
 
     # Resolve region/language/category from user's profile
+    from packages.core.taxonomy import normalize_niche as _norm_niche, normalize_country as _norm_country, normalize_language as _norm_lang
     profile_region = None
     profile_language = "en"
     profile_category = None
@@ -592,8 +622,11 @@ async def extract_creator_signals(
         if pr.status_code == 200 and pr.json():
             p = pr.json()[0]
             prefs = p.get("preferences") or {}
-            profile_region = prefs.get("region")
-            profile_category = (p.get("content_niche") or "").lower().replace(" & ", "_").replace(" ", "_")[:40] or None
+            # Normalize via the shared taxonomy so these same values are
+            # queryable later by the Ranker (which uses `category=<niche>`).
+            profile_region = _norm_country(prefs.get("region")) or None
+            profile_language = _norm_lang(prefs.get("language")) or "en"
+            profile_category = _norm_niche(p.get("content_niche")) or None
     except Exception:
         pass
 
@@ -651,6 +684,27 @@ async def extract_creator_signals(
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"Insert error: {e}")
 
+    # 4b. Invalidate the user's LocalIntelligence cache so the newly extracted
+    #     creator_self patterns surface on the next pipeline run. Without this
+    #     the 7-day ic_user_intelligence TTL hides the user's new hints.
+    try:
+        import httpx as _httpx_inv
+        _httpx_inv.delete(
+            f"{app_settings.supabase_url}/rest/v1/ic_user_intelligence",
+            params={"user_id": f"eq.{user.id}"},
+            headers={
+                "apikey": svc_key,
+                "Authorization": f"Bearer {svc_key}",
+                "Prefer": "return=minimal",
+            },
+            timeout=5,
+        )
+    except Exception as _inv_err:
+        import logging as _log
+        _log.getLogger(__name__).warning(
+            f"LI cache invalidation failed after creator signals extract: {type(_inv_err).__name__}"
+        )
+
     # 5. Estimated vs actual usage — rate tied to the model actually used.
     usage = getattr(resp, "usage", None)
     actual_cost = None
@@ -677,6 +731,146 @@ async def extract_creator_signals(
             {k: v for k, v in pat.items() if k in ("signal_type", "hook_type", "emotional_charge", "duration_bucket", "topic_tag", "confidence")}
             for pat in patterns
         ],
+    }
+
+
+@router.get("/analytics/my-content-intelligence")
+async def get_my_content_intelligence(user: User = Depends(require_auth)):
+    """Aggregate the creator's own `ic_signals` (source_type='creator_self').
+
+    These are the patterns the user extracted from THEIR own shorts, using
+    THEIR own API tokens, in the Creator Signals flow. The Intelligence
+    dashboard needs a place to show them back so the spend makes sense.
+
+    Returns:
+      - top_hooks:         best-performing hook_type patterns (by performance_premium × confidence)
+      - retention_patterns:signals with retention/engagement angle
+      - topic_performance: patterns grouped by topic
+      - avoid_patterns:    low-confidence / underperforming patterns (performance_premium < 1)
+      - empty state flag   so the UI can prompt a first extraction
+    """
+    from packages.core.config import settings as app_settings
+
+    cohort = _get_user_creator_cohort(user.id)
+    if not cohort:
+        return {"empty": True, "reason": "cohort_not_available"}
+
+    # Hard-fail if service_role is missing — the anon key silently returns
+    # 0 rows under RLS and the endpoint would respond with a misleading
+    # "no_signals_yet" empty state after the user paid for extraction.
+    svc_key = getattr(app_settings, "supabase_service_role_key", "") or ""
+    if not svc_key:
+        raise HTTPException(
+            status_code=500,
+            detail="Supabase service role key not configured — /my-content-intelligence needs it to bypass RLS on ic_signals.",
+        )
+
+    import httpx as _httpx
+    try:
+        r = _httpx.get(
+            f"{app_settings.supabase_url}/rest/v1/ic_signals",
+            params={
+                "select": "signal_type,pattern,metric_value,performance_premium,sample_size,confidence,duration_bucket,category,period",
+                "source_type": "eq.creator_self",
+                "cohort_hash": f"eq.{cohort}",
+                "is_active": "eq.true",
+                "order": "performance_premium.desc,confidence.desc",
+                "limit": "200",
+            },
+            headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+            timeout=10,
+        )
+        if r.status_code >= 400:
+            raise HTTPException(status_code=502, detail=f"ic_signals query failed: {r.status_code}")
+        rows = r.json() or []
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"ic_signals fetch error: {type(e).__name__}: {e}")
+
+    if not rows:
+        return {"empty": True, "reason": "no_signals_yet"}
+
+    def _score(row: dict) -> float:
+        pp = float(row.get("performance_premium") or 1.0)
+        conf = float(row.get("confidence") or 0.5)
+        return pp * conf
+
+    # top_hooks: best hook_type patterns
+    hooks = []
+    for row in rows:
+        pat = row.get("pattern") or {}
+        hook = pat.get("hook_type")
+        if not hook:
+            continue
+        hooks.append({
+            "hook_type": hook,
+            "emotional_charge": pat.get("emotional_charge"),
+            "duration_bucket": row.get("duration_bucket"),
+            "performance_premium": float(row.get("performance_premium") or 1.0),
+            "confidence": float(row.get("confidence") or 0.5),
+            "sample_size": int(row.get("sample_size") or 0),
+            "score": round(_score(row), 3),
+        })
+    hooks.sort(key=lambda x: x["score"], reverse=True)
+    top_hooks = hooks[:5]
+
+    # topic_performance: aggregate by pattern.topic
+    topics: dict[str, dict] = {}
+    for row in rows:
+        pat = row.get("pattern") or {}
+        topic = pat.get("topic") or pat.get("topic_tag")
+        if not topic:
+            continue
+        entry = topics.setdefault(topic, {"topic": topic, "sample_size": 0, "perf_sum": 0.0, "n": 0})
+        entry["sample_size"] += int(row.get("sample_size") or 0)
+        entry["perf_sum"] += float(row.get("performance_premium") or 1.0)
+        entry["n"] += 1
+    topic_performance = sorted(
+        [
+            {
+                "topic": t["topic"],
+                "avg_performance_premium": round(t["perf_sum"] / max(t["n"], 1), 2),
+                "sample_size": t["sample_size"],
+            }
+            for t in topics.values()
+        ],
+        key=lambda x: x["avg_performance_premium"],
+        reverse=True,
+    )[:5]
+
+    # retention_patterns: signals where signal_type relates to retention/engagement
+    retention_patterns = [
+        {
+            "signal_type": row.get("signal_type"),
+            "pattern": row.get("pattern"),
+            "performance_premium": float(row.get("performance_premium") or 1.0),
+            "confidence": float(row.get("confidence") or 0.5),
+        }
+        for row in rows
+        if row.get("signal_type") in ("retention_pattern", "engagement_pattern", "clip_structure")
+    ][:5]
+
+    # avoid_patterns: performance_premium < 1 (below this creator's median)
+    avoid_patterns = [
+        {
+            "hook_type": (row.get("pattern") or {}).get("hook_type"),
+            "emotional_charge": (row.get("pattern") or {}).get("emotional_charge"),
+            "performance_premium": float(row.get("performance_premium") or 1.0),
+            "confidence": float(row.get("confidence") or 0.5),
+            "sample_size": int(row.get("sample_size") or 0),
+        }
+        for row in rows
+        if float(row.get("performance_premium") or 1.0) < 1.0
+    ][:3]
+
+    return {
+        "empty": False,
+        "signal_count": len(rows),
+        "top_hooks": top_hooks,
+        "retention_patterns": retention_patterns,
+        "topic_performance": topic_performance,
+        "avoid_patterns": avoid_patterns,
     }
 
 
@@ -1257,91 +1451,101 @@ async def _sync_channel(access_token: str, channel_id: str, user_id: str = None,
 
 # ─── YouTube Historical Extractor (Retroactive Intelligence) ────────────────
 
-@router.get("/analytics/youtube/historical/estimate")
-async def estimate_historical_cost(user: User = Depends(require_auth)):
-    """
-    Counts available historical shorts and calculates the OpenRouter LLM cost
-    based on the user's currently configured model.
-    """
-    import httpx
-    from packages.core.config import settings
-    
-    # 1. How many shorts do we have in local DB that aren't synced to telemetry yet?
-    # For MVP, we'll just count how many shorts are in the DB and multiply.
-    # We could be more precise and only count those without `ic_telemetry_events`.
-    conn = _get_yt_db()
-    cursor = conn.execute("SELECT COUNT(*) FROM youtube_shorts")
-    count_row = cursor.fetchone()
-    total_shorts = count_row[0] if count_row else 0
-    conn.close()
-    
-    if total_shorts == 0:
-        return {"total_shorts": 0, "estimated_cost_usd": 0.0, "model": "none"}
-        
-    # Determine which model is active by checking available API keys in order
-    active_model = "meta-llama/llama-3.3-70b-instruct" # default fallback
-    
-    provider_order = getattr(settings, "ai_provider_order", "groq,openai,anthropic,vertex")
-    if isinstance(provider_order, str):
-        order_list = [p.strip().lower() for p in provider_order.split(",") if p.strip()]
-    elif isinstance(provider_order, list):
-        order_list = [p.strip().lower() for p in provider_order if isinstance(p, str) and p.strip()]
-    else:
-        order_list = ["groq", "openai", "anthropic", "vertex"]
-        
-    for provider in order_list:
-        if provider == "anthropic" and getattr(settings, "anthropic_api_key", ""):
-            active_model = settings.anthropic_model
-            break
-        elif provider == "openai" and getattr(settings, "openai_api_key", ""):
-            active_model = settings.openai_model
-            break
-        elif provider == "groq" and getattr(settings, "groq_api_key", ""):
-            active_model = settings.groq_model
-            break
-        elif provider == "vertex" and getattr(settings, "gcp_project_id", ""):
-            active_model = settings.vertex_model
-            break
-    
-    # Prefix mapping for OpenRouter if needed
-    or_model_id = active_model
-    if not "/" in or_model_id and "gpt" not in or_model_id and "claude" not in or_model_id:
-        # Simplistic mapping for local model names, but SettingsForm now saves OR names directly
-        pass 
-        
-    # 2. Fetch OpenRouter pricing
-    cost_per_token = 0.0
-    try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get("https://openrouter.ai/api/v1/models")
-            if resp.status_code == 200:
-                data = resp.json()
-                for model in data.get("data", []):
-                    if model.get("id") == active_model or active_model in model.get("id", ""):
-                        pricing = model.get("pricing", {})
-                        # price is given per 1 token as string
-                        cost_per_token = float(pricing.get("prompt", 0.0))
-                        break
-    except Exception as e:
-        import logging
-        logging.warning(f"Failed to fetch OpenRouter pricing: {e}")
-        # Fallback average price if API fails
-        cost_per_token = 0.0000005 
+# Default Anthropic model for retroactive analysis. Haiku 4.5 classifies
+# shorts well enough and costs ~5x less than Sonnet (~$0.32 vs $1.60 per
+# 500 shorts). Users can override via body.model in /sync.
+_RETROACTIVE_DEFAULT_MODEL = "claude-haiku-4-5-20251001"
 
-    # 3. Calculate: ~800 tokens per transcript + prompt
-    # Example: 800 tokens * 0.000001 = $0.0008 per video
-    est_tokens_per_video = 800
-    total_cost = total_shorts * est_tokens_per_video * cost_per_token
-    
+
+def _estimate_retroactive_cost(num_shorts: int, anthropic_model: str = _RETROACTIVE_DEFAULT_MODEL) -> dict:
+    """Cost estimate for retroactive sync.
+
+    Each short needs a transcript + metrics analysis call.
+    ~1500 input tokens (system prompt + transcript + metrics) + ~400 output tokens (JSON).
+
+    Pricing per M tokens (2026-04):
+      - Haiku 4.5: $1 in / $5 out
+      - Sonnet 4.6: $3 in / $15 out
+      - Opus 4.7: $15 in / $75 out
+    """
+    input_tokens = num_shorts * 1500
+    output_tokens = num_shorts * 400
+    m = anthropic_model.lower()
+    if "opus" in m:
+        in_rate, out_rate = 15.0, 75.0
+    elif "sonnet" in m:
+        in_rate, out_rate = 3.0, 15.0
+    else:  # haiku / default
+        in_rate, out_rate = 1.0, 5.0
+    cost = (input_tokens / 1_000_000) * in_rate + (output_tokens / 1_000_000) * out_rate
     return {
-        "total_shorts": total_shorts,
-        "estimated_cost_usd": round(total_cost, 4),
-        "model": active_model,
-        "cost_per_1M_tokens": round(cost_per_token * 1_000_000, 2)
+        "num_shorts": num_shorts,
+        "input_tokens_est": input_tokens,
+        "output_tokens_est": output_tokens,
+        "cost_usd_est": round(cost, 3),
+        "model": anthropic_model,
     }
 
+
+@router.get("/analytics/youtube/historical/estimate")
+async def estimate_historical_cost(
+    model: str | None = None,
+    user: User = Depends(require_auth),
+):
+    """Count available historical shorts and estimate Anthropic cost.
+
+    Accepts ?model=... to preview cost at a different model.
+    Returns model_options so the frontend can render a picker.
+    """
+    # Count shorts scoped to this user AND not yet analyzed by the LLM —
+    # avoids re-billing the creator for the same content on repeated runs.
+    conn = _get_yt_db()
+    cursor = conn.execute(
+        "SELECT COUNT(*) FROM youtube_shorts WHERE user_id = ? AND (llm_analysis IS NULL OR llm_analysis = '')",
+        (user.id,),
+    )
+    count_row = cursor.fetchone()
+    total_unanalyzed = count_row[0] if count_row else 0
+    # Also expose the absolute total so the UI can tell the user how many
+    # shorts are already analyzed.
+    total_cur = conn.execute("SELECT COUNT(*) FROM youtube_shorts WHERE user_id = ?", (user.id,))
+    total_all = total_cur.fetchone()[0] if total_cur else 0
+    conn.close()
+
+    total_shorts = total_unanalyzed
+    if total_shorts == 0:
+        return {
+            "total_shorts": 0,
+            "total_all": total_all,
+            "estimated_cost_usd": 0.0,
+            "model": _RETROACTIVE_DEFAULT_MODEL,
+            "model_options": {
+                "claude-haiku-4-5-20251001": 0.0,
+                "claude-sonnet-4-6": 0.0,
+                "claude-opus-4-7": 0.0,
+            },
+        }
+
+    # Cap batch to 100 to match /sync behaviour (max_videos=100).
+    batch_size = min(100, total_shorts)
+    chosen_model = _resolve_anthropic_model(model, fallback=_RETROACTIVE_DEFAULT_MODEL)
+    est = _estimate_retroactive_cost(batch_size, chosen_model)
+    est["total_shorts"] = total_shorts
+    est["batch_size"] = batch_size
+    est["estimated_cost_usd"] = est["cost_usd_est"]
+    est["model_options"] = {
+        "claude-haiku-4-5-20251001": _estimate_retroactive_cost(batch_size, "claude-haiku-4-5-20251001")["cost_usd_est"],
+        "claude-sonnet-4-6":        _estimate_retroactive_cost(batch_size, "claude-sonnet-4-6")["cost_usd_est"],
+        "claude-opus-4-7":          _estimate_retroactive_cost(batch_size, "claude-opus-4-7")["cost_usd_est"],
+    }
+    return est
+
+
 @router.post("/analytics/youtube/historical/sync")
-async def sync_historical_data(user: User = Depends(require_auth)):
+async def sync_historical_data(
+    body: dict = Body(default_factory=dict),
+    user: User = Depends(require_auth),
+):
     """
     Triggers the YouTubeHistoricalExtractor as a BACKGROUND JOB.
     Returns immediately with a job_id for polling progress.
@@ -1386,22 +1590,39 @@ async def sync_historical_data(user: User = Depends(require_auth)):
         raise HTTPException(status_code=401, detail="Failed to refresh Google token")
         
     access_token = token_res.json().get("access_token")
-    
+
+    # Resolve the user's preferred output language so the retroactive analysis
+    # writes `retention_analysis` / `growth_driver` in the creator's language.
+    try:
+        from packages.clips.pipeline import _load_user_profile_context
+        from packages.core.taxonomy import language_label as _lang_label
+        _profile = _load_user_profile_context(user_id)
+        _output_language = _lang_label(_profile.get("language") or "")
+    except Exception:
+        _output_language = "English"
+
     # Create a background job
     store = get_job_store()
     import uuid
+    # Model choice constrained to the server's allowlist.
+    chosen_model = _resolve_anthropic_model(body.get("model"), fallback=_RETROACTIVE_DEFAULT_MODEL)
+
     job_id = f"historical_{uuid.uuid4().hex[:8]}"
     store.create_job(job_id, episode_id=f"yt_historical_{user_id}", total_clips=0)
     store.update_progress(job_id, 0, "🔍 Preparando análisis histórico...")
-    
+
     async def _run_historical_sync():
         """Background worker for historical sync."""
         try:
             from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
             from packages.core.services.telemetry import telemetry as telemetry_svc
 
-            extractor = YouTubeHistoricalExtractor(telemetry_svc)
-            
+            extractor = YouTubeHistoricalExtractor(
+                telemetry_svc,
+                anthropic_model=chosen_model,
+                output_language=_output_language,
+            )
+
             result = await extractor.process_historical_shorts(
                 user_id=user_id,
                 channel_id=channel_id,
@@ -1423,8 +1644,13 @@ async def sync_historical_data(user: User = Depends(require_auth)):
     
     # Fire and forget
     asyncio.create_task(_run_historical_sync())
-    
-    return {"job_id": job_id, "status": "started", "message": "Análisis histórico iniciado en segundo plano."}
+
+    return {
+        "job_id": job_id,
+        "status": "started",
+        "model": chosen_model,
+        "message": "Historical analysis started in the background.",
+    }
 
 
 @router.get("/analytics/youtube/historical/status/{job_id}")
