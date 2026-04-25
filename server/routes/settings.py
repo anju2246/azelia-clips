@@ -91,7 +91,6 @@ async def get_settings(user: User = Depends(require_auth)):
         google_model=settings.google_model,
         transcript_supabase_url=settings.transcript_supabase_url,
         transcript_supabase_key=mask_key(settings.transcript_supabase_key),
-        generate_teasers=settings.generate_teasers
     )
 
 @router.post("/settings", response_model=SettingsResponse)
@@ -174,10 +173,6 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         env_content["TRANSCRIPT_SUPABASE_KEY"] = req.transcript_supabase_key
         settings.transcript_supabase_key = req.transcript_supabase_key
 
-    if req.generate_teasers is not None:
-        env_content["GENERATE_TEASERS"] = str(req.generate_teasers).lower()
-        settings.generate_teasers = req.generate_teasers
-    
     # Write back to .env
     with open(env_path, "w") as f:
         for key, val in env_content.items():

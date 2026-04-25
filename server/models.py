@@ -64,7 +64,6 @@ class SettingsResponse(BaseModel):
     google_model: str = Field(default="gemini-2.5-pro")
     transcript_supabase_url: str = Field(default="")
     transcript_supabase_key: str = Field(default="", description="Masked key")
-    generate_teasers: bool = Field(default=False)
 
 class UpdateSettingsRequest(BaseModel):
     podcast_name: Optional[str] = None
@@ -80,7 +79,6 @@ class UpdateSettingsRequest(BaseModel):
     google_model: Optional[str] = None
     transcript_supabase_url: Optional[str] = None
     transcript_supabase_key: Optional[str] = None
-    generate_teasers: Optional[bool] = None
 
 class EpisodeResponse(BaseModel):
     id: str

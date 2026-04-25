@@ -53,11 +53,12 @@ export interface SettingsResponse {
   openai_model?: string;
   anthropic_api_key?: string;
   anthropic_model?: string;
+  google_api_key?: string;
+  google_model?: string;
   gcp_project_id?: string;
   vertex_model?: string;
   transcript_supabase_url?: string;
   transcript_supabase_key?: string;
-  generate_teasers?: boolean;
 }
 
 export interface UpdateSettingsRequest {
@@ -70,11 +71,12 @@ export interface UpdateSettingsRequest {
   openai_model?: string;
   anthropic_api_key?: string;
   anthropic_model?: string;
+  google_api_key?: string;
+  google_model?: string;
   gcp_project_id?: string;
   vertex_model?: string;
   transcript_supabase_url?: string;
   transcript_supabase_key?: string;
-  generate_teasers?: boolean;
 }
 
 export interface EpisodeResponse {
