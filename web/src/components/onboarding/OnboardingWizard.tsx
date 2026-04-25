@@ -5,6 +5,8 @@ import { DirectoryPicker } from '../settings/DirectoryPicker';
 import { ChevronDown, ChevronRight, Key, Loader2, Sparkles, FolderOpen, ArrowRight, ArrowLeft, CheckCircle2, User, Target, BarChart, Youtube, Link as LinkIcon, Shield } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { RetroactiveSyncModal } from '../analytics/RetroactiveSyncModal';
+import { SearchableCombobox, type ComboboxItem } from '../ui/SearchableCombobox';
+import { fetchTaxonomy } from '../../lib/taxonomy';
 
 import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 
@@ -49,9 +51,24 @@ export const OnboardingWizard: React.FC = () => {
             user_role: '',
             primary_goal: '',
             region: '',
-            episode_format: ''
+            episode_format: '',
+            language: ''
         };
     });
+
+    // Canonical taxonomies served by /api/taxonomy (single source of truth).
+    const [niches, setNiches] = useState<ComboboxItem[]>([]);
+    const [languages, setLanguages] = useState<ComboboxItem[]>([]);
+    const [countries, setCountries] = useState<ComboboxItem[]>([]);
+    useEffect(() => {
+        fetchTaxonomy()
+            .then(bundle => {
+                setNiches(bundle.niches);
+                setLanguages(bundle.languages);
+                setCountries(bundle.countries);
+            })
+            .catch(err => console.warn('Taxonomy fetch failed', err));
+    }, []);
 
     // Telemetry (Step 3) - Opt-in: default OFF, user must explicitly enable
     const [telemetry, setTelemetry] = useState(() => {
@@ -147,33 +164,23 @@ export const OnboardingWizard: React.FC = () => {
         }, 1200);
     };
 
-    const NICHES = ['Business & Entrepreneurship', 'Comedy', 'Education & Science', 'Technology', 'True Crime', 'Gaming', 'Health & Fitness', 'Lifestyle'];
     const ROLES = [
-        { id: 'solo_creator', label: 'Creador Local / Solitario' },
-        { id: 'video_editor', label: 'Freelance Video Editor' },
-        { id: 'agency', label: 'Agencia (Multi-cliente)' },
-        { id: 'network_producer', label: 'Network Producer' }
+        { id: 'solo_creator', label: 'Solo creator' },
+        { id: 'video_editor', label: 'Freelance video editor' },
+        { id: 'agency', label: 'Agency (multi-client)' },
+        { id: 'network_producer', label: 'Network producer' }
     ];
     const GOALS = [
-        { id: 'grow_audience', label: 'Crecer mi Audiencia (Viralidad)' },
-        { id: 'save_time', label: 'Save Editing Time' },
-        { id: 'monetize', label: 'Monetizar / Vender Productos' }
-    ];
-    const REGIONS = [
-        { id: 'Mexico', label: 'Mexico' },
-        { id: 'Colombia', label: 'Colombia' },
-        { id: 'Argentina', label: 'Argentina' },
-        { id: 'Spain', label: 'Spain' },
-        { id: 'USA', label: 'Estados Unidos' },
-        { id: 'Chile', label: 'Chile' },
-        { id: 'Peru', label: 'Peru' },
+        { id: 'grow_audience', label: 'Grow my audience (virality)' },
+        { id: 'save_time', label: 'Save editing time' },
+        { id: 'monetize', label: 'Monetize / sell products' }
     ];
     const FORMATS = [
-        { id: 'interview', label: 'Entrevista (Host + Invitado)' },
-        { id: 'solo', label: 'Solo / Monologue' },
-        { id: 'co_host', label: 'Co-hosts (2+ presentadores)' },
-        { id: 'panel', label: 'Panel (3+ participantes)' },
-        { id: 'narrative', label: 'Narrativo / Storytelling' },
+        { id: 'interview', label: 'Interview (host + guest)' },
+        { id: 'solo', label: 'Solo / monologue' },
+        { id: 'co_host', label: 'Co-hosts (2+ speakers)' },
+        { id: 'panel', label: 'Panel (3+ participants)' },
+        { id: 'narrative', label: 'Narrative / storytelling' },
     ];
 
     const stripMasked = (data: Record<string, any>) => {
@@ -267,6 +274,7 @@ export const OnboardingWizard: React.FC = () => {
                     preferences: {
                         region: profile.region,
                         episode_format: profile.episode_format,
+                        language: profile.language,
                     }
                 }).eq('id', user.id);
             }
@@ -568,31 +576,41 @@ export const OnboardingWizard: React.FC = () => {
                             </div>
                         </div>
 
-                        <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Content Niche</label>
-                            <select
-                                value={profile.content_niche}
-                                onChange={(e) => setProfile({ ...profile, content_niche: e.target.value })}
-                                className="w-full bg-black/40 border border-white/10 rounded-xl px-4 py-3 text-white appearance-none focus:border-brand-500 outline-none"
-                            >
-                                <option value="" disabled>Select a main niche…</option>
-                                {NICHES.map(n => <option key={n} value={n} className="bg-zinc-900">{n}</option>)}
-                            </select>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Content niche</label>
+                                <SearchableCombobox
+                                    items={niches}
+                                    value={profile.content_niche}
+                                    onChange={(id) => setProfile({ ...profile, content_niche: id })}
+                                    placeholder={niches.length ? 'Select a category…' : 'Loading…'}
+                                    disabled={!niches.length}
+                                />
+                                <p className="text-xs text-zinc-500 mt-1.5 ml-1">Drives how Azelia ranks clips for your audience.</p>
+                            </div>
+
+                            <div>
+                                <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Podcast language</label>
+                                <SearchableCombobox
+                                    items={languages}
+                                    value={profile.language}
+                                    onChange={(id) => setProfile({ ...profile, language: id })}
+                                    placeholder={languages.length ? 'Select a language…' : 'Loading…'}
+                                    disabled={!languages.length}
+                                />
+                                <p className="text-xs text-zinc-500 mt-1.5 ml-1">The AI agents write reasoning in this language.</p>
+                            </div>
                         </div>
 
                         <div>
-                            <label className="block text-sm font-medium text-zinc-300 mb-3 ml-1">Main Region</label>
-                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                                {REGIONS.map(r => (
-                                    <button
-                                        key={r.id}
-                                        onClick={() => setProfile({ ...profile, region: r.id })}
-                                        className={`px-4 py-3 rounded-xl border text-center text-sm transition-all ${profile.region === r.id ? 'bg-brand-500/20 border-brand-500 text-white' : 'bg-black/20 border-white/5 hover:border-white/20 text-zinc-400'}`}
-                                    >
-                                        {r.label}
-                                    </button>
-                                ))}
-                            </div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Country / region</label>
+                            <SearchableCombobox
+                                items={countries}
+                                value={profile.region}
+                                onChange={(id) => setProfile({ ...profile, region: id })}
+                                placeholder={countries.length ? 'Select a country…' : 'Loading…'}
+                                disabled={!countries.length}
+                            />
                         </div>
 
                         <div>
