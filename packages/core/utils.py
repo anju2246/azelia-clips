@@ -10,6 +10,47 @@ from rich.console import Console
 console = Console()
 
 
+# ISO 639-1 → human-readable label fed to LLM prompts as
+# `Respond in {output_language}`. Claude reasons better against natural names
+# than codes, so we expand here. Anything outside this map keeps its code,
+# which is still a valid (if less elegant) instruction.
+_LANG_LABELS = {
+    "en": "English", "es": "Spanish", "pt": "Portuguese", "fr": "French",
+    "de": "German", "it": "Italian", "ja": "Japanese", "ko": "Korean",
+    "zh-cn": "Simplified Chinese", "zh-tw": "Traditional Chinese", "zh": "Chinese",
+    "ar": "Arabic", "ru": "Russian", "hi": "Hindi", "tr": "Turkish",
+    "pl": "Polish", "nl": "Dutch", "sv": "Swedish", "no": "Norwegian",
+    "da": "Danish", "fi": "Finnish", "el": "Greek", "he": "Hebrew",
+    "th": "Thai", "vi": "Vietnamese", "id": "Indonesian", "uk": "Ukrainian",
+    "cs": "Czech", "ro": "Romanian", "hu": "Hungarian",
+}
+
+
+def detect_language(text: str, fallback: str = "en") -> str:
+    """Best-effort ISO 639-1 detection from a transcript.
+
+    Uses `langdetect` (pure Python, no models). Falls back to the supplied
+    code on any failure — short text, mixed languages, library missing —
+    so the pipeline never crashes because of detection. Seeded for
+    deterministic results across re-runs of the same transcript.
+    """
+    if not text or len(text.strip()) < 30:
+        return fallback
+    try:
+        from langdetect import detect, DetectorFactory
+        DetectorFactory.seed = 0
+        return detect(text).lower()
+    except Exception:
+        return fallback
+
+
+def language_label(code: str, fallback: str = "English") -> str:
+    """Human-readable label for an ISO 639-1 code (e.g. `es` → 'Spanish')."""
+    if not code:
+        return fallback
+    return _LANG_LABELS.get(code.lower(), code)
+
+
 class TempFileManager:
     """Context manager for guaranteed cleanup of temporary files.
     

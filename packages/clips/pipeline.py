@@ -366,6 +366,24 @@ class BatchProcessor:
             # podcast-aware instead of applying generic viral heuristics.
             profile_ctx = _load_user_profile_context(self.user_id)
 
+            # Auto-detect episode language. Whisper sets `transcript.language`
+            # during transcription; for transcripts loaded from JSON or the
+            # API path that may be the schema default, so we fall back to a
+            # text-based detector. The user-level override in the profile
+            # (Settings → Advanced) wins over both — that's the escape hatch
+            # for bilingual podcasts that want to force one output language.
+            from packages.core.utils import detect_language as _detect_lang
+            episode_language = (profile_ctx.get("language") or "").strip()
+            if not episode_language:
+                episode_language = (getattr(transcript, "language", "") or "").strip().lower()
+            if not episode_language or episode_language == "es":
+                # `es` is the schema default in Transcript — re-detect to
+                # avoid mislabelling English/other-language transcripts as ES.
+                detected = _detect_lang(transcript.full_text, fallback="")
+                if detected:
+                    episode_language = detected
+            episode_language = episode_language or "en"
+
             curation_config = CurationConfig(
                 podcast_name=settings.podcast_name,
                 high_retention_patterns=li_patterns.get("high_retention_patterns", []),
@@ -375,7 +393,7 @@ class BatchProcessor:
                 primary_goal=profile_ctx.get("primary_goal", ""),
                 region=profile_ctx.get("region", ""),
                 episode_format=profile_ctx.get("episode_format", ""),
-                language=profile_ctx.get("language", ""),
+                language=episode_language,
                 is_pro_tier=bool(profile_ctx.get("is_pro_tier", False)),
                 user_cohort_hash=profile_ctx.get("cohort_hash", ""),
             )

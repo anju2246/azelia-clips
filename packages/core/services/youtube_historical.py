@@ -57,8 +57,12 @@ class YouTubeHistoricalExtractor:
         """Fetch transcript via API first, fall back to yt-dlp + whisper."""
         if YouTubeTranscriptApi:
             try:
-                transcript = YouTubeTranscriptApi.get_transcript(video_id, languages=['es', 'en'])
-                text = " ".join([seg['text'] for seg in transcript])
+                # youtube-transcript-api 1.x dropped the static `get_transcript`
+                # in favor of the instance method `fetch`. Snippets now expose
+                # attributes (.text/.start/.duration) instead of dict keys.
+                ytt = YouTubeTranscriptApi()
+                fetched = ytt.fetch(video_id, languages=['es', 'en'])
+                text = " ".join([s.text for s in fetched])
                 return text.replace('\n', ' ').strip(), "youtube_api"
             except Exception as e:
                 logger.warning("YouTube transcript API failed for %s: %s", video_id, e)
@@ -222,6 +226,13 @@ class YouTubeHistoricalExtractor:
 
         logger.info("Analyzing historical short %s (transcript via %s)...", video_id, source)
 
+        # Detect language per-video. youtube-transcript-api requests captions in
+        # `['es','en']` order so for non-Latin podcasts we'd otherwise label
+        # everything Spanish. With detection the LLM writes `retention_analysis`
+        # and `growth_driver` in the actual language of the short.
+        from packages.core.utils import detect_language as _detect_lang, language_label as _lang_label
+        per_video_lang = _lang_label(_detect_lang(transcript, fallback="en"))
+
         # Build rich metrics context for the LLM
         metrics_context = ""
         if metrics or analytics:
@@ -247,9 +258,9 @@ class YouTubeHistoricalExtractor:
 
         system_prompt = f"""You are an audience analyst specialised in YouTube Shorts.
 
-⚠️ OUTPUT LANGUAGE: Respond in {self.output_language}. The free-text fields
+⚠️ OUTPUT LANGUAGE: Respond in {per_video_lang}. The free-text fields
 (`retention_analysis`, `growth_driver`, and each `core_topics` entry) MUST be
-written in {self.output_language}. The enum values for `hook_type`,
+written in {per_video_lang}. The enum values for `hook_type`,
 `emotional_charge`, and `episode_format` stay in English as shown.
 
 Analyze this historical YouTube Short by combining its transcript with the real
