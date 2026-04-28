@@ -38,8 +38,18 @@ import { OnboardingWizard } from "../components/onboarding/OnboardingWizard";
                     if (res.ok) {
                         const data = await res.json();
                         if (data.onboarding_complete) {
-                            window.location.replace("/dashboard");
-                            return;
+                            // Don't bounce to /dashboard if the URL carries an
+                            // OAuth callback (Google YouTube). The wizard's
+                            // init handler needs a chance to POST the code to
+                            // /sync-with-code so the YT connection persists.
+                            // Without this guard, post-OAuth landings on a
+                            // post-onboarding account silently lose the code
+                            // and the user thinks YouTube didn't connect.
+                            const params = new URLSearchParams(window.location.search);
+                            if (!params.has("code")) {
+                                window.location.replace("/dashboard");
+                                return;
+                            }
                         }
                     }
                 } catch (e) {

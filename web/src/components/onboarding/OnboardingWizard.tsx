@@ -12,6 +12,18 @@ import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
+// Synchronous belt-and-suspenders: if the user is on /onboarding and
+// localStorage still claims onboarding is complete, that's a contradiction
+// (server must have reset them). Wipe stale flags before any state hook
+// initialises from localStorage. This complements the async server check
+// inside the component for the case when /auth/onboarding-status fails.
+if (typeof window !== 'undefined' &&
+    window.location.pathname.startsWith('/onboarding') &&
+    window.localStorage.getItem('az_onboarding_complete') === 'true') {
+    ['az_onboard_step','az_onboard_profile','az_onboard_telemetry','az_onboard_form','az_historical_synced','az_onboarding_complete']
+        .forEach(k => window.localStorage.removeItem(k));
+}
+
 async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
     const headers = new Headers(options.headers || {});
     try {
@@ -57,14 +69,15 @@ export const OnboardingWizard: React.FC = () => {
     });
 
     // Canonical taxonomies served by /api/taxonomy (single source of truth).
+    // Language is auto-detected per episode from the transcript, so we don't
+    // load the language list here — Settings → Advanced exposes the override
+    // for bilingual podcasts.
     const [niches, setNiches] = useState<ComboboxItem[]>([]);
-    const [languages, setLanguages] = useState<ComboboxItem[]>([]);
     const [countries, setCountries] = useState<ComboboxItem[]>([]);
     useEffect(() => {
         fetchTaxonomy()
             .then(bundle => {
                 setNiches(bundle.niches);
-                setLanguages(bundle.languages);
                 setCountries(bundle.countries);
             })
             .catch(err => console.warn('Taxonomy fetch failed', err));
@@ -196,6 +209,26 @@ export const OnboardingWizard: React.FC = () => {
 
     useEffect(() => {
         const init = async () => {
+            // Detect a true fresh start: server says onboarding isn't complete
+            // AND the profile has no required data yet. In that case, wipe any
+            // stale localStorage from a previous session so we land on step 1
+            // with empty fields (instead of replaying old answers).
+            try {
+                const statusRes = await fetchWithAuth('/auth/onboarding-status');
+                if (statusRes.ok) {
+                    const status = await statusRes.json();
+                    const freshStart = !status.onboarding_complete && !status.data_complete;
+                    if (freshStart) {
+                        ['az_onboard_step','az_onboard_profile','az_onboard_telemetry','az_onboard_form','az_historical_synced','az_onboarding_complete']
+                            .forEach(k => localStorage.removeItem(k));
+                        setStep(1);
+                        setProfile({ content_niche: '', user_role: '', primary_goal: '', region: '', episode_format: '', language: '' });
+                        setTelemetry(false);
+                        setHasSyncedHistorical(false);
+                    }
+                }
+            } catch { /* gate will re-check on each render */ }
+
             try {
                 const existing = await SettingsApi.getSettings();
                 const savedForm = localStorage.getItem('az_onboard_form');
@@ -264,10 +297,15 @@ export const OnboardingWizard: React.FC = () => {
     const handleFinish = async () => {
         setSaving(true);
         try {
-            // 1. Sync Profile to Supabase (Central DB)
+            // 1. Sync Profile to Supabase. Use upsert so the wizard works even
+            // when the profile row doesn't exist yet (deleted during testing,
+            // or auth.users insert trigger never created one). `id` matches
+            // auth.uid() so RLS still scopes the write to this user.
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
-                await supabase.from('profiles').update({
+                await supabase.from('profiles').upsert({
+                    id: user.id,
+                    email: user.email,
                     content_niche: profile.content_niche,
                     user_role: profile.user_role,
                     primary_goal: profile.primary_goal,
@@ -276,7 +314,7 @@ export const OnboardingWizard: React.FC = () => {
                         episode_format: profile.episode_format,
                         language: profile.language,
                     }
-                }).eq('id', user.id);
+                }, { onConflict: 'id' });
             }
 
             // 2. Sync Local Settings (Env)
@@ -348,7 +386,10 @@ export const OnboardingWizard: React.FC = () => {
                 toast.success(`Connected — ${result.total_shorts} videos synced from ${result.channel_name}.`, { id: toastId, icon: '🔗' });
                 setYtConnected(true);
                 setYtChannelName(result.channel_name);
-                if (!hasSyncedHistorical) {
+                // Gate the retroactive sync modal on having an AI key — the
+                // sync calls Claude per video, so without a key it 401s and
+                // produces no data. New users haven't reached step 4 yet.
+                if (!hasSyncedHistorical && hasAnyKey) {
                     setTimeout(() => setShowRetroactiveModal(true), 800);
                 }
                 // If coming back from YouTube OAuth during the ProUpgradeCard step, go to dashboard
@@ -379,7 +420,7 @@ export const OnboardingWizard: React.FC = () => {
             setYtConnected(true);
             setYtChannelName(result.channel_name);
             setYtShowPicker(false);
-            if (!hasSyncedHistorical) {
+            if (!hasSyncedHistorical && hasAnyKey) {
                 setTimeout(() => setShowRetroactiveModal(true), 1500);
             }
         } catch (error: any) {
@@ -526,10 +567,7 @@ export const OnboardingWizard: React.FC = () => {
 
                     </div>
 
-                    <div className="flex items-center justify-between pt-8 border-t border-white/10 mt-8">
-                        <button onClick={handleNext} className="text-zinc-500 hover:text-white transition-colors text-sm font-medium">
-                            Skip (I'll upload manually)
-                        </button>
+                    <div className="flex items-center justify-end pt-8 border-t border-white/10 mt-8">
                         <button onClick={handleNext} disabled={!formData.podcast_name} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all disabled:opacity-50">
                              Next <ArrowRight className="w-4 h-4" />
                         </button>
@@ -543,6 +581,7 @@ export const OnboardingWizard: React.FC = () => {
                     <div>
                         <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Let's get to know you</h1>
                         <p className="text-zinc-400 mt-2 text-lg">This info tunes Azelia's recommendation algorithms to your specific niche.</p>
+                        <p className="text-zinc-500 mt-2 text-xs">The setup wizard stays in English. Azelia auto-detects the language of every episode from its transcript and writes titles, summaries and reasoning in that language — no need to pick one.</p>
                     </div>
 
                     <div className="space-y-6 mt-6">
@@ -576,30 +615,16 @@ export const OnboardingWizard: React.FC = () => {
                             </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div>
-                                <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Content niche</label>
-                                <SearchableCombobox
-                                    items={niches}
-                                    value={profile.content_niche}
-                                    onChange={(id) => setProfile({ ...profile, content_niche: id })}
-                                    placeholder={niches.length ? 'Select a category…' : 'Loading…'}
-                                    disabled={!niches.length}
-                                />
-                                <p className="text-xs text-zinc-500 mt-1.5 ml-1">Drives how Azelia ranks clips for your audience.</p>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Podcast language</label>
-                                <SearchableCombobox
-                                    items={languages}
-                                    value={profile.language}
-                                    onChange={(id) => setProfile({ ...profile, language: id })}
-                                    placeholder={languages.length ? 'Select a language…' : 'Loading…'}
-                                    disabled={!languages.length}
-                                />
-                                <p className="text-xs text-zinc-500 mt-1.5 ml-1">The AI agents write reasoning in this language.</p>
-                            </div>
+                        <div>
+                            <label className="block text-sm font-medium text-zinc-300 mb-2 ml-1">Content niche</label>
+                            <SearchableCombobox
+                                items={niches}
+                                value={profile.content_niche}
+                                onChange={(id) => setProfile({ ...profile, content_niche: id })}
+                                placeholder={niches.length ? 'Select a category…' : 'Loading…'}
+                                disabled={!niches.length}
+                            />
+                            <p className="text-xs text-zinc-500 mt-1.5 ml-1">Drives how Azelia ranks clips for your audience.</p>
                         </div>
 
                         <div>
@@ -686,20 +711,9 @@ export const OnboardingWizard: React.FC = () => {
                                                 <div className="text-green-400 text-xs mt-0.5">{ytChannelName}</div>
                                             </div>
                                         </div>
-                                        {!hasSyncedHistorical ? (
-                                            <button 
-                                                onClick={() => setShowRetroactiveModal(true)}
-                                                className="px-3 py-1.5 bg-brand-500/20 hover:bg-brand-500/40 border border-brand-500/50 text-brand-300 text-xs rounded-lg transition-colors flex items-center gap-1.5 font-medium"
-                                            >
-                                                <Sparkles className="w-3.5 h-3.5" />
-                                                Historical Sync
-                                            </button>
-                                        ) : (
-                                            <div className="px-3 py-1.5 bg-zinc-800/50 border border-white/10 text-zinc-400 text-xs rounded-lg flex items-center gap-1.5 font-medium">
-                                                <Sparkles className="w-3.5 h-3.5 text-brand-500" />
-                                                Historial Procesado
-                                            </div>
-                                        )}
+                                        <div className="px-3 py-1.5 bg-zinc-800/40 border border-white/10 text-zinc-500 text-[11px] rounded-lg leading-tight max-w-[180px]">
+                                            Historical sync runs from the dashboard once setup is done.
+                                        </div>
                                     </div>
                                 ) : ytShowPicker ? (
                                     <div className="p-4 rounded-xl bg-black/20 border border-red-500/20 space-y-3">
