@@ -30,7 +30,18 @@ export const SettingsForm: React.FC = () => {
     // Tab IDs intentionally match the section order in the JSX below; changing them
     // requires updating the `activeTab === '...'` checks wrapping each <section>.
     type TabId = 'workspace' | 'pipeline' | 'integrations' | 'privacy';
-    const [activeTab, setActiveTab] = useState<TabId>('workspace');
+    const [activeTab, setActiveTab] = useState<TabId>(() => {
+        // Honour `#privacy` (and any other tab id) in the URL hash so deep
+        // links from the dashboard nudges land on the right tab. We only
+        // accept ids that match TabId; anything else falls back to workspace.
+        if (typeof window !== 'undefined') {
+            const hash = window.location.hash.replace('#', '');
+            if (hash === 'workspace' || hash === 'pipeline' || hash === 'integrations' || hash === 'privacy') {
+                return hash;
+            }
+        }
+        return 'workspace';
+    });
     const TABS: Array<{ id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }> = [
         { id: 'workspace',    label: 'Workspace',    icon: FolderOpen },
         { id: 'pipeline',     label: 'Pipeline',     icon: Key },

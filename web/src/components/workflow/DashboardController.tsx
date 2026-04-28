@@ -4,6 +4,7 @@ import { LibraryView } from './LibraryView';
 import { LiveProcessingWidget } from './LiveProcessingWidget';
 import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
+import { TelemetryNudge } from '../analytics/TelemetryNudge';
 import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 import { CreditsStatusBanner } from './CreditsStatusBanner';
 import { FirstVisitHint } from './FirstVisitHint';
@@ -203,6 +204,11 @@ export const DashboardController: React.FC = () => {
 
             {/* 4. YouTube nudge — only surfaces when NOT connected yet. */}
             <YouTubeNudge />
+
+            {/* 4b. Telemetry nudge — only surfaces when consent is OFF.
+                Mirrors YouTubeNudge so the user has a way back if they
+                declined during onboarding (which used to be a one-shot). */}
+            <TelemetryNudge />
 
             {/* 5. Secondary: upgrade path for free-tier users. */}
             {userTier === 'free' && (
