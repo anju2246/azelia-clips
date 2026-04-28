@@ -28,22 +28,6 @@ const navLinks = [
     <meta name="generator" content={Astro.generator} />
     <title>{title}</title>
     <meta name="theme-color" content="#09090b" />
-    <link rel="apple-touch-icon" href="/pwa-192x192.png" />
-    <link rel="manifest" href="/manifest.webmanifest" />
-    <script>
-      import { registerSW } from "virtual:pwa-register";
-      registerSW({
-        immediate: true,
-        onNeedRefresh() {
-          console.log(
-            "New content available, click on reload button to update.",
-          );
-        },
-        onOfflineReady() {
-          console.log("App is ready to work offline.");
-        },
-      });
-    </script>
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
