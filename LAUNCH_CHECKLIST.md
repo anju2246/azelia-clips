@@ -56,12 +56,12 @@
 
 ## 4. Legal / landing
 
-### `celia-clips-landing/astro-landing/src/pages/terms.astro`
+### `azelia-website/astro-landing/src/pages/terms.astro`
 - Section 5 "Pro — beta redemption program" describes the 3-month redemption
   window + 12 months of Pro + telemetry consent. Update wording when beta ends
   and paid pricing activates.
 
-### `celia-clips-landing/astro-landing/src/pages/privacy.astro`
+### `azelia-website/astro-landing/src/pages/privacy.astro`
 - "Vigente desde abril de 2026" — update the effective date if the policy changes
   materially at launch.
 
@@ -112,7 +112,7 @@ Current state is a ES/EN mix that undermines credibility.
 - `auth.py::mark_onboarding_complete` error details are mixed; make them English-first.
 - `telemetry_routes.py` consent response message is Spanish.
 
-### Landing pages (`celia-clips-landing/astro-landing/src/`)
+### Landing pages (`azelia-website/astro-landing/src/`)
 
 - `pages/privacy.astro` — **fully Spanish** (181 lines). Translate to English as primary; keep Spanish as a later `/privacy/es` if needed.
 - `pages/terms.astro` — **fully Spanish** (162 lines). Same treatment.
