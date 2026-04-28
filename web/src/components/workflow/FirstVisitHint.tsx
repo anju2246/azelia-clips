@@ -100,7 +100,7 @@ export const FirstVisitHint: React.FC<{ onScrollToUpload?: () => void }> = ({ on
                 <div className="flex-1 min-w-0">
                     <h3 className="text-white font-semibold text-sm">You're all set.</h3>
                     <p className="text-zinc-400 text-xs mt-0.5 leading-relaxed">
-                        Everything from onboarding is saved. Upload or pick an episode below to run your first pipeline.
+                        Everything from onboarding is saved. Pick an episode from your podcast directory below to run your first pipeline. Azelia processes everything locally — nothing is uploaded.
                     </p>
                 </div>
                 <button
@@ -110,7 +110,7 @@ export const FirstVisitHint: React.FC<{ onScrollToUpload?: () => void }> = ({ on
                     }}
                     className="flex-shrink-0 flex items-center gap-2 px-4 py-2 bg-brand-600 hover:bg-brand-500 text-white text-sm font-medium rounded-lg transition-all shadow-lg shadow-brand-500/20"
                 >
-                    Upload episode <ArrowDown className="w-4 h-4" />
+                    Pick an episode <ArrowDown className="w-4 h-4" />
                 </button>
                 <button
                     onClick={() => dismiss(true)}
