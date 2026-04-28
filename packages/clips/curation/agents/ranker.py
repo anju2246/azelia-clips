@@ -103,29 +103,54 @@ class RankerAgent:
             # Niche is validated against the canonical taxonomy so a
             # malicious profile value can't inject PostgREST operators.
             if config.content_niche and config.is_pro_tier and _is_valid_niche(config.content_niche):
-                rp = httpx.get(
-                    f"{_settings.supabase_url}/rest/v1/ic_signals",
-                    params={
-                        "select": "pattern,performance_premium,confidence,signal_type",
-                        "source_type": "eq.podintel_public",
-                        "category": f"eq.{config.content_niche}",
-                        "is_active": "eq.true",
-                        "order": "performance_premium.desc,confidence.desc",
-                        "limit": "4",
-                    },
-                    headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
-                    timeout=5,
-                )
-                if rp.status_code == 200:
-                    for row in rp.json() or []:
-                        pat = row.get("pattern") or {}
-                        hook = pat.get("hook_type")
-                        pp = row.get("performance_premium") or 1.0
-                        if hook:
-                            hints.append(
-                                f"NICHE SIGNAL · '{hook}' tends to outperform in your niche"
-                                f" (×{float(pp):.2f}) — supplementary weight."
-                            )
+                from packages.core.taxonomy import fallback_niche as _fallback_niche
+
+                def _query_niche_signals(category: str) -> list:
+                    rp = httpx.get(
+                        f"{_settings.supabase_url}/rest/v1/ic_signals",
+                        params={
+                            "select": "pattern,performance_premium,confidence,signal_type",
+                            "source_type": "eq.podintel_public",
+                            "category": f"eq.{category}",
+                            "is_active": "eq.true",
+                            "order": "performance_premium.desc,confidence.desc",
+                            "limit": "4",
+                        },
+                        headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
+                        timeout=5,
+                    )
+                    return rp.json() or [] if rp.status_code == 200 else []
+
+                primary_rows = _query_niche_signals(config.content_niche)
+                # Cold-start fallback: if the user's niche is brand new
+                # (zero rows yet) we borrow from the parent category so the
+                # Ranker still sees market hints on day one. Tag these as
+                # RELATED NICHE so the LLM treats them as supplementary.
+                fallback_rows: list = []
+                if not primary_rows:
+                    parent = _fallback_niche(config.content_niche)
+                    if parent:
+                        fallback_rows = _query_niche_signals(parent)
+
+                for row in primary_rows:
+                    pat = row.get("pattern") or {}
+                    hook = pat.get("hook_type")
+                    pp = row.get("performance_premium") or 1.0
+                    if hook:
+                        hints.append(
+                            f"NICHE SIGNAL · '{hook}' tends to outperform in your niche"
+                            f" (×{float(pp):.2f}) — supplementary weight."
+                        )
+
+                for row in fallback_rows:
+                    pat = row.get("pattern") or {}
+                    hook = pat.get("hook_type")
+                    pp = row.get("performance_premium") or 1.0
+                    if hook:
+                        hints.append(
+                            f"RELATED NICHE · '{hook}' from a related category"
+                            f" (×{float(pp):.2f}) — your niche has no data yet, treat as a weak hint."
+                        )
 
             return hints[:10]
         except Exception as e:

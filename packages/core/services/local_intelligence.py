@@ -656,8 +656,13 @@ Respond ONLY with valid JSON matching this schema:
         """
         Fetch market intelligence signals from ic_signals (PodFinder data).
         Filtered by user's context (region, category, episode_format).
+
+        Cold-start fallback: if the primary `category` has no signals yet
+        (typical for newly-added niches), retry the query against the parent
+        category from the taxonomy fallback map. Otherwise the day-one user
+        of a new niche would see no hints at all.
         """
-        try:
+        def _run(category_filter: str | None) -> list:
             query = (
                 self._supabase.table("ic_signals")
                 .select("signal_type, pattern, performance_premium, confidence, trend_direction, trend_velocity, saturation")
@@ -667,18 +672,29 @@ Respond ONLY with valid JSON matching this schema:
                 .order("confidence", desc=True)
                 .limit(limit * 3)  # Over-fetch, sort client-side
             )
-
-            # Apply context filters if available
             if context.get("region"):
                 query = query.eq("region", context["region"])
-            if context.get("category"):
-                query = query.eq("category", context["category"])
+            if category_filter:
+                query = query.eq("category", category_filter)
             if context.get("episode_format"):
                 query = query.eq("episode_format", context["episode_format"])
-
             result = query.execute()
+            return result.data or []
 
-            if not result.data:
+        try:
+            rows = _run(context.get("category"))
+
+            # Fallback to parent category if primary niche is empty.
+            if not rows and context.get("category"):
+                try:
+                    from packages.core.taxonomy import fallback_niche as _fallback_niche
+                    parent = _fallback_niche(context.get("category"))
+                except Exception:
+                    parent = None
+                if parent:
+                    rows = _run(parent)
+
+            if not rows:
                 return []
 
             # Sort by impact score: confidence * abs(premium - 1)
@@ -687,7 +703,7 @@ Respond ONLY with valid JSON matching this schema:
                 conf = s.get("confidence") or 0
                 return conf * abs(premium - 1)
 
-            signals = sorted(result.data, key=impact, reverse=True)
+            signals = sorted(rows, key=impact, reverse=True)
             return signals[:limit]
 
         except Exception as e:

@@ -22,8 +22,10 @@ from typing import Iterable
 CONTENT_NICHES: list[dict[str, str]] = [
     {"id": "arts", "label": "Arts"},
     {"id": "business", "label": "Business"},
+    {"id": "careers", "label": "Careers"},
     {"id": "comedy", "label": "Comedy"},
     {"id": "education", "label": "Education"},
+    {"id": "entrepreneurship", "label": "Entrepreneurship"},
     {"id": "fiction", "label": "Fiction"},
     {"id": "government", "label": "Government"},
     {"id": "health_fitness", "label": "Health & Fitness"},
@@ -34,6 +36,7 @@ CONTENT_NICHES: list[dict[str, str]] = [
     {"id": "news", "label": "News"},
     {"id": "religion_spirituality", "label": "Religion & Spirituality"},
     {"id": "science", "label": "Science"},
+    {"id": "self_improvement", "label": "Self Improvement"},
     {"id": "society_culture", "label": "Society & Culture"},
     {"id": "sports", "label": "Sports"},
     {"id": "technology", "label": "Technology"},
@@ -48,19 +51,25 @@ _NICHE_LABEL_TO_ID: dict[str, str] = {n["label"].lower(): n["id"] for n in CONTE
 # to the canonical id. Prevents profiles with legacy free-form values from
 # becoming invisible to the Ranker's niche-wide query.
 _NICHE_LEGACY_ALIASES: dict[str, str] = {
-    "business & entrepreneurship": "business",
-    "business and entrepreneurship": "business",
-    "entrepreneurship": "business",
+    "business & entrepreneurship": "entrepreneurship",
+    "business and entrepreneurship": "entrepreneurship",
     "business_finance": "business",
     "business & finance": "business",
+    "career": "careers",
     "education & science": "education",
     "education and science": "education",
     "gaming": "leisure",
     "lifestyle": "leisure",
     "food": "leisure",
     "hobbies": "leisure",
-    "self-help": "society_culture",
-    "self_help": "society_culture",
+    "self-help": "self_improvement",
+    "self_help": "self_improvement",
+    "self-development": "self_improvement",
+    "self_development": "self_improvement",
+    "personal_development": "self_improvement",
+    "personal development": "self_improvement",
+    "personal_growth": "self_improvement",
+    "personal growth": "self_improvement",
     "philosophy": "society_culture",
     "politics": "news",
     "tech": "technology",
@@ -108,6 +117,53 @@ def normalize_niche(value: str | None) -> str:
 
 def is_valid_niche(value: str | None) -> bool:
     return bool(value) and value in _NICHE_IDS
+
+
+# Cold-start fallback chain for the IC Cascade. When a user's niche has zero
+# `ic_signals` rows yet, the Ranker borrows from the parent anchor so the
+# day-one experience isn't just generic heuristics. Once the niche has its
+# own data, the primary query starts returning rows and the fallback never
+# fires.
+#
+# Anchors (no fallback — they're the densest pools and accept inflows):
+#   business, education, society_culture, leisure
+# Everything else funnels into one of those four. Don't add fallbacks that
+# go in reverse (`business → careers` would distort signal).
+_NICHE_PARENT_FALLBACK: dict[str, str] = {
+    # → business
+    "careers": "business",
+    "entrepreneurship": "business",
+    # → education
+    "self_improvement": "education",
+    "history": "education",
+    "science": "education",
+    "technology": "education",
+    # → society_culture
+    "arts": "society_culture",
+    "fiction": "society_culture",
+    "government": "society_culture",
+    "news": "society_culture",
+    "religion_spirituality": "society_culture",
+    "health_fitness": "society_culture",
+    # → leisure
+    "comedy": "leisure",
+    "kids_family": "leisure",
+    "music": "leisure",
+    "sports": "leisure",
+    "true_crime": "leisure",
+    "tv_film": "leisure",
+}
+
+
+def fallback_niche(value: str | None) -> str | None:
+    """Return the parent niche to consult if `value` has no IC signals yet.
+
+    Returns None when no fallback is registered or the input is invalid.
+    Callers should treat fallback hints as lower-confidence than primary ones.
+    """
+    if not value or value not in _NICHE_IDS:
+        return None
+    return _NICHE_PARENT_FALLBACK.get(value)
 
 
 # ─── Languages (ISO 639-1, most common ~60) ──────────────────────────────────
