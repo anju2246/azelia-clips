@@ -25,7 +25,7 @@ echo -e "${GREEN}${BOLD}Bienvenido al instalador de Azelia Clips.${NC}\n"
 # ─────────────────────────────────────────────
 # 1. System Requirements Check & Install
 # ─────────────────────────────────────────────
-echo -e "${BLUE}[1/6] Verificando dependencias del sistema...${NC}"
+echo -e "${BLUE}[1/5] Verificando dependencias del sistema...${NC}"
 
 check_cmd() {
     command -v "$1" &> /dev/null
@@ -80,7 +80,7 @@ echo "✓ Python ${PYTHON_VERSION}"
 # ─────────────────────────────────────────────
 # 2. Clone or Update Repository
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[2/6] Descargando Azelia Clips...${NC}"
+echo -e "\n${BLUE}[2/5] Descargando Azelia Clips...${NC}"
 
 INSTALL_DIR="$HOME/.azelia"
 REPO_URL="https://github.com/anju2246/azelia-clips.git"
@@ -102,7 +102,7 @@ fi
 # ─────────────────────────────────────────────
 # 3. Python Virtual Environment + Dependencies
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[3/6] Configurando entorno Python...${NC}"
+echo -e "\n${BLUE}[3/5] Configurando entorno Python...${NC}"
 echo -e "${YELLOW}(Puede tomar unos minutos)${NC}"
 
 if [ ! -d "venv" ]; then
@@ -115,67 +115,18 @@ pip install -e ".[all]" --quiet
 echo "✓ Backend e IA configurados."
 
 # ─────────────────────────────────────────────
-# 4. Node modules (no build yet — needs .env first)
+# 4. Node modules (no build yet — runs on first azelia start)
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[4/6] Instalando dependencias del dashboard...${NC}"
+echo -e "\n${BLUE}[4/5] Instalando dependencias del dashboard...${NC}"
 cd web
 npm install --silent 2>/dev/null
 cd ..
 echo "✓ Dependencias web instaladas."
 
 # ─────────────────────────────────────────────
-# 5. Environment Setup
+# 5. Global Command Setup
 # ─────────────────────────────────────────────
-echo -e "\n${BLUE}[5/6] Configurando variables de entorno...${NC}"
-
-ENV_FILE="$INSTALL_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-    echo "✓ .env ya existe — se respetan los valores actuales."
-else
-    cp "$INSTALL_DIR/.env.example" "$ENV_FILE"
-    echo -e "${YELLOW}Se creó .env desde .env.example. Necesitas configurar tus claves:${NC}"
-    echo ""
-
-    prompt_env() {
-        local key="$1"
-        local label="$2"
-        local default="$3"
-        printf "  %s" "$label"
-        [ -n "$default" ] && printf " [%s]" "$default"
-        printf ": "
-        read -r val
-        val="${val:-$default}"
-        if [ -n "$val" ]; then
-            # Replace the placeholder line in .env
-            sed -i.bak "s|^${key}=.*|${key}=${val}|" "$ENV_FILE" && rm -f "$ENV_FILE.bak"
-        fi
-    }
-
-    echo -e "  ${BOLD}Supabase${NC} (requerido — crea tu proyecto en supabase.com):"
-    prompt_env "SUPABASE_URL"        "  Project URL"        ""
-    prompt_env "SUPABASE_KEY"        "  Anon public key"    ""
-    prompt_env "SUPABASE_JWT_SECRET" "  JWT secret"         ""
-
-    echo ""
-    echo -e "  ${BOLD}API de IA${NC} (al menos una):"
-    prompt_env "ANTHROPIC_API_KEY" "  Anthropic API key (Claude)" ""
-    prompt_env "GROQ_API_KEY"      "  Groq API key (opcional)"   ""
-    prompt_env "OPENAI_API_KEY"    "  OpenAI API key (opcional)"  ""
-
-    echo ""
-    echo -e "  ${BOLD}Podcast${NC}:"
-    prompt_env "PODCAST_NAME" "  Nombre del podcast" "Mi Podcast"
-    prompt_env "PODCAST_DIR"  "  Ruta al directorio de episodios" "$HOME"
-
-    echo ""
-    echo -e "✓ .env configurado en $ENV_FILE"
-    echo -e "${YELLOW}Puedes editarlo manualmente en cualquier momento: ${ENV_FILE}${NC}"
-fi
-
-# ─────────────────────────────────────────────
-# 6. Global Command Setup
-# ─────────────────────────────────────────────
-echo -e "\n${BLUE}[6/6] Instalando comando global 'azelia'...${NC}"
+echo -e "\n${BLUE}[5/5] Instalando comando global 'azelia'...${NC}"
 
 BIN_DIR="$HOME/.azelia/bin"
 mkdir -p "$BIN_DIR"
