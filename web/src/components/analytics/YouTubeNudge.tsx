@@ -1,57 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Youtube, X, ArrowRight, Sparkles } from 'lucide-react';
 
-const DISMISS_KEY = 'azelia_yt_nudge_dismissed';
+interface YouTubeNudgeProps {
+    /** If provided, skips the internal API check and uses this value directly. */
+    connected?: boolean;
+    /** Called when the user successfully connects YouTube. */
+    onConnected?: () => void;
+}
 
-export const YouTubeNudge: React.FC = () => {
-    // Start hidden; wait until we KNOW the connection state before showing
-    // anything. This prevents the nudge from flashing on already-connected
-    // users while the API round-trip is in flight.
-    const [checked, setChecked] = useState(false);
+export const YouTubeNudge: React.FC<YouTubeNudgeProps> = ({ connected = false, onConnected }) => {
+    // Session-only dismiss: shows again on next page load until actually connected.
     const [dismissed, setDismissed] = useState(false);
-    const [connected, setConnected] = useState(false);
 
-    useEffect(() => {
-        const wasDismissed = localStorage.getItem(DISMISS_KEY) === 'true';
-        if (wasDismissed) {
-            setDismissed(true);
-            setChecked(true);
-            return;
-        }
+    const handleDismiss = () => setDismissed(true);
 
-        const checkStatus = async () => {
-            try {
-                const { supabase } = await import('../../lib/supabase');
-                const { data } = await supabase.auth.getSession();
-                const token = data?.session?.access_token;
-                if (!token) { setChecked(true); return; }
-
-                const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
-                const res = await fetch(`${API_BASE}/analytics/youtube/status`, {
-                    headers: { Authorization: `Bearer ${token}` }
-                });
-                if (res.ok) {
-                    const status = await res.json();
-                    setConnected(!!status.connected);
-                }
-            } catch (e) { /* silently fail */ }
-            finally {
-                setChecked(true);
-            }
-        };
-        checkStatus();
-    }, []);
-
-    const handleDismiss = () => {
-        localStorage.setItem(DISMISS_KEY, 'true');
-        setDismissed(true);
-    };
-
-    // Three conditions suppress the nudge:
-    //   1. We haven't finished checking status yet (avoid flash).
-    //   2. User already dismissed it this device.
-    //   3. YouTube is actually connected.
-    if (!checked || dismissed || connected) return null;
+    // Suppress when already connected or dismissed this session.
+    if (connected || dismissed) return null;
 
     return (
         <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-red-950/40 via-zinc-900/80 to-zinc-900/80 border border-red-500/20 p-5 mb-6 animate-in fade-in slide-in-from-top-2 duration-500">

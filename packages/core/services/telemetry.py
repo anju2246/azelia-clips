@@ -58,8 +58,9 @@ def _resolve_cohort_salt() -> Optional[str]:
             if r.status_code == 200 and r.json():
                 _cohort_salt = r.json()[0].get("salt")
                 return _cohort_salt
-        except Exception:
-            pass
+            print(f"[Telemetry] Warning: cohort salt fetch returned {r.status_code} — telemetry events will be skipped until resolved.")
+        except Exception as e:
+            print(f"[Telemetry] Warning: cohort salt fetch failed ({e}) — telemetry events will be skipped until server restart.")
         return None
 
 
@@ -94,6 +95,8 @@ class TelemetryService:
     def __init__(self):
         # Service-level flag: is Supabase reachable? (not the same as user consent)
         self.supabase: Optional[Client] = None
+        # Service-role client for consent checks — bypasses RLS to read profiles
+        self._supabase_svc: Optional[Client] = None
         # Per-user consent cache: {user_id: (consented: bool, expires_at: float)}
         self._consent_cache: Dict[str, Tuple[bool, float]] = {}
 
@@ -102,6 +105,14 @@ class TelemetryService:
                 self.supabase = create_client(settings.supabase_url, settings.supabase_key)
             except Exception as e:
                 print(f"[Telemetry] Warning: Could not initialize Supabase client: {e}")
+
+        # Initialize service-role client for privileged reads (consent checks bypass RLS)
+        svc_key = getattr(settings, "supabase_service_role_key", "") or ""
+        if settings.supabase_url and svc_key:
+            try:
+                self._supabase_svc = create_client(settings.supabase_url, svc_key)
+            except Exception:
+                pass
 
     @property
     def enabled(self) -> bool:
@@ -112,16 +123,20 @@ class TelemetryService:
         """
         Check if this specific user has opted in to telemetry.
         Reads from profiles.telemetry_consent with a 5-minute in-memory cache.
-        This is the authoritative check — not a global env var.
+        Uses service-role client to bypass RLS — profiles are not readable by anon key.
         """
-        if not self.supabase or not user_id or user_id == "anonymous":
+        if not user_id or user_id == "anonymous":
+            return False
+        # Prefer service-role client so RLS doesn't block the read
+        client = self._supabase_svc or self.supabase
+        if not client:
             return False
         now = time.monotonic()
         cached = self._consent_cache.get(user_id)
         if cached and now < cached[1]:
             return cached[0]
         try:
-            result = self.supabase.table("profiles").select("telemetry_consent").eq("id", user_id).single().execute()
+            result = client.table("profiles").select("telemetry_consent").eq("id", user_id).single().execute()
             consented = bool(result.data and result.data.get("telemetry_consent"))
         except Exception:
             consented = False
@@ -323,24 +338,11 @@ class TelemetryService:
         server-side audit write. The user's identity was already verified by
         require_auth before we got here, so writing to user_id's own row is safe.
         """
-        svc_key = getattr(settings, "supabase_service_role_key", "") or ""
-        if not (settings.supabase_url and svc_key):
-            # Fallback: try anon client (old behavior) — will typically no-op due to RLS
-            if not self.supabase and settings.supabase_url and settings.supabase_key:
-                try:
-                    self.supabase = create_client(settings.supabase_url, settings.supabase_key)
-                except Exception:
-                    return
-            if not self.supabase:
-                return
-            client = self.supabase
-        else:
-            # Service-role client — authoritative audit write
-            try:
-                client = create_client(settings.supabase_url, svc_key)
-            except Exception as e:
-                print(f"[Telemetry] Service-role client init failed: {e}")
-                return
+        # Reuse the already-initialized service-role client — no need to create one per call.
+        client = self._supabase_svc or self.supabase
+        if not client:
+            print("[Telemetry] track_consent_change: no Supabase client available, skipping.")
+            return
 
         def _record():
             try:
@@ -369,13 +371,26 @@ class TelemetryService:
         title_hash: Optional[str] = None,
         category: Optional[str] = None,
         episode_format: Optional[str] = None,
+        # Rich YouTube Analytics fields
+        avg_view_percentage: Optional[float] = None,
+        shares: Optional[int] = None,
+        subscribers_gained: Optional[int] = None,
+        subscribers_lost: Optional[int] = None,
+        estimated_minutes_watched: Optional[float] = None,
+        # LLM analysis fields
+        emotional_charge: Optional[str] = None,
+        core_topics: Optional[list] = None,
+        # Title signals (derived patterns — no title text)
+        title_patterns: Optional[dict] = None,
     ):
         """
         Records an aggregated snapshot of YouTube performance metrics for a clip.
         Matches the architectural requirement for batch IC processing: one row per clip sync,
         containing the snapshot of views and the matched contextual patterns.
-        
-        NEVER includes: video title, URL, channel name.
+
+        NEVER includes: video title, URL, channel name, user_id.
+        title_patterns contains only structural signals derived from the title
+        (word count, hashtag count, has question mark, etc.) — not the title itself.
         """
         if not self._is_user_consented(user_id):
             return
@@ -398,35 +413,57 @@ class TelemetryService:
                 "predicted_score": predicted_score,
                 "category": category,
                 "episode_format": episode_format,
+                "avg_view_percentage": avg_view_percentage,
+                "shares": shares,
+                "subscribers_gained": subscribers_gained,
+                "subscribers_lost": subscribers_lost,
+                "estimated_minutes_watched": estimated_minutes_watched,
+                "emotional_charge": emotional_charge,
+                "core_topics": core_topics or [],
+                "title_patterns": title_patterns or {},
             },
         )
-        
+
         def _push_user_telemetry():
             try:
+                # Use service-role client for inserts — ic_user_telemetry has RLS
+                svc = self._supabase_svc or self.supabase
                 # Attempt to retrieve episode_format from the user's profile if missing
                 final_format = event.metadata.get("episode_format")
                 if not final_format:
-                    res = self.supabase.table("profiles").select("preferences").eq("id", user_id).execute()
+                    res = svc.table("profiles").select("preferences").eq("id", user_id).execute()
                     if res.data and res.data[0].get("preferences"):
                         prefs = res.data[0]["preferences"]
                         final_format = prefs.get("episode_format")
-                    
                     event.metadata["episode_format"] = final_format or "interview"
 
-                self.supabase.table("ic_user_telemetry").insert({
+                svc.table("ic_user_telemetry").insert({
                     "cohort_hash": cohort,
-                    "podcast_fingerprint": event.metadata.get("title_hash", "unknown_hash"),
+                    "podcast_fingerprint": event.metadata.get("title_hash") or f"yt_{event.metadata.get('youtube_id', 'unknown')}",
                     "category": event.metadata.get("category"),
                     "episode_format": final_format or "interview",
                     "platform": "youtube",
-                    "avg_view_duration_s": event.metadata.get("duration_seconds"),
+                    # Native Analytics columns
+                    "avg_view_duration_s": int(event.metadata.get("duration_seconds") or 0),
+                    "avg_view_percentage": event.metadata.get("avg_view_percentage"),
                     "signal_type": "youtube_clip_aggregate",
+                    # Full pattern payload — all rich signals in JSONB
                     "pattern_applied": {
-                        "hook_type": event.metadata.get("hook_type"),
-                        "predicted_score": event.metadata.get("predicted_score"),
+                        # Performance snapshot
                         "views": event.metadata.get("views_snapshot"),
                         "likes": event.metadata.get("likes_snapshot"),
                         "comments": event.metadata.get("comments_snapshot"),
+                        "shares": event.metadata.get("shares"),
+                        "subscribers_gained": event.metadata.get("subscribers_gained"),
+                        "subscribers_lost": event.metadata.get("subscribers_lost"),
+                        "estimated_minutes_watched": event.metadata.get("estimated_minutes_watched"),
+                        # LLM-derived signals
+                        "hook_type": event.metadata.get("hook_type"),
+                        "emotional_charge": event.metadata.get("emotional_charge"),
+                        "core_topics": event.metadata.get("core_topics"),
+                        "predicted_score": event.metadata.get("predicted_score"),
+                        # Title structure signals (no title text)
+                        "title_signals": event.metadata.get("title_patterns"),
                     },
                     "metrics_window_days": 7
                 }).execute()
