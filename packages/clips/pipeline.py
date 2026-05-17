@@ -581,25 +581,39 @@ class BatchProcessor:
 
 
     def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
-        """Transcribe using the configured driver (Local Whisper / AssemblyAI)."""
-        # Supabase transcription source removed in local-first MVP.
+        """Transcribe the full episode video using the configured driver.
+
+        The driver may be local Whisper, AssemblyAI, or the user's own
+        Supabase (transcripts pulled by episode_id).
+        """
         resource = str(video_path)
-        
-        # Progress updates
         if job_id:
             from server.workers.job_store import get_job_store
             store = get_job_store()
             store.update_progress(job_id, 20, "🎤 Obteniendo transcripción...")
-            
         try:
             return self.transcription_driver.get_transcript(resource, **self.transcription_config)
         except Exception as e:
             console.print(f"[red]Transcription failed: {e}[/red]")
             raise e
-    
+
     def _transcribe_clip(self, clip_path: Path, job_id: str = None) -> "Transcript":
-        """Transcribe a short clip for subtitles."""
-        return self._transcribe_video(clip_path, job_id)
+        """Transcribe a short extracted clip for word-level subtitles.
+
+        ALWAYS uses local Whisper. Never the user-Supabase source — that one
+        looks up transcripts by episode_id, and per-clip temp files don't
+        have an episode_id. The episode-level transcription_driver is only
+        for the full episode (where the user keeps their canonical transcripts).
+        """
+        from packages.clips.transcription.local_whisper import LocalWhisperSource
+
+        if not hasattr(self, "_local_whisper_clip_source"):
+            self._local_whisper_clip_source = LocalWhisperSource()
+        try:
+            return self._local_whisper_clip_source.get_transcript(str(clip_path))
+        except Exception as e:
+            console.print(f"[red]Clip transcription failed: {e}[/red]")
+            raise e
     
     def run(
         self,
