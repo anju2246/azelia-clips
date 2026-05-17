@@ -46,7 +46,6 @@ class YouTubeHistoricalExtractor:
         anthropic_model: Optional[str] = None,
         output_language: str = "English",
     ):
-        self.telemetry = None  # local-first: no central telemetry
         self.llm = get_llm()
         self.anthropic_model = anthropic_model or self.DEFAULT_ANTHROPIC_MODEL
         # Human-readable language label (e.g. "Spanish", "Japanese"). Used in

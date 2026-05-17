@@ -1,48 +1,30 @@
 ---
 import DashboardLayout from '../../layouts/DashboardLayout.astro';
-import { MyPipelineStats } from '../../components/analytics/IntelligenceDashboard';
-import { MyContentIntelligence } from '../../components/analytics/MyContentIntelligence';
-import { NicheBenchmark } from '../../components/analytics/NicheBenchmark';
-import { YouTubeConnect } from '../../components/analytics/YouTubeConnect';
 ---
 
 <DashboardLayout title="Intelligence">
-    <div class="mb-10">
-        <h1 class="text-3xl font-bold tracking-tight text-white mb-2">Intelligence</h1>
-        <p class="text-zinc-400">
-            A creator dashboard that combines your real YouTube data, your own content patterns, and
-            what Azelia is predicting — kept separate so you always know what a number means.
+    <div class="max-w-2xl mx-auto py-24 text-center">
+        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 mb-6">
+            <svg class="w-7 h-7 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            </svg>
+        </div>
+
+        <h1 class="text-3xl font-bold tracking-tight text-white mb-3">Intelligence — coming soon</h1>
+
+        <p class="text-zinc-400 leading-relaxed mb-3">
+            Your YouTube channel data is already feeding the curation agents under the hood.
+            The visual dashboard for inspecting it lands in the next release.
         </p>
+
+        <p class="text-sm text-zinc-500 mb-6">
+            To connect your channel now, go to <a href="/dashboard/settings#integrations" class="text-brand-400 underline">Settings → Integrations</a>.
+        </p>
+
+        <div class="inline-flex items-center gap-2 text-xs text-zinc-500 px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06]">
+            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            Visual dashboard planned for v0.1.1
+        </div>
     </div>
-
-    <!-- 1. My Channel — real YouTube metrics + connect/sync actions. -->
-    <section class="mb-12">
-        <h2 class="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">
-            My channel
-        </h2>
-        <YouTubeConnect client:load />
-    </section>
-
-    <!-- 2. What works for my audience — signals extracted from the creator's own
-         shorts using their own API tokens. This is where the Creator Signals
-         spend becomes legible to the user. -->
-    <section class="mb-12">
-        <h2 class="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">
-            What works for my audience
-        </h2>
-        <MyContentIntelligence client:load />
-    </section>
-
-    <!-- 3. My Pipeline — what Azelia is predicting and producing locally. -->
-    <section class="mb-12">
-        <h2 class="text-sm font-medium text-zinc-400 uppercase tracking-widest mb-4 ml-1">
-            My pipeline
-        </h2>
-        <MyPipelineStats client:load />
-    </section>
-
-    <!-- 4. How I compare — anonymous cohort benchmark. Collapsed by default. -->
-    <section class="mb-12">
-        <NicheBenchmark client:load />
-    </section>
 </DashboardLayout>
