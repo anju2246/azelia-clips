@@ -31,7 +31,8 @@ class Settings(BaseSettings):
     # ── Data persistence ────────────────────────────────────────────────
     data_dir: Path = Field(
         default_factory=_default_data_dir,
-        description="Where user data lives (jobs, SQLite DBs, secrets). Never modified by self-update.",
+        alias="AZELIA_DATA_DIR",
+        description="Where user data lives (jobs, SQLite DBs, secrets). Never modified by self-update. Override with AZELIA_DATA_DIR env var.",
     )
 
     # ── LLM providers (restricted to Claude Code + Anthropic) ──────────

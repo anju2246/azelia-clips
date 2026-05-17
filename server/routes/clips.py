@@ -591,7 +591,13 @@ async def cancel_job(job_id: str, user: User = Depends(require_auth)):
 
 @router.post("/jobs/{job_id}/pause")
 async def pause_job(job_id: str, user: User = Depends(require_auth)):
-    """Pause a running job at the next clip boundary."""
+    """Pause a running job at the next clip boundary.
+
+    The pipeline checkpoints after each clip — pause may take up to the
+    length of the current clip render (~60s) to surface. To prevent
+    concurrent workers when /resume is called, we record a 'paused_at'
+    timestamp; resume refuses if the timestamp is too recent.
+    """
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -604,7 +610,11 @@ async def pause_job(job_id: str, user: User = Depends(require_auth)):
         get_abort_event(job_id).set()
     except Exception:
         pass
-    return {"status": "paused", "job_id": job_id}
+    return {
+        "status": "paused",
+        "job_id": job_id,
+        "note": "Pipeline may take up to ~60s to actually stop. Wait before pressing Resume.",
+    }
 
 
 @router.post("/jobs/{job_id}/resume")
@@ -625,6 +635,36 @@ async def resume_job_endpoint(
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != "paused":
         raise HTTPException(status_code=400, detail=f"Job is not paused (status: {job.status})")
+
+    # Race-condition guard: if pause was triggered very recently, the previous
+    # worker may still be mid-clip (ffmpeg/Whisper) and starting a second
+    # BatchProcessor now causes a SIGSEGV from concurrent MLX model usage.
+    # Refuse with 425 Too Early; UI can retry in a few seconds.
+    try:
+        from datetime import datetime, timezone
+        updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00")) if job.updated_at else None
+        if updated:
+            if updated.tzinfo is None:
+                updated = updated.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            secs_since_pause = (now - updated).total_seconds()
+            if secs_since_pause < 60:
+                wait_secs = int(60 - secs_since_pause)
+                raise HTTPException(
+                    status_code=425,
+                    detail=f"Pipeline still settling from pause. Try again in {wait_secs}s.",
+                )
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    # Clear stale abort_event before re-arming the pipeline
+    try:
+        from server.dependencies import clear_abort_event
+        clear_abort_event(job_id)
+    except Exception:
+        pass
 
     saved_req = store.get_config(job_id) or {}
     ep_id = job.episode_id or ""
