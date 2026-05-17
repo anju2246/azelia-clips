@@ -1,73 +1,141 @@
 # Architecture
 
-> What's open source, what's proprietary, and why.
+> Azelia Clips v0.1.0 is **100% local-first and MIT-licensed**. No central backend, no telemetry, no Pro tier. Your video, your transcripts, your clips — never leave your machine.
 
-Azelia Clips is **MIT licensed** — the entire client, backend, and multi-agent pipeline is in this repository and free to use, modify, and redistribute. This document exists to be transparent about what stays proprietary and why that line is drawn where it is.
-
----
-
-## Open source (MIT, this repository)
-
-Everything in `azelia-clips` under MIT:
-
-- **Client** (`web/`) — Astro + React dashboard, onboarding wizard, review interface
-- **Server** (`server/`) — FastAPI backend: routes, middleware, auth verification, job orchestration
-- **Pipeline** (`packages/clips/`) — transcription, multi-agent curation (Finder → Critic → Ranker), reframing, subtitles
-- **Core libraries** (`packages/core/`) — auth, crypto, config, services
-- **CLI** — `azelia` command-line tool
-- **E2E tests, infra scripts, migrations** — everything you need to run Azelia locally
-
-If you want to fork it, rebrand it, ship it as your own product: the license allows that. No hidden traps, no "but actually" clauses.
+This document is short because the architecture is small. That's the point.
 
 ---
 
-## Proprietary (not in this repository)
+## What runs where
 
-These are infrastructure and data assets that live on Azelia's servers and are not part of the MIT-licensed code:
+```
+Your machine
+├── ~/.azelia/
+│   ├── azelia/          ← MIT-licensed source (this repo, cloned by install.sh)
+│   ├── venv/            ← Python virtualenv with pipeline deps
+│   ├── bin/azelia       ← wrapper script (PATH-installed)
+│   └── data/            ← YOUR data — never touched by updates
+│       ├── jobs/        (generated clips, curation.json, faces, speakers)
+│       ├── jobs.db      (SQLite: job statuses)
+│       ├── youtube_shorts.db   (local YouTube sync — v0.1.1+)
+│       ├── secrets.env  (your Anthropic API key, etc.)
+│       └── update.log   (last self-update output)
 
-### 1. IC Cascade — the signals dataset
+External services (only what you explicitly call)
+├── Anthropic API           (if you set ANTHROPIC_API_KEY — your account, your bill)
+├── Claude Code CLI         (if installed locally — uses your subscription)
+├── GitHub API              (read-only: check for new releases)
+└── Your own Supabase       (optional: if you keep transcripts there)
+```
 
-Aggregated signals derived from community telemetry: hook patterns, duration benchmarks, sentiment distributions, performance curves. Updated weekly from anonymous metrics contributed by opted-in Pro users.
-
-This is the moat. The pipeline code can detect clips; the dataset is what makes them *ranked intelligently*. Without it, Azelia Clips is a capable curator. With it, it's calibrated against thousands of real podcast shorts that actually performed.
-
-Any self-hosted installation can query read-only against the Azelia central API to get current IC Cascade rankings (subject to rate limits). Write access — contributing new signals — is gated behind Pro tier consent.
-
-### 2. Ranker weights (trained models)
-
-The Ranker agent uses a scoring model trained on the IC Cascade + retention data. The prompt skeleton is open source in this repo. The weights, training data, and training pipeline are not.
-
-### 3. Central Supabase instance
-
-Our hosted database powers authentication, billing, telemetry ingestion, Pro tier gating, and IC Cascade distribution. Default builds of the MIT code connect here. Rate-limited per `installation_id`. Subject to the [Terms of Service](https://azelia.ai/terms) separate from the MIT license of the client.
-
-### 4. The "Azelia" name and brand
-
-Trademark pending. The name, logo, and visual identity are not covered by MIT. A fork can reuse the code under any name — not "Azelia".
-
----
-
-## Why this split
-
-**MIT maximizes reach.** We want Azelia Clips to be the default multi-agent podcast clipper — the one developers read to learn, the one indie creators fork to customize, the one cited in research. That requires permissive licensing without caveats.
-
-**The dataset and weights stay proprietary because they compound.** Every clip processed by the community that opts into telemetry makes the IC Cascade more accurate. That flywheel is what funds the infrastructure that keeps the MIT code maintained. If the dataset were MIT too, forks could match feature parity instantly — the incentive to invest in the pipeline would collapse.
-
-**We're betting on distribution over protection.** We'd rather 10,000 installations running Azelia (connected to our IC Cascade, contributing telemetry) than 500 installations of a proprietary clone. MIT is what gets us to 10,000.
+Azelia itself runs **no servers**. There is nothing for us to take down, paywall, or rate-limit.
 
 ---
 
-## For contributors
+## The pipeline
 
-If you contribute code back to this repo, you sign a [Contributor License Agreement](./CLA.md) that gives Azelia broad rights to use, relicense, and distribute your contribution. This is standard for MIT projects that need future flexibility — see the CLA file for the exact terms.
+```
+podcast.mp4
+   │
+   ▼
+[1. Transcribe]   Whisper (local) — MLX on Apple Silicon, OpenAI Whisper elsewhere
+   │              Optional: Pyannote diarization if HF_TOKEN is set
+   │              Optional: your own Supabase transcript table
+   │
+   ▼
+[2. Curate]       Multi-agent LLM pipeline:
+   │              Finder  → scans transcript for viral candidates
+   │              Critic  → filters weak ones (incomplete ideas, bad hooks)
+   │              Ranker  → scores survivors on 10 dimensions
+   │              Caption → generates social-ready hooks
+   │              (All steps run through Claude Code or Anthropic API.)
+   │
+   ▼
+[3. Reframe]      MTCNN face detection + speaker tracking →
+   │              dynamic crop, 16:9 → 9:16 vertical (TikTok/Reels format)
+   │
+   ▼
+[4. Subtitle]    ASS subtitles with word-level timing + animation styles
+   │              Burned into final MP4 with FFmpeg
+   │
+   ▼
+ready-to-post vertical clips (under `data/jobs/{id}/clips/approved/`)
+```
+
+Every step runs on your hardware. The LLM call is the only network hop, and you pick the provider.
+
+---
+
+## What's MIT (everything here)
+
+| Component | Path | Purpose |
+|---|---|---|
+| Client UI | `web/` | Astro + React dashboard |
+| Server | `server/` | FastAPI: routes, queue, jobs, system updates |
+| Pipeline | `packages/clips/` | Transcription, curation, vision, subtitles |
+| Core | `packages/core/` | Config, LLM router, taxonomy, utilities |
+| CLI | `packages/clips/cli.py` | `azelia process`, `start`, etc. |
+| Installer | `install.sh` | One-shot setup + wrapper with auto-restart |
+| Self-update | `scripts/self_update.sh` | Pulls latest release, restarts cleanly |
+
+Fork it, rebrand it, ship it as your own product. The license allows that.
+
+---
+
+## What's NOT in this repo
+
+- **Trademark.** The name "Azelia" and the logo are not covered by MIT. Forks can reuse the code under any name — not "Azelia".
+
+That's the whole list. There is no proprietary backend, no closed dataset, no managed service.
+
+---
+
+## Self-update model
+
+Updates are **GitHub releases** (semver tags like `v0.1.0`, `v0.1.1`, …).
+
+1. The dashboard polls `GET /api/system/version` and compares the local version against the latest GitHub release.
+2. If newer, the user clicks **Update now** in Settings → Workspace.
+3. `POST /api/system/update` runs `scripts/self_update.sh`:
+   - `git fetch` + `git reset --hard origin/main`
+   - `pip install -e .`
+   - `npm install && npm run build`
+   - Touches a restart sentinel
+4. The CLI watcher sees the sentinel and exits with code **42**.
+5. The wrapper script (`bin/azelia`) detects exit 42 and re-launches the server with the new code.
+6. The dashboard reconnects automatically.
+
+Your data (`~/.azelia/data/`) is **outside the git checkout** and is never touched by any of these steps. Worst case (failed update), you can `git reset` the checkout manually — your clips and settings are safe.
+
+---
+
+## What we explicitly chose NOT to build (yet)
+
+- **User accounts.** It's single-user, on localhost. No login, no signup. If you need multi-user, fork it.
+- **Telemetry.** Nothing leaves your machine without your action. No "anonymous metrics" we promise are anonymous.
+- **Pro tier / payments.** Free, MIT, all features. Pay your LLM provider directly.
+- **Collective intelligence dataset.** Each install is an island. The Ranker uses prompt engineering, not a trained model on aggregated data.
+- **Multi-platform clip distribution.** Generate the clips, upload them yourself (or wait for a future tool).
+
+If a future version wants any of these, they'll be opt-in connections to a separately-licensed Azelia service. The local product will remain MIT and runnable disconnected.
+
+---
+
+## Versioning
+
+- Single source of truth: `pyproject.toml` → `version = "X.Y.Z"`
+- Surfaced via `packages.clips.__version__` and `server/app.py` (FastAPI version field)
+- `/api/system/version` and `/api/system/info` expose it for diagnostics
+
+Semver: bumps follow Keep a Changelog conventions; see `CHANGELOG.md` (added in v0.1.1).
 
 ---
 
 ## Questions
 
-- **Can I use Azelia Clips to build a competing SaaS?** Yes, MIT allows it. You'll have to build your own IC Cascade dataset though — ours isn't included.
-- **Can I self-host and not connect to your Supabase?** Technically yes if you modify `packages/core/config.py` to point elsewhere. Not officially supported and you lose IC Cascade + auth.
-- **Can I use the "Azelia" name on my fork?** No — that's trademark, not license.
-- **Will the IC Cascade ever be open?** Not planned. The models trained on it may be released as checkpoints after a lag.
+- **Can I use Azelia to build a competing SaaS?** Yes, MIT allows it. Build your own brand.
+- **Can I run multiple users on a LAN?** Set `AZELIA_BIND_HOST=0.0.0.0`. But there's no auth — anyone on the LAN can use it. Add your own reverse proxy with auth if needed.
+- **Will there ever be a hosted version?** Maybe. If so, it'll be separately operated, and this MIT codebase will remain the source of truth.
+- **What about YouTube integration?** v0.1.0 disabled it (the old version was wired to a central DB). v0.1.1 brings it back as 100% local.
 
-Contact for anything else: `hola@azelia.ai`.
+Contact for anything else: open an issue on GitHub.
