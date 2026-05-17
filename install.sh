@@ -82,8 +82,10 @@ echo "✓ Python ${PYTHON_VERSION}"
 # ─────────────────────────────────────────────
 echo -e "\n${BLUE}[2/5] Descargando Azelia Clips...${NC}"
 
-INSTALL_DIR="$HOME/.azelia"
-REPO_URL="https://github.com/anju2246/azelia-clips.git"
+# Install location can be overridden with AZELIA_HOME (used by smoke tests
+# and CI). Default: $HOME/.azelia
+INSTALL_DIR="${AZELIA_HOME:-$HOME/.azelia}"
+REPO_URL="${AZELIA_REPO_URL:-https://github.com/anju2246/azelia-clips.git}"
 
 if [ -d "$INSTALL_DIR/.git" ]; then
     echo "Carpeta $INSTALL_DIR ya existe. Actualizando..."
@@ -95,7 +97,7 @@ else
         rm -rf "$INSTALL_DIR"
     fi
     echo "Clonando repositorio en $INSTALL_DIR..."
-    git clone --quiet "$REPO_URL" "$INSTALL_DIR"
+    git clone --quiet --branch "${AZELIA_BRANCH:-main}" "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
 fi
 
@@ -128,7 +130,7 @@ echo "✓ Dependencias web instaladas."
 # ─────────────────────────────────────────────
 echo -e "\n${BLUE}[5/5] Instalando comando global 'azelia'...${NC}"
 
-BIN_DIR="$HOME/.azelia/bin"
+BIN_DIR="${INSTALL_DIR}/bin"
 mkdir -p "$BIN_DIR"
 
 # Wrapper script: activates venv and calls azelia CLI.
@@ -136,16 +138,18 @@ mkdir -p "$BIN_DIR"
 # server reboot. The CLI exits with code 42 when ~/.azelia/data/.restart is
 # touched by scripts/self_update.sh — the loop then re-launches the freshly
 # installed code. Any other exit code propagates normally.
-cat << 'WRAPPER' > "$BIN_DIR/azelia"
+# Wrapper bakes the install path so a custom AZELIA_HOME survives at runtime.
+cat << WRAPPER > "$BIN_DIR/azelia"
 #!/usr/bin/env bash
-AZELIA_HOME="$HOME/.azelia"
-source "$AZELIA_HOME/venv/bin/activate"
+AZELIA_HOME="\${AZELIA_HOME:-${INSTALL_DIR}}"
+cd "\$AZELIA_HOME"
+source "\$AZELIA_HOME/venv/bin/activate"
 
 while true; do
-    "$AZELIA_HOME/venv/bin/python" -m packages.clips.cli "$@"
-    EXIT_CODE=$?
-    if [ "$EXIT_CODE" -ne 42 ]; then
-        exit $EXIT_CODE
+    "\$AZELIA_HOME/venv/bin/python" -m packages.clips.cli "\$@"
+    EXIT_CODE=\$?
+    if [ "\$EXIT_CODE" -ne 42 ]; then
+        exit \$EXIT_CODE
     fi
     echo ""
     echo "🔄 Self-update detected — restarting Azelia in 1s…"
@@ -157,9 +161,9 @@ chmod +x "$BIN_DIR/azelia"
 # Add to PATH if needed
 add_to_path() {
     local shell_rc="$1"
-    local path_line="export PATH=\"\$HOME/.azelia/bin:\$PATH\""
+    local path_line="export PATH=\"${BIN_DIR}:\$PATH\""
     if [ -f "$shell_rc" ]; then
-        if ! grep -q '.azelia/bin' "$shell_rc" 2>/dev/null; then
+        if ! grep -qF "$BIN_DIR" "$shell_rc" 2>/dev/null; then
             echo "" >> "$shell_rc"
             echo "# Azelia Clips" >> "$shell_rc"
             echo "$path_line" >> "$shell_rc"
@@ -194,5 +198,6 @@ echo ""
 echo -e "  El dashboard se construye en el primer arranque (~1 min)."
 echo -e "  Luego abre: ${BLUE}http://localhost:8000${NC}"
 echo ""
-echo -e "  ${YELLOW}Para editar tu configuración: ${INSTALL_DIR}/.env${NC}"
+echo -e "  ${YELLOW}Tus datos quedan en: \$HOME/.azelia/data/  (no se tocan en updates)${NC}"
+echo -e "  ${YELLOW}Settings UI: http://localhost:8000 → Settings${NC}"
 echo ""
