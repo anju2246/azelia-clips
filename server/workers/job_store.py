@@ -223,12 +223,33 @@ class JobStore:
         now = datetime.utcnow().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             result = conn.execute("""
-                UPDATE jobs SET 
+                UPDATE jobs SET
                     status = 'resuming',
                     message = '▶️ Reanudando...',
                     updated_at = ?
                 WHERE job_id = ? AND status = 'paused'
             """, (now, job_id))
+            conn.commit()
+            return result.rowcount > 0
+
+    def cancel_job(self, job_id: str) -> bool:
+        """Mark a job as cancelled. Returns True if a row was updated.
+
+        Accepts cancel from any non-terminal state (pending/processing/paused/resuming).
+        Pipeline polls status between clips and exits cleanly when it sees 'cancelled'.
+        """
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            result = conn.execute(
+                """
+                UPDATE jobs SET
+                    status = 'cancelled',
+                    message = '⛔ Cancelado por el usuario',
+                    updated_at = ?
+                WHERE job_id = ? AND status IN ('pending','processing','paused','resuming')
+                """,
+                (now, job_id),
+            )
             conn.commit()
             return result.rowcount > 0
     
