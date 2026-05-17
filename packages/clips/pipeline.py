@@ -24,89 +24,12 @@ console = Console()
 
 
 def _load_user_profile_context(user_id: str | None) -> dict:
-    """Fetch podcast-identity fields from the Supabase `profiles` row.
+    """Profile context disabled in local-first MVP (no central profiles DB).
 
-    Returns an empty dict on any failure — callers fall back to generic heuristics
-    so the pipeline never breaks because of onboarding gaps.
+    Returns empty dict — Curation pipeline falls back to generic heuristics.
+    Re-introduce in v0.2 reading from local SettingsForm (Workspace tab).
     """
-    if not user_id or user_id == "anonymous":
-        return {}
-    try:
-        from packages.core.config import settings as _settings
-        svc_key = getattr(_settings, "supabase_service_role_key", "") or getattr(_settings, "supabase_key", "")
-        if not svc_key or not getattr(_settings, "supabase_url", ""):
-            return {}
-        import httpx
-        r = httpx.get(
-            f"{_settings.supabase_url}/rest/v1/profiles",
-            params={
-                "id": f"eq.{user_id}",
-                "select": "content_niche,user_role,primary_goal,preferences,tier,pro_expires_at",
-                "limit": "1",
-            },
-            headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
-            timeout=5,
-        )
-        if r.status_code != 200:
-            # Distinguish auth/config failures (401/403) from "not onboarded yet".
-            # Without this the pipeline degrades to generic heuristics silently.
-            import logging as _log
-            _log.getLogger(__name__).warning(
-                "profile_context fetch returned HTTP %s for user %s — pipeline will use generic heuristics.",
-                r.status_code, user_id,
-            )
-            return {}
-        rows = r.json() or []
-        if not rows:
-            return {}
-        row = rows[0]
-        prefs = row.get("preferences") or {}
-        # Normalize via the shared taxonomy. Anything that doesn't map to a
-        # known id becomes "" — that's safe because CurationConfig skips the
-        # niche-wide IC query when content_niche is empty, falling back to
-        # generic heuristics. It also neutralizes any PostgREST-filter-
-        # injection attempts a user could have snuck into their own profile.
-        from packages.core.taxonomy import (
-            normalize_niche as _norm_niche,
-            normalize_country as _norm_country,
-            normalize_language as _norm_lang,
-        )
-        raw_niche = row.get("content_niche") or prefs.get("content_niche") or ""
-        raw_region = prefs.get("region") or ""
-        raw_language = prefs.get("language") or ""
-
-        # Pro tier gate — used downstream by the Ranker to decide whether
-        # to fetch podintel_public (niche-wide) signals. Mirrors the check
-        # in local_intelligence._get_user_tier (pro + non-expired).
-        is_pro_tier = False
-        try:
-            tier = (row.get("tier") or "").lower()
-            if tier == "pro":
-                from datetime import datetime, timezone
-                exp = row.get("pro_expires_at")
-                if exp:
-                    exp_dt = datetime.fromisoformat(str(exp).replace("Z", "+00:00"))
-                    is_pro_tier = exp_dt > datetime.now(timezone.utc)
-            elif tier in ("cloud", "enterprise", "founder", "super_admin"):
-                is_pro_tier = True
-        except Exception:
-            is_pro_tier = False
-
-        ctx = {
-            "content_niche": _norm_niche(raw_niche),
-            "user_role": (row.get("user_role") or prefs.get("user_role") or "").strip()[:40],
-            "primary_goal": (row.get("primary_goal") or prefs.get("primary_goal") or "").strip()[:40],
-            "region": _norm_country(raw_region),
-            "episode_format": (prefs.get("episode_format") or "").strip()[:30],
-            "language": _norm_lang(raw_language),
-            "is_pro_tier": is_pro_tier,
-        }
-        # Cohort hash unused in local-first MVP (no central IC). Kept empty for compat.
-        ctx["cohort_hash"] = ""
-        return ctx
-    except Exception as e:
-        console.print(f"[dim]   Profile context load failed ({type(e).__name__}: {e}) — using generic heuristics.[/dim]")
-        return {}
+    return {}
 
 
 @dataclass
@@ -425,19 +348,7 @@ class BatchProcessor:
         valid_clips.sort(key=lambda c: c.virality_score.total, reverse=True)
         console.print(f"[green]✓[/green] Processing {len(valid_clips)} clips that meet quality criteria (score >= {self.min_score})")
         
-        # Track curation metrics using telemetry
-        try:
-            avg_score = sum(c.virality_score.total for c in valid_clips) / len(valid_clips) if valid_clips else 0.0
-            categories = list({c.category for c in valid_clips if hasattr(c, 'category')})
-            telemetry.track_curation_metrics(
-                user_id=self.user_id,
-                num_clips_found=len(valid_clips),
-                avg_virality_score=avg_score,
-                top_topics=categories,
-                duration_seconds=getattr(transcript, 'duration', None),
-            )
-        except Exception as e:
-            console.print(f"[dim]Telemetry tracking warning: {e}[/dim]")
+        # Telemetry removed in local-first MVP — metrics stay local in JobStore.
         
         # Clip ID filtering (for re-processing)
         target_clip_id = getattr(self, 'target_clip_id', None)
@@ -560,33 +471,9 @@ class BatchProcessor:
                     folder_name = "approved" if is_approved else "review"
                     console.print(f"[green]   ✓ {clip_name} saved to {folder_name}/[/green]")
                     
-                    # 3g. Sync to Community Intelligence (if approved & enabled)
-                    if is_approved and self.analytics_sync.Enabled:
-                        try:
-                            clip_data = {
-                                "clip_hash": f"EP{episode.episode_number}_{i}_{int(clip.start_time)}",
-                                "video_title": clip.title,
-                                "duration": clip.duration,
-                                "hook_type": clip.category,
-                                "style": "split_screen_hybrid",
-                                "score": clip.virality_score.total
-                            }
-                            self.analytics_sync.sync_clip(clip_data)
-                        except Exception as e:
-                            console.print(f"[yellow]   ⚠️ Sync warning: {e}[/yellow]")
-                            
-                    # 3h. Telemetry: Send anonymous clip signals
-                    try:
-                        telemetry.track_clip_performance(
-                            user_id=self.user_id,
-                            predicted_score=clip.virality_score.total,
-                            hook_type=getattr(clip, 'category', None),
-                            duration_seconds=clip.duration,
-                            word_count=len(clip_transcript.text.split()) if clip_transcript else None
-                        )
-                    except Exception as e:
-                        pass
-                    
+                    # Community Intelligence sync + clip telemetry removed in local-first MVP.
+
+
                     # Update job progress (for pause/resume)
                     if store and job_id:
                         store.update_clip_progress(
@@ -681,17 +568,9 @@ class BatchProcessor:
 
 
     def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
-        """Transcribe using the configured driver (Local, AssemblyAI, or Supabase)."""
-        from packages.clips.transcription.supabase import SupabaseSource
-        
-        # Determine resource (Path or ID)
+        """Transcribe using the configured driver (Local Whisper / AssemblyAI)."""
+        # Supabase transcription source removed in local-first MVP.
         resource = str(video_path)
-        if isinstance(self.transcription_driver, SupabaseSource):
-            if episode_id:
-                resource = episode_id
-            else:
-                console.print("[yellow]Warning: SupabaseSource requires episode_id, using filename as fallback[/yellow]")
-                resource = video_path.stem
         
         # Progress updates
         if job_id:

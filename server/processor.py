@@ -11,26 +11,21 @@ class SingleVideoProcessor(BatchProcessor):
     Bypasses the strict external drive folder structure requirement.
     """
     def __init__(self, output_dir: Path, **kwargs):
-        # Bypass parent __init__ checks by initializing manually or using dummy path
-        # We override __init__ to avoid the external drive check
         self.base_path = output_dir
         self.clips_per_episode = kwargs.get('clips_per_episode')
         self.min_duration = kwargs.get('min_duration', 30)
         self.max_duration = kwargs.get('max_duration', 90)
         self.min_score = kwargs.get('min_score', 70)
-        self.use_supabase = kwargs.get('use_supabase', False)
+        self.use_supabase = False  # local-first MVP
         self.target_clip_id = None
         self.auth_token = kwargs.get('auth_token')
-        
-        # New: Pass transcription config to parent logic
+
         transcription_config = kwargs.get('transcription_config')
         super().__init__(
-            external_drive_path=output_dir, # Used as dummy base path
+            external_drive_path=output_dir,  # dummy base path for the parent's check
             transcription_config=transcription_config,
-            use_supabase=self.use_supabase
+            use_supabase=False,
         )
-        
-        # Ensure output dir exists
         self.base_path.mkdir(parents=True, exist_ok=True)
         
     def process_single(self, video_path: Path, job_id: str) -> int:
