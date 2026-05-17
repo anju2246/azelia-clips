@@ -291,8 +291,17 @@ export const OnboardingWizard: React.FC = () => {
         setFormData(prev => ({ ...prev, ...updates }));
     };
 
-    const handleNext = () => setStep(prev => (prev + 1) as 1 | 2 | 3 | 4);
-    const handlePrev = () => setStep(prev => (prev - 1) as 1 | 2 | 3 | 4);
+    // v0.1.0: only steps 1 (Workspace) and 4 (AI providers) are shown.
+    // Steps 2 (strategic profile) and 3 (YouTube + telemetry) are skipped —
+    // they were tied to the central backend that v0.1.0 doesn't have.
+    const handleNext = () => setStep(prev => {
+        if (prev === 1) return 4;
+        return (prev + 1) as 1 | 2 | 3 | 4;
+    });
+    const handlePrev = () => setStep(prev => {
+        if (prev === 4) return 1;
+        return (prev - 1) as 1 | 2 | 3 | 4;
+    });
 
     const handleFinish = async () => {
         setSaving(true);
@@ -485,9 +494,9 @@ export const OnboardingWizard: React.FC = () => {
 
     return (
         <div ref={boxRef} className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl relative transition-all duration-500 h-[75vh] overflow-y-auto">
-            {/* Progress indicator */}
+            {/* Progress indicator — v0.1.0 collapses to 2 visible steps (Workspace + AI) */}
             <div className="flex items-center gap-2 mb-8">
-                {[1, 2, 3, 4].map((i) => (
+                {[1, 4].map((i) => (
                     <div key={i} className={`flex-1 h-1.5 rounded-full transition-colors duration-300 ${step >= i ? 'bg-brand-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'bg-zinc-800'}`} />
                 ))}
             </div>
