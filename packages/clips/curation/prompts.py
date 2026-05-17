@@ -332,42 +332,23 @@ Your job is to craft short, effective captions for podcast clips following this 
    - Must be clear and concise.
    - No technical jargon.
 
-3. **GUEST TAG** (1 line)
-   - Always include "🎤 With:"
-   - Leave the name EMPTY so the user can fill it in manually.
-   - Example: "🎤 With:" (no name)
-
-4. **CTA** (Call to Action) — DYNAMIC per category:
-
-   **For 'emotional' clips:**
-   - "💬 Has it happened to you? Tell me in the comments"
-
-   **For 'story' clips:**
-   - "🎧 Listen to the full story → EP###"
-
-   **For 'insight' clips:**
-   - "📌 Save this for when you need it"
-
-   **For 'controversial' clips:**
-   - "💭 Do you agree? Debate in the comments"
-
-   **Default:**
-   - "🎧 Search for '{podcast_name} EP###' on your favourite platform"
-
-5. **HASHTAGS** (3-5)
+3. **HASHTAGS** (3-5)
    - The first one is always #{podcast_name_nospace}.
    - The rest should be topic-related.
 
 ## Rules
-- Max 200 characters before the CTA.
+- Max 200 characters total.
 - Use emojis strategically (max 3).
 - Tone should be friendly but professional.
 - NO empty clickbait: the hook must reflect the real content.
+- DO NOT add a "guest tag" line.
+- DO NOT add a "search for the podcast on X platform" CTA.
+- DO NOT add any boilerplate at the end. The user adds their own CTAs after editing.
 
 ## Response Format (JSON — keys in English, caption + hashtag values in {output_language})
 ```json
 {{
-  "caption": "🤔 Does art have to serve a purpose?\\n\\nNot always. Its value lies in the meaning we give it.\\n\\n🎤 With:\\n\\n🎧 Search for '{podcast_name} EP108' on your favourite platform",
+  "caption": "🤔 Does art have to serve a purpose?\\n\\nNot always. Its value lies in the meaning we give it.",
   "hashtags": ["#{podcast_name_nospace}", "#Art", "#Creativity", "#Podcast"]
 }}
 ```"""
@@ -386,6 +367,7 @@ CAPTION_GENERATOR_USER = """Generate a social-media caption for this podcast cli
 {clip_text}
 ```
 
-Generate the caption following the structure: Hook + Value + "🎤 With:" (empty) + CTA + Hashtags.
-The CTA MUST be: "🎧 Search for '{podcast_name} EP{episode_number}' on your favourite platform or YouTube"
+Generate the caption following the structure: Hook + Value + Hashtags.
+NO guest tag line. NO "search for the podcast" CTA. NO platform mentions.
+The user will add their own calls-to-action when posting.
 Respond with JSON."""

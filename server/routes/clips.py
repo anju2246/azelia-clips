@@ -568,6 +568,71 @@ async def restore_clip(job_id: str, filename: str, user: User = Depends(require_
     return {"status": "restored", "filename": filename}
 
 
+# ─── Job control: cancel / pause / resume ───────────────────────────────
+
+
+@router.post("/jobs/{job_id}/cancel")
+async def cancel_job(job_id: str, user: User = Depends(require_auth)):
+    """Cancel a running job. The pipeline stops at the next clip boundary."""
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status not in ("processing", "pending", "paused", "resuming"):
+        raise HTTPException(status_code=400, detail=f"Job is not running (status: {job.status})")
+    if not store.cancel_job(job_id):
+        raise HTTPException(status_code=400, detail="Could not cancel job")
+    try:
+        from server.dependencies import get_abort_event
+        get_abort_event(job_id).set()
+    except Exception:
+        pass
+    return {"status": "cancelled", "job_id": job_id}
+
+
+@router.post("/jobs/{job_id}/pause")
+async def pause_job(job_id: str, user: User = Depends(require_auth)):
+    """Pause a running job at the next clip boundary."""
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "processing":
+        raise HTTPException(status_code=400, detail=f"Job is not processing (status: {job.status})")
+    if not store.pause_job(job_id):
+        raise HTTPException(status_code=400, detail="Could not pause job")
+    try:
+        from server.dependencies import get_abort_event
+        get_abort_event(job_id).set()
+    except Exception:
+        pass
+    return {"status": "paused", "job_id": job_id}
+
+
+@router.post("/jobs/{job_id}/resume")
+async def resume_job_endpoint(job_id: str, user: User = Depends(require_auth)):
+    """Resume a paused job from the last successful clip checkpoint."""
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "paused":
+        raise HTTPException(status_code=400, detail=f"Job is not paused (status: {job.status})")
+
+    config = store.get_config(job_id) or {}
+    config["start_from_clip"] = job.last_clip_index
+
+    store.resume_job(job_id)
+    try:
+        from server.dependencies import clear_abort_event
+        clear_abort_event(job_id)
+    except Exception:
+        pass
+    asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=config))
+    return {
+        "status": "resuming",
+        "job_id": job_id,
+        "resuming_from_clip": job.last_clip_index,
+    }
+
+
 def cleanup_rejected_clips(max_age_days: int = 30):
     """Delete rejected clips older than max_age_days. Runs on server startup."""
     import time
