@@ -495,6 +495,25 @@ def start(
 
     threading.Thread(target=open_browser, daemon=True).start()
 
+    # Self-update restart watcher.
+    # The self_update.sh script touches ~/.azelia/data/.restart when an update
+    # finishes. The azelia wrapper bin (see install.sh) loops on exit code 42
+    # and re-launches the server with the freshly installed code.
+    def restart_watcher():
+        from packages.core.config import settings as _s
+        sentinel = _s.data_dir / ".restart"
+        while True:
+            try:
+                if sentinel.exists():
+                    sentinel.unlink()
+                    console.print("[bold yellow]🔄 Self-update finished — restarting server…[/bold yellow]")
+                    os._exit(42)
+            except Exception:
+                pass
+            time.sleep(1.5)
+
+    threading.Thread(target=restart_watcher, daemon=True).start()
+
     import uvicorn
     uvicorn.run("server.app:app", host=host, port=port)
 

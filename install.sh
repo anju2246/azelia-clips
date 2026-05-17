@@ -131,12 +131,26 @@ echo -e "\n${BLUE}[5/5] Instalando comando global 'azelia'...${NC}"
 BIN_DIR="$HOME/.azelia/bin"
 mkdir -p "$BIN_DIR"
 
-# Wrapper script that activates venv and calls the real azelia entry point
+# Wrapper script: activates venv and calls azelia CLI.
+# Implements a restart loop so the in-app self-update can trigger a clean
+# server reboot. The CLI exits with code 42 when ~/.azelia/data/.restart is
+# touched by scripts/self_update.sh — the loop then re-launches the freshly
+# installed code. Any other exit code propagates normally.
 cat << 'WRAPPER' > "$BIN_DIR/azelia"
 #!/usr/bin/env bash
 AZELIA_HOME="$HOME/.azelia"
 source "$AZELIA_HOME/venv/bin/activate"
-exec "$AZELIA_HOME/venv/bin/python" -m packages.clips.cli "$@"
+
+while true; do
+    "$AZELIA_HOME/venv/bin/python" -m packages.clips.cli "$@"
+    EXIT_CODE=$?
+    if [ "$EXIT_CODE" -ne 42 ]; then
+        exit $EXIT_CODE
+    fi
+    echo ""
+    echo "🔄 Self-update detected — restarting Azelia in 1s…"
+    sleep 1
+done
 WRAPPER
 chmod +x "$BIN_DIR/azelia"
 

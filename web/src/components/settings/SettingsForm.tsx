@@ -3,6 +3,7 @@ import { Save, Loader2, Database, Key, FolderOpen, ToggleLeft, ToggleRight, Chev
 import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '../../lib/api';
 import { DirectoryPicker } from './DirectoryPicker';
 import { useAIModels } from '../../hooks/useAIModels';
+import { SystemUpdateCard } from '../system/SystemUpdateCard';
 import toast, { Toaster } from 'react-hot-toast';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
@@ -319,6 +320,11 @@ export const SettingsForm: React.FC = () => {
                             />
                         </div>
                     </div>
+                </section>
+
+                {/* System updates card — local-first self-update */}
+                <section className="mt-6">
+                    <SystemUpdateCard />
                 </section>
 
                 {/* end of Workspace tab wrapper */}
