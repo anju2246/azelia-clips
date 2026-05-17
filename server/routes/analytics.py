@@ -515,17 +515,10 @@ async def estimate_creator_signals_cost(
     model: str | None = None,
     user: User = Depends(require_auth),
 ):
-    """v0.1.0: returns empty estimate — feature requires the central IC Cascade
-    (Edge Function + Supabase central). Re-introduces in v0.1.1 as 100% local:
-    LLM analyzes user's own shorts and writes patterns to
-    ~/.azelia/data/youtube_shorts.db, no central calls."""
-    return {
-        "total_shorts": 0,
-        "model_options": {},
-        "coming_in": "v0.1.1",
-        "note": "Creator-signal extraction goes 100% local in v0.1.1.",
-    }
-    conn = _get_yt_db()  # noqa — unreachable, kept for v0.1.1 port reference
+    """Return the cost estimate BEFORE the user confirms the run.
+    Frontend shows this in the confirmation modal.
+    Accepts ?model=... query to preview cost at a different model."""
+    conn = _get_yt_db()
     cur = conn.execute(
         "SELECT COUNT(*) FROM youtube_shorts WHERE user_id = ?",
         (user.id,),
@@ -557,18 +550,6 @@ async def extract_creator_signals(
     body: dict = Body(default_factory=dict),
     user: User = Depends(require_auth),
 ):
-    """v0.1.0: disabled — required the central IC Cascade. Reintroduces in
-    v0.1.1 as a fully local extractor (LLM analyzes shorts, writes patterns
-    to ~/.azelia/data/youtube_shorts.db, no Supabase/Edge calls)."""
-    raise HTTPException(
-        status_code=501,
-        detail={
-            "status": "coming_soon",
-            "message": "Creator-signal extraction goes 100% local in v0.1.1.",
-            "version_target": "0.1.1",
-        },
-    )
-    # Original SaaS-era impl below — kept verbatim for v0.1.1 port reference
     """Extract structural patterns from this creator's top shorts and insert
     them as anonymous signals (`source_type='creator_self'`, `cohort_hash`)
     into the central IC Cascade. Feeds the Ranker for the user's future
@@ -792,17 +773,6 @@ async def get_my_content_intelligence(
     request: Request,
     user: User = Depends(require_auth),
 ):
-    """v0.1.0: returns empty — depends on creator-signals (disabled). UI gets
-    {empty: true, reason: 'feature_disabled'} so it renders the placeholder."""
-    return {
-        "empty": True,
-        "reason": "feature_disabled",
-        "coming_in": "v0.1.1",
-        "top_hooks": [],
-        "retention_patterns": [],
-        "best_durations": [],
-    }
-    # Original impl below — preserved for v0.1.1 port
     """Aggregate the creator's own `ic_signals` (source_type='creator_self').
 
     These are the patterns the user extracted from THEIR own shorts, using
@@ -1546,8 +1516,6 @@ async def _sync_channel(
         try:
             import hashlib
 
-            from packages.core.services.telemetry import telemetry
-
             # Batch lookups — PostgREST chokes on very long `in.(...)` URLs
             clips_by_title: dict = {}
             titles = [s["title"] for s in shorts]
@@ -1575,25 +1543,8 @@ async def _sync_channel(
                 hook_type = clip_data.get("hook_type") if clip_data else None
                 predicted_score = clip_data.get("sentiment_score") if clip_data else None
 
-                title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]
-                try:
-                    telemetry.track_youtube_performance(
-                        user_jwt=user_jwt,
-                        youtube_id=s["video_id"],
-                        views=s["view_count"],
-                        likes=s["like_count"],
-                        comments=s["comment_count"],
-                        duration_seconds=s["duration_seconds"],
-                        hook_type=hook_type,
-                        predicted_score=predicted_score,
-                        title_hash=title_hash,
-                    )
-                except Exception as track_err:
-                    import logging
-
-                    logging.getLogger(__name__).warning(
-                        f"telemetry.track_youtube_performance failed for {s['video_id']}: {type(track_err).__name__}"
-                    )
+                title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]  # noqa: F841
+                # telemetry block removed in v0.1.0 — analytics stays local
         except Exception as telemetry_err:
             import logging
 
@@ -1788,7 +1739,6 @@ async def sync_historical_data(
     async def _run_historical_sync():
         """Background worker for historical sync."""
         try:
-            from packages.core.services.telemetry import telemetry as telemetry_svc
             from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
 
             extractor = YouTubeHistoricalExtractor(
@@ -2197,8 +2147,6 @@ async def fetch_youtube_analytics(
 
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
-
-    from packages.core.services.telemetry import telemetry
     from server.services.analytics import AnalyticsSync
 
     token = (authorization or "").replace("Bearer ", "").strip()
@@ -2301,17 +2249,7 @@ async def fetch_youtube_analytics(
                 # user JWT — fresh and authenticated for this request.
                 if user_id:
                     title_hash = hashlib.sha256(title.encode()).hexdigest()[:12]
-                    telemetry.track_youtube_performance(
-                        user_jwt=token,
-                        youtube_id=vid["id"],
-                        views=views,
-                        likes=likes,
-                        comments=comments_count,
-                        duration_seconds=clip_duration,
-                        hook_type=hook_type,
-                        predicted_score=predicted_score,
-                        title_hash=title_hash,
-                    )
+                    # telemetry call removed in v0.1.0
                     telemetry_count += 1
 
         return {

@@ -20,9 +20,7 @@ export const SettingsForm: React.FC = () => {
     const [providerOrder, setProviderOrder] = useState<string[]>(['groq', 'openai', 'anthropic', 'google']);
     const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
 
-    // Telemetry consent state
-    const [telemetryEnabled, setTelemetryEnabled] = useState(false);
-    const [telemetryLoading, setTelemetryLoading] = useState(false);
+    // (Telemetry consent state removed in v0.1.0 — no central telemetry.)
 
     // Live model registry from provider APIs
     const { groupedModels, loading: modelsLoading, refetch: refetchModels } = useAIModels();
@@ -143,20 +141,7 @@ export const SettingsForm: React.FC = () => {
             }
             // Mark ready for auto-save after React settles
             setTimeout(() => { readyForAutoSaveRef.current = true; }, 500);
-
-            // Load telemetry consent status
-            try {
-                const { data: sessionData } = await (await import('../../lib/supabase')).supabase.auth.getSession();
-                if (sessionData?.session?.access_token) {
-                    const telResp = await fetch(`${API_BASE}/telemetry/status`, {
-                        headers: { 'Authorization': `Bearer ${sessionData.session.access_token}` }
-                    });
-                    if (telResp.ok) {
-                        const telData = await telResp.json();
-                        setTelemetryEnabled(telData.telemetry_enabled);
-                    }
-                }
-            } catch { /* telemetry status is non-critical */ }
+            // (Telemetry status load removed — no central telemetry in v0.1.0.)
 
         } catch (error) {
             toast.error('Failed to load settings');
@@ -516,68 +501,10 @@ export const SettingsForm: React.FC = () => {
                 {/* End of Integrations tab wrapper */}
                 </>)}
 
-                {/* Privacy tab — DISABLED in v0.1.0 (no telemetry).
-                    Code preserved for v0.2 if opt-in central is reintroduced. */}
-                {false && ((activeTab as string) === 'privacy') && (<>
-                <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
-                    <div className="p-6">
-                        <div className="flex items-start justify-between">
-                            <div className="space-y-1 pr-6">
-                                <h3 className="font-semibold text-white flex items-center gap-2">
-                                    <BarChart3 className="w-5 h-5 text-brand-400" /> Collective Intelligence (Telemetry)
-                                </h3>
-                                <p className="text-sm text-zinc-400 leading-relaxed">
-                                    Share anonymized clip metrics (scores, durations, hook types) to power the IC Engine.
-                                    <strong className="text-zinc-300"> We never upload video, audio, or transcripts.</strong>
-                                </p>
-                                <div className="flex items-center gap-2 mt-2">
-                                    <Shield className="w-3.5 h-3.5 text-green-400" />
-                                    <span className="text-xs text-green-400/80">Data is anonymized before leaving your machine</span>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                disabled={telemetryLoading}
-                                onClick={async () => {
-                                    setTelemetryLoading(true);
-                                    try {
-                                        const { supabase } = await import('../../lib/supabase');
-                                        const { data: sessionData } = await supabase.auth.getSession();
-                                        if (!sessionData?.session?.access_token) {
-                                            toast.error('Please log in to change telemetry settings');
-                                            setTelemetryLoading(false);
-                                            return;
-                                        }
-                                        const resp = await fetch(`${API_BASE}/telemetry/consent`, {
-                                            method: 'POST',
-                                            headers: {
-                                                'Authorization': `Bearer ${sessionData.session.access_token}`,
-                                                'Content-Type': 'application/json',
-                                            },
-                                            body: JSON.stringify({ enabled: !telemetryEnabled }),
-                                        });
-                                        if (resp.ok) {
-                                            const result = await resp.json();
-                                            setTelemetryEnabled(result.telemetry_enabled);
-                                            toast.success(result.message);
-                                        } else {
-                                            const err = await resp.json().catch(() => ({}));
-                                            toast.error(err.detail || 'Failed to update telemetry');
-                                        }
-                                    } catch (e) {
-                                        toast.error('Failed to update telemetry');
-                                    } finally {
-                                        setTelemetryLoading(false);
-                                    }
-                                }}
-                                className={`cursor-pointer transition-colors flex-shrink-0 ${telemetryEnabled ? 'text-brand-500' : 'text-zinc-600'} ${telemetryLoading ? 'opacity-50' : ''}`}
-                            >
-                                {telemetryEnabled ? <ToggleRight className="w-10 h-10" /> : <ToggleLeft className="w-10 h-10" />}
-                            </button>
-                        </div>
-                    </div>
-                </section>
-                </>)}
+                {/* Privacy tab + telemetry consent block removed in v0.1.0.
+                    Local-first MVP has no telemetry, so there's nothing to consent to.
+                    See archive/working-tree-2026-05-17 in the private repo for the
+                    original SaaS-era block if/when this gets re-introduced as opt-in. */}
 
                 {/* Auto-Save Status Indicator — always visible across all tabs. */}
                 <div className="sticky bottom-6 flex justify-end">
