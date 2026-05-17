@@ -65,97 +65,13 @@ class RankerAgent:
         return " ".join(text)
 
     def _fetch_ic_signals_for_config(self, config: CurationConfig) -> List[str]:
-        """Fetch creator_self + podintel_public signals as prompt-ready hints.
+        """IC Cascade disabled in local-first MVP (no central signals DB).
 
-        creator_self signals (from THIS user's cohort) are weighted higher —
-        they describe patterns that work for this specific podcaster. When no
-        cohort or niche is known, returns an empty list and the ranker falls
-        back to generic heuristics.
+        Returns empty list — Ranker falls back to generic viral heuristics + any
+        `high_retention_patterns` configured locally by the user.
+        Re-introduce in v0.2 as opt-in connection to central Azelia DB.
         """
-        if not config.content_niche and not config.user_cohort_hash:
-            return []
-        try:
-            from packages.core.config import settings as _settings
-            from packages.core.taxonomy import is_valid_niche as _is_valid_niche
-            svc_key = getattr(_settings, "supabase_service_role_key", "") or getattr(_settings, "supabase_key", "")
-            if not svc_key or not getattr(_settings, "supabase_url", ""):
-                return []
-            import httpx
-
-            hints: List[str] = []
-
-            # 1. creator_self — this podcaster's own patterns. Highest weight.
-            # Delegated to local_intelligence so schema changes only need one edit.
-            if config.user_cohort_hash:
-                try:
-                    from packages.core.services.local_intelligence import local_intelligence
-                    hints.extend(
-                        local_intelligence.fetch_creator_self_hints(
-                            cohort_hash=config.user_cohort_hash, limit=6
-                        )
-                    )
-                except Exception as _e_self:
-                    console.print(f"[dim]   creator_self hints unavailable: {type(_e_self).__name__}[/dim]")
-
-            # 2. podintel_public — niche-wide signals for this category.
-            # Pro-tier only (mirrors `local_intelligence._blend_with_ic`).
-            # Free-tier users still get CREATOR SELF hints above.
-            # Niche is validated against the canonical taxonomy so a
-            # malicious profile value can't inject PostgREST operators.
-            if config.content_niche and config.is_pro_tier and _is_valid_niche(config.content_niche):
-                from packages.core.taxonomy import fallback_niche as _fallback_niche
-
-                def _query_niche_signals(category: str) -> list:
-                    rp = httpx.get(
-                        f"{_settings.supabase_url}/rest/v1/ic_signals",
-                        params={
-                            "select": "pattern,performance_premium,confidence,signal_type",
-                            "source_type": "eq.podintel_public",
-                            "category": f"eq.{category}",
-                            "is_active": "eq.true",
-                            "order": "performance_premium.desc,confidence.desc",
-                            "limit": "4",
-                        },
-                        headers={"apikey": svc_key, "Authorization": f"Bearer {svc_key}"},
-                        timeout=5,
-                    )
-                    return rp.json() or [] if rp.status_code == 200 else []
-
-                primary_rows = _query_niche_signals(config.content_niche)
-                # Cold-start fallback: if the user's niche is brand new
-                # (zero rows yet) we borrow from the parent category so the
-                # Ranker still sees market hints on day one. Tag these as
-                # RELATED NICHE so the LLM treats them as supplementary.
-                fallback_rows: list = []
-                if not primary_rows:
-                    parent = _fallback_niche(config.content_niche)
-                    if parent:
-                        fallback_rows = _query_niche_signals(parent)
-
-                for row in primary_rows:
-                    pat = row.get("pattern") or {}
-                    hook = pat.get("hook_type")
-                    pp = row.get("performance_premium") or 1.0
-                    if hook:
-                        hints.append(
-                            f"NICHE SIGNAL · '{hook}' tends to outperform in your niche"
-                            f" (×{float(pp):.2f}) — supplementary weight."
-                        )
-
-                for row in fallback_rows:
-                    pat = row.get("pattern") or {}
-                    hook = pat.get("hook_type")
-                    pp = row.get("performance_premium") or 1.0
-                    if hook:
-                        hints.append(
-                            f"RELATED NICHE · '{hook}' from a related category"
-                            f" (×{float(pp):.2f}) — your niche has no data yet, treat as a weak hint."
-                        )
-
-            return hints[:10]
-        except Exception as e:
-            console.print(f"[dim]   IC signal fetch for ranker skipped ({type(e).__name__}: {e}).[/dim]")
-            return []
+        return []
 
     def _build_ranker_addendum(self, config: CurationConfig) -> str:
         """Combine podcast context + IC signal hints into the system addendum."""

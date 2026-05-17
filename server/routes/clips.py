@@ -92,18 +92,11 @@ async def process_video(
         subtitle_style=subtitle_style
     )
     
-    # Create Transcription Config — auto-fill from settings if user has configured transcript DB
-    t_url = supabase_url or settings.transcript_supabase_url or None
-    t_key = supabase_key or settings.transcript_supabase_key or None
-    effective_source = transcription_source
-    if t_url and t_key and transcription_source == "local_whisper":
-        effective_source = "supabase_custom"
-
+    # Local-first MVP: only local_whisper / assemblyai supported.
+    # The supabase_url/key form fields are kept for API compat but ignored.
     transcription_config = {
-        "source_type": effective_source,
+        "source_type": "local_whisper" if transcription_source == "supabase_custom" else transcription_source,
         "assemblyai_api_key": assemblyai_key,
-        "supabase_url": t_url,
-        "supabase_key": t_key
     }
     
     # Initialize Job in Store (Legacy for UI compatibility)
@@ -187,18 +180,10 @@ async def process_local_video(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
         
-    # Auto-fill transcript DB from settings if configured
-    t_url = req.supabase_url or settings.transcript_supabase_url or None
-    t_key = req.supabase_key or settings.transcript_supabase_key or None
-    effective_source = req.transcription_source
-    if t_url and t_key and req.transcription_source == "local_whisper":
-        effective_source = "supabase_custom"
-
+    # Local-first MVP: supabase_url/key in request are ignored.
     transcription_config = {
-        "source_type": effective_source,
-        "assemblyai_api_key": req.assemblyai_key,
-        "supabase_url": t_url,
-        "supabase_key": t_key
+        "source_type": "local_whisper" if req.transcription_source == "supabase_custom" else req.transcription_source,
+        "assemblyai_api_key": getattr(req, "assemblyai_key", None),
     }
 
     # If job is already running, just return it
@@ -763,16 +748,14 @@ async def process_episode_endpoint(
         try:
             store.update_progress(job_id, 5, "Initializing batch processor...")
             processor = BatchProcessor(
+                external_drive_path=settings.podcast_dir,
                 min_duration=req.min_duration,
                 max_duration=req.max_duration,
                 min_score=req.min_score,
-                use_supabase=(req.transcription_source == "supabase_custom"),
                 transcription_config={
-                    "source_type": req.transcription_source,
-                    "assemblyai_api_key": req.assemblyai_key,
-                    "supabase_url": req.supabase_url,
-                    "supabase_key": req.supabase_key
-                }
+                    "source_type": "local_whisper" if req.transcription_source == "supabase_custom" else req.transcription_source,
+                    "assemblyai_api_key": getattr(req, "assemblyai_key", None),
+                },
             )
             
             # Find the episode config

@@ -60,12 +60,9 @@ def process(
             console.print("[red]Error:[/red] WhisperX not installed. Run: pip install -e '.[asr]'")
             raise typer.Exit(1)
 
-    # Optional: Upload to Supabase
+    # Supabase upload removed in local-first MVP — `--upload` flag is a no-op.
     if upload:
-        from server.sources.supabase_transcripts import upload_transcript
-        # Infer ID from filename (e.g. EP108_...)
-        ep_id = video.stem.split(" ")[0] if video.name.startswith("EP") else video.stem
-        upload_transcript(transcript, ep_id)
+        console.print("[yellow]Note: --upload disabled in local-first MVP. Transcript stays local.[/yellow]")
 
     # Step 2: Curate clips
     curator = ClipCurator()
@@ -268,16 +265,15 @@ def from_supabase(
         azelia from-supabase EP108 --all --guest "Juan Pérez"
         azelia from-supabase EP108 --video ep108.mp4 --output ./clips
     """
-    import json
-    from server.sources import get_transcript
-    from packages.clips.curation import ClipCurator, ClipExtractor
+    console.print("[yellow]The 'from-supabase' command is disabled in local-first MVP (v0.1.0).[/yellow]")
+    console.print("[dim]Use 'azelia process <video.mp4>' or the dashboard library instead.[/dim]")
+    raise typer.Exit(0)
+    # ── Unreachable below: kept for v0.2 reintroduction reference ──
+    import json  # noqa: F401
+    from packages.clips.curation import ClipCurator, ClipExtractor  # noqa: F401
 
     console.print("[bold blue]🎬 Azelia Clips[/bold blue] - Supabase Mode\n")
-
-    # Get transcript from Supabase
-    console.print(f"[blue]📡[/blue] Fetching transcript for: {episode_id}")
-    transcript = get_transcript(episode_id)
-
+    transcript = None
     if not transcript:
         console.print(f"[red]Error:[/red] Could not find transcript for {episode_id}")
         raise typer.Exit(1)
@@ -515,9 +511,12 @@ def upload_transcript_cmd(
         azelia upload-transcript ./episodes/EP108
         azelia upload-transcript transcript.json --id EP108
     """
-    from packages.clips.transcription.transcriber import Transcript
-    from server.sources.supabase_transcripts import upload_transcript
-    
+    console.print("[yellow]'upload-transcript' is disabled in local-first MVP (v0.1.0).[/yellow]")
+    console.print("[dim]Transcripts stay local in your podcast directory.[/dim]")
+    raise typer.Exit(0)
+    # ── Unreachable below ──
+    from packages.clips.transcription.transcriber import Transcript  # noqa: F401
+
     # Resolve target
     transcript_path = target
     if target.is_dir():
