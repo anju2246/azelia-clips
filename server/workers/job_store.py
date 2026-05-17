@@ -2,6 +2,9 @@
 
 Solves the problem of losing processing state when the server restarts.
 Jobs can be paused, resumed, and recovered after crashes.
+
+Local-first MVP: DB lives in settings.data_dir (default ~/.azelia/data/jobs.db),
+which is OUTSIDE the git checkout so self-update never wipes it.
 """
 
 import json
@@ -11,8 +14,18 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-# Default database path
-DB_PATH = Path(__file__).parent.parent / "data" / "jobs.db"
+
+def _default_db_path() -> Path:
+    """Resolve at first use so test runs that set AZELIA_DATA_DIR are honored."""
+    try:
+        from packages.core.config import settings
+        return settings.data_dir / "jobs.db"
+    except Exception:
+        # Fallback if config can't be imported (e.g. during tests with no env)
+        return Path(__file__).parent.parent / "data" / "jobs.db"
+
+
+DB_PATH = _default_db_path()
 
 
 @dataclass
