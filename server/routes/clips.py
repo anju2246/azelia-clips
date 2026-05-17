@@ -608,39 +608,95 @@ async def pause_job(job_id: str, user: User = Depends(require_auth)):
 
 
 @router.post("/jobs/{job_id}/resume")
-async def resume_job_endpoint(job_id: str, user: User = Depends(require_auth)):
-    """Resume a paused job from the last successful clip checkpoint."""
+async def resume_job_endpoint(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_auth),
+):
+    """Resume a paused job from the last successful clip checkpoint.
+
+    Library episodes (id starts with EP###) re-enter via BatchProcessor with
+    start_from_clip — the same path /episodes/{n}/process uses, so curation.json
+    is picked up and only the unfinished clips are rendered. Upload jobs go
+    through the worker queue (legacy path).
+    """
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != "paused":
         raise HTTPException(status_code=400, detail=f"Job is not paused (status: {job.status})")
 
-    # Reconstruct the worker payload from the persisted ProcessRequest +
-    # episode location. The first-time path went straight to BatchProcessor
-    # (skipping the worker queue), so the queue worker needs us to inflate
-    # the same shape it'd see in /process.
     saved_req = store.get_config(job_id) or {}
-
-    # Resolve episode video_path from the episode_id (= "EP{n}")
-    video_path = None
-    episode_folder = None
     ep_id = job.episode_id or ""
+
+    store.resume_job(job_id)
+    try:
+        from server.dependencies import clear_abort_event
+        clear_abort_event(job_id)
+    except Exception:
+        pass
+
+    # Library episode (EPNNN) → mirror the first-launch path: BatchProcessor
+    # in a background task, with start_from_clip = checkpoint.
     if ep_id.startswith("EP"):
         try:
             ep_num = int(ep_id[2:])
-            from server.processor import BatchProcessor as _BP
-            _p = _BP(external_drive_path=settings.podcast_dir)
-            _eps = _p.discover_episodes(start=ep_num, end=ep_num)
-            if _eps:
-                video_path = str(_eps[0].video_path)
-                episode_folder = str(_eps[0].episode_folder)
-        except Exception:
-            pass
+        except ValueError:
+            ep_num = None
 
+        if ep_num is not None:
+            from server.processor import BatchProcessor
+
+            t_url = saved_req.get("supabase_url") or settings.transcript_supabase_url or None
+            t_key = saved_req.get("supabase_key") or settings.transcript_supabase_key or None
+            transcription_source = saved_req.get("transcription_source", "local_whisper")
+            effective_source = transcription_source
+            if t_url and t_key and transcription_source == "local_whisper":
+                effective_source = "supabase_custom"
+            use_sb = effective_source == "supabase_custom"
+
+            transcription_config = {
+                "source_type": effective_source,
+                "assemblyai_api_key": saved_req.get("assemblyai_key"),
+                "supabase_url": t_url,
+                "supabase_key": t_key,
+            }
+
+            def run_resume_task(jid, num, start_clip):
+                try:
+                    store.update_progress(jid, 5, f"Resuming from clip {start_clip + 1}…")
+                    processor = BatchProcessor(
+                        external_drive_path=settings.podcast_dir,
+                        min_duration=saved_req.get("min_duration", 30),
+                        max_duration=saved_req.get("max_duration", 90),
+                        min_score=saved_req.get("min_score", 70),
+                        use_supabase=use_sb,
+                        transcription_config=transcription_config,
+                    )
+                    eps = processor.discover_episodes(start=num, end=num)
+                    if not eps:
+                        raise Exception(f"Episode {num} not found at {settings.podcast_dir}")
+                    clips_count = processor.process_episode(
+                        eps[0], job_id=jid, start_from_clip=start_clip
+                    )
+                    # Honor pause/cancel that may have happened during resume
+                    current = store.get_job(jid)
+                    if current and current.status in ("paused", "cancelled"):
+                        return
+                    store.complete_job(jid, clips_count)
+                except Exception as e:
+                    store.fail_job(jid, str(e))
+
+            background_tasks.add_task(run_resume_task, job_id, ep_num, job.last_clip_index)
+            return {
+                "status": "resuming",
+                "job_id": job_id,
+                "resuming_from_clip": job.last_clip_index,
+            }
+
+    # Fallback: non-EP job (upload) — keep the worker-queue path.
     payload = {
-        "video_path": video_path,
-        "episode_folder": episode_folder,
+        "video_path": saved_req.get("video_path"),
         "episode_id": ep_id,
         "settings": {
             "min_duration": saved_req.get("min_duration", 30),
@@ -655,13 +711,6 @@ async def resume_job_endpoint(job_id: str, user: User = Depends(require_auth)):
         "start_from_clip": job.last_clip_index,
         "user_id": "local",
     }
-
-    store.resume_job(job_id)
-    try:
-        from server.dependencies import clear_abort_event
-        clear_abort_event(job_id)
-    except Exception:
-        pass
     asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
     return {
         "status": "resuming",
