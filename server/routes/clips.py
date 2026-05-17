@@ -616,8 +616,45 @@ async def resume_job_endpoint(job_id: str, user: User = Depends(require_auth)):
     if job.status != "paused":
         raise HTTPException(status_code=400, detail=f"Job is not paused (status: {job.status})")
 
-    config = store.get_config(job_id) or {}
-    config["start_from_clip"] = job.last_clip_index
+    # Reconstruct the worker payload from the persisted ProcessRequest +
+    # episode location. The first-time path went straight to BatchProcessor
+    # (skipping the worker queue), so the queue worker needs us to inflate
+    # the same shape it'd see in /process.
+    saved_req = store.get_config(job_id) or {}
+
+    # Resolve episode video_path from the episode_id (= "EP{n}")
+    video_path = None
+    episode_folder = None
+    ep_id = job.episode_id or ""
+    if ep_id.startswith("EP"):
+        try:
+            ep_num = int(ep_id[2:])
+            from server.processor import BatchProcessor as _BP
+            _p = _BP(external_drive_path=settings.podcast_dir)
+            _eps = _p.discover_episodes(start=ep_num, end=ep_num)
+            if _eps:
+                video_path = str(_eps[0].video_path)
+                episode_folder = str(_eps[0].episode_folder)
+        except Exception:
+            pass
+
+    payload = {
+        "video_path": video_path,
+        "episode_folder": episode_folder,
+        "episode_id": ep_id,
+        "settings": {
+            "min_duration": saved_req.get("min_duration", 30),
+            "max_duration": saved_req.get("max_duration", 90),
+            "min_score": saved_req.get("min_score", 70),
+        },
+        "transcription_config": {
+            "source_type": saved_req.get("transcription_source", "local_whisper"),
+            "supabase_url": saved_req.get("supabase_url") or settings.transcript_supabase_url or None,
+            "supabase_key": saved_req.get("supabase_key") or settings.transcript_supabase_key or None,
+        },
+        "start_from_clip": job.last_clip_index,
+        "user_id": "local",
+    }
 
     store.resume_job(job_id)
     try:
@@ -625,7 +662,7 @@ async def resume_job_endpoint(job_id: str, user: User = Depends(require_auth)):
         clear_abort_event(job_id)
     except Exception:
         pass
-    asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=config))
+    asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
     return {
         "status": "resuming",
         "job_id": job_id,

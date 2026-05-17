@@ -515,10 +515,17 @@ async def estimate_creator_signals_cost(
     model: str | None = None,
     user: User = Depends(require_auth),
 ):
-    """Return the cost estimate BEFORE the user confirms the run.
-    Frontend shows this in the confirmation modal.
-    Accepts ?model=... query to preview cost at a different model."""
-    conn = _get_yt_db()
+    """v0.1.0: returns empty estimate — feature requires the central IC Cascade
+    (Edge Function + Supabase central). Re-introduces in v0.1.1 as 100% local:
+    LLM analyzes user's own shorts and writes patterns to
+    ~/.azelia/data/youtube_shorts.db, no central calls."""
+    return {
+        "total_shorts": 0,
+        "model_options": {},
+        "coming_in": "v0.1.1",
+        "note": "Creator-signal extraction goes 100% local in v0.1.1.",
+    }
+    conn = _get_yt_db()  # noqa — unreachable, kept for v0.1.1 port reference
     cur = conn.execute(
         "SELECT COUNT(*) FROM youtube_shorts WHERE user_id = ?",
         (user.id,),
@@ -550,6 +557,18 @@ async def extract_creator_signals(
     body: dict = Body(default_factory=dict),
     user: User = Depends(require_auth),
 ):
+    """v0.1.0: disabled — required the central IC Cascade. Reintroduces in
+    v0.1.1 as a fully local extractor (LLM analyzes shorts, writes patterns
+    to ~/.azelia/data/youtube_shorts.db, no Supabase/Edge calls)."""
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "status": "coming_soon",
+            "message": "Creator-signal extraction goes 100% local in v0.1.1.",
+            "version_target": "0.1.1",
+        },
+    )
+    # Original SaaS-era impl below — kept verbatim for v0.1.1 port reference
     """Extract structural patterns from this creator's top shorts and insert
     them as anonymous signals (`source_type='creator_self'`, `cohort_hash`)
     into the central IC Cascade. Feeds the Ranker for the user's future
@@ -773,6 +792,17 @@ async def get_my_content_intelligence(
     request: Request,
     user: User = Depends(require_auth),
 ):
+    """v0.1.0: returns empty — depends on creator-signals (disabled). UI gets
+    {empty: true, reason: 'feature_disabled'} so it renders the placeholder."""
+    return {
+        "empty": True,
+        "reason": "feature_disabled",
+        "coming_in": "v0.1.1",
+        "top_hooks": [],
+        "retention_patterns": [],
+        "best_durations": [],
+    }
+    # Original impl below — preserved for v0.1.1 port
     """Aggregate the creator's own `ic_signals` (source_type='creator_self').
 
     These are the patterns the user extracted from THEIR own shorts, using
