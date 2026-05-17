@@ -48,8 +48,8 @@ export const Header: React.FC = () => {
                     <span className="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-brand-500 border border-black"></span>
                 </button>
 
-                {/* User Profile */}
-                <a href="/dashboard/profile" className="flex items-center gap-3 pl-4 border-l border-zinc-800/50 hover:opacity-80 transition-opacity">
+                {/* Local user indicator (no profile page in v0.1.0 — single-user local) */}
+                <div className="flex items-center gap-3 pl-4 border-l border-zinc-800/50">
                     <div className="text-right hidden md:block">
                         <p className="text-sm font-medium text-zinc-200 leading-tight">{displayName || 'Loading...'}</p>
                         <p className="text-xs text-zinc-500">Local Environment</p>
@@ -69,7 +69,7 @@ export const Header: React.FC = () => {
                             )}
                         </div>
                     )}
-                </a>
+                </div>
             </div>
         </header>
     );

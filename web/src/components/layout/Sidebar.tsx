@@ -1,6 +1,5 @@
 import React, { useState } from 'react';
-import { Home, Film, LineChart, Settings, Bell, User, LogOut, BellOff } from 'lucide-react';
-import { signOut } from '../../lib/supabase';
+import { Home, Film, LineChart, Settings, Bell, BellOff } from 'lucide-react';
 
 interface SidebarProps {
     currentPath: string;
@@ -102,40 +101,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
             {/* Spacer */}
             <div className="flex-1" />
 
-            {/* Group 3: User Profile + Logout */}
-            <div className="bg-white/[0.04] rounded-2xl p-1.5 flex flex-col items-center gap-1 mb-2">
-                <a
-                    href="/dashboard/profile"
-                    title="Profile"
-                    className={`group relative w-11 h-11 flex items-center justify-center rounded-2xl transition-all duration-200 ${currentPath.startsWith('/dashboard/profile')
-                        ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/30'
-                        : 'text-zinc-500 hover:text-zinc-200 hover:bg-white/5'
-                        }`}
-                >
-                    <User className="w-5 h-5" strokeWidth={1.8} />
-                    <span className="absolute left-full ml-3 px-2.5 py-1 bg-zinc-800 text-white text-xs font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 whitespace-nowrap transition-opacity shadow-xl border border-white/10 z-50">
-                        Profile
-                    </span>
-                </a>
-                <button
-                    onClick={async () => {
-                        try {
-                            await signOut();
-                        } catch (e) {
-                            console.error('Logout failed:', e);
-                        } finally {
-                            window.location.href = '/login';
-                        }
-                    }}
-                    title="Logout"
-                    className="group relative w-11 h-11 flex items-center justify-center rounded-2xl text-zinc-500 hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
-                >
-                    <LogOut className="w-5 h-5" strokeWidth={1.8} />
-                    <span className="absolute left-full ml-3 px-2.5 py-1 bg-zinc-800 text-white text-xs font-medium rounded-lg opacity-0 pointer-events-none group-hover:opacity-100 whitespace-nowrap transition-opacity shadow-xl border border-white/10 z-50">
-                        Log Out
-                    </span>
-                </button>
-            </div>
+            {/* v0.1.0: Profile + Logout removed — single-user local mode,
+                no user account to sign out from. */}
         </aside>
     );
 };

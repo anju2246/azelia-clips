@@ -30,14 +30,13 @@ export const SettingsForm: React.FC = () => {
     // Settings are grouped into 4 tabs so the 500+ line form isn't an infinite scroll.
     // Tab IDs intentionally match the section order in the JSX below; changing them
     // requires updating the `activeTab === '...'` checks wrapping each <section>.
-    type TabId = 'workspace' | 'pipeline' | 'integrations' | 'privacy';
+    // v0.1.0: 3 visible tabs. The 'privacy' tab was removed — there is no
+    // telemetry in local-first MVP, so consent UI doesn't apply.
+    type TabId = 'workspace' | 'pipeline' | 'integrations';
     const [activeTab, setActiveTab] = useState<TabId>(() => {
-        // Honour `#privacy` (and any other tab id) in the URL hash so deep
-        // links from the dashboard nudges land on the right tab. We only
-        // accept ids that match TabId; anything else falls back to workspace.
         if (typeof window !== 'undefined') {
             const hash = window.location.hash.replace('#', '');
-            if (hash === 'workspace' || hash === 'pipeline' || hash === 'integrations' || hash === 'privacy') {
+            if (hash === 'workspace' || hash === 'pipeline' || hash === 'integrations') {
                 return hash;
             }
         }
@@ -47,7 +46,6 @@ export const SettingsForm: React.FC = () => {
         { id: 'workspace',    label: 'Workspace',    icon: FolderOpen },
         { id: 'pipeline',     label: 'Pipeline',     icon: Key },
         { id: 'integrations', label: 'Integrations', icon: Database },
-        { id: 'privacy',      label: 'Privacy',      icon: Shield },
     ];
 
     const PROVIDERS: Record<string, { name: string, desc: string, field: keyof UpdateSettingsRequest, modelField: keyof UpdateSettingsRequest, ph: string, orProvider: 'meta' | 'openai' | 'anthropic' | 'google', fallbackModels: { id: string, label: string }[] }> = {
@@ -518,8 +516,9 @@ export const SettingsForm: React.FC = () => {
                 {/* End of Integrations tab wrapper */}
                 </>)}
 
-                {/* Privacy tab */}
-                {activeTab === 'privacy' && (<>
+                {/* Privacy tab — DISABLED in v0.1.0 (no telemetry).
+                    Code preserved for v0.2 if opt-in central is reintroduced. */}
+                {false && ((activeTab as string) === 'privacy') && (<>
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="p-6">
                         <div className="flex items-start justify-between">
