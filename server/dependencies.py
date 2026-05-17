@@ -5,6 +5,7 @@ Job state is tracked in `data/jobs.db` (SQLite) via JobStore.
 """
 
 import asyncio
+import threading
 import traceback
 from pathlib import Path
 from typing import Any, Dict
@@ -15,6 +16,24 @@ from server.workers.job_store import get_job_store
 
 # Global job queue (singleton)
 job_queue = SQLiteJobQueue()
+
+# Per-job abort events for graceful pause/cancel.
+_abort_events: Dict[str, threading.Event] = {}
+_abort_events_lock = threading.Lock()
+
+
+def get_abort_event(job_id: str) -> threading.Event:
+    """Get-or-create the abort event for a job. Pipeline checks it between clips."""
+    with _abort_events_lock:
+        if job_id not in _abort_events:
+            _abort_events[job_id] = threading.Event()
+        return _abort_events[job_id]
+
+
+def clear_abort_event(job_id: str) -> None:
+    """Remove the event after a job terminates (success/fail/cancel)."""
+    with _abort_events_lock:
+        _abort_events.pop(job_id, None)
 
 
 async def processing_worker(job_id: str, payload: Dict[str, Any]):
