@@ -216,20 +216,22 @@ class BatchProcessor:
         #                WhisperX only for final clip transcription (word-level)
         
         # If the user has their own Supabase configured for transcripts, try
-        # that first. Falls through to local/WhisperX if not configured or fails.
+        # that first. Falls through to local/WhisperX on any failure (not found,
+        # DNS error, auth, anything) so a misconfigured/down Supabase never
+        # blocks the pipeline.
+        transcript = None
         if self.use_supabase:
             console.print("[dim]   Loading transcript from your Supabase…[/dim]")
-            from server.sources.supabase_transcripts import get_transcript_from_supabase
-            transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
-            if transcript is None:
-                console.print("[yellow]   Not found in your Supabase, falling back to local.[/yellow]")
-                if episode.transcript_path and episode.transcript_path.exists():
-                    transcript = Transcript.load(episode.transcript_path)
-                else:
-                    console.print("[dim]   Transcribing episode (this takes time)...[/dim]")
-                    transcript = self._transcribe_video(episode.video_path, job_id=job_id)
-                    transcript.save(episode.episode_folder / "transcript.json")
-        else:
+            try:
+                from server.sources.supabase_transcripts import get_transcript_from_supabase
+                transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
+                if transcript is None:
+                    console.print("[yellow]   Not found in your Supabase — falling back to local.[/yellow]")
+            except Exception as e:
+                console.print(f"[yellow]   Supabase fetch failed ({type(e).__name__}: {str(e)[:80]}) — falling back to local.[/yellow]")
+                transcript = None
+
+        if transcript is None:
             # Traditional mode: local transcript or WhisperX
             if episode.transcript_path and episode.transcript_path.exists():
                 console.print(f"[dim]   Loading existing transcript...[/dim]")
