@@ -101,12 +101,8 @@ def _load_user_profile_context(user_id: str | None) -> dict:
             "language": _norm_lang(raw_language),
             "is_pro_tier": is_pro_tier,
         }
-        # Cohort hash (reuses the same one-way hash as telemetry + creator signals)
-        try:
-            from packages.core.services.telemetry import _cohort_hash as _ch
-            ctx["cohort_hash"] = _ch(user_id) or ""
-        except Exception:
-            ctx["cohort_hash"] = ""
+        # Cohort hash unused in local-first MVP (no central IC). Kept empty for compat.
+        ctx["cohort_hash"] = ""
         return ctx
     except Exception as e:
         console.print(f"[dim]   Profile context load failed ({type(e).__name__}: {e}) — using generic heuristics.[/dim]")
@@ -169,9 +165,8 @@ class BatchProcessor:
         self.transcription_config = transcription_config or {}
         self.transcription_driver = TranscriptionDriver.get_source_from_config(self.transcription_config)
         
-        # Initialize Analytics Sync
-        from server.services.analytics import AnalyticsSync
-        self.analytics_sync = AnalyticsSync(auth_token=auth_token)
+        # Analytics sync removed in local-first MVP (no central DB)
+        self.analytics_sync = None
         
         if not self.base_path.exists():
             raise FileNotFoundError(
@@ -267,8 +262,8 @@ class BatchProcessor:
         from packages.clips.curation.pipeline import CurationPipeline
         from packages.clips.vision.reframer import reframe_video
         from packages.clips.subtitles.generator import SubtitleGenerator
-        from packages.core.services.telemetry import telemetry
-        
+        # telemetry removed in local-first MVP
+
         console.print(f"\n[bold blue]Processing EP{episode.episode_number:03d}[/bold blue]")
         if store and job_id:
             store.update_progress(job_id, 25, "Fase 1: Validando archivo de video...")
@@ -297,20 +292,9 @@ class BatchProcessor:
         # DUAL PIPELINE: Use Supabase for curation (with speaker timing)
         #                WhisperX only for final clip transcription (word-level)
         
-        if self.use_supabase:
-            console.print(f"[dim]   Loading transcript from Supabase...[/dim]")
-            from server.sources.supabase_transcripts import get_transcript_from_supabase
-            transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
-            
-            if transcript is None:
-                # Fallback to local or re-transcribe
-                console.print(f"[yellow]   Supabase transcript not found, falling back to local...[/yellow]")
-                if episode.transcript_path and episode.transcript_path.exists():
-                    transcript = Transcript.load(episode.transcript_path)
-                else:
-                    console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
-                    transcript = self._transcribe_video(episode.video_path, job_id=job_id)
-                    transcript.save(episode.episode_folder / "transcript.json")
+        # Supabase transcript source removed in local-first MVP. use_supabase is always False.
+        if False:  # was: self.use_supabase
+            pass
         else:
             # Traditional mode: local transcript or WhisperX
             if episode.transcript_path and episode.transcript_path.exists():
@@ -357,10 +341,9 @@ class BatchProcessor:
             curator = CurationPipeline()
             from packages.core.config import settings
 
-            # Local Intelligence: Fetch user's personalized patterns (ephemeral, in-memory only)
-            from packages.core.services.local_intelligence import local_intelligence
+            # Local Intelligence removed in local-first MVP (no central learning).
             from packages.clips.curation.models import CurationConfig
-            li_patterns = local_intelligence.get_user_patterns(self.user_id)
+            li_patterns = {"high_retention_patterns": [], "preferred_clip_formats": []}
 
             # Podcast identity — pulled from profiles so the agents can be
             # podcast-aware instead of applying generic viral heuristics.

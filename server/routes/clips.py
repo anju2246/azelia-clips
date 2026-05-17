@@ -13,7 +13,6 @@ from typing import List
 
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Depends, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse
-from sqlmodel import Session
 
 from server.models import (
     JobResponse, JobStatus, ProcessRequest, ProcessLocalRequest, Clip,
@@ -22,18 +21,14 @@ from server.models import (
 from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
-from server.middleware.auth import require_auth, require_onboarding
-from packages.core.auth import User
-from packages.core.db.engine import engine
-from packages.core.db.models import Episode
+from server.middleware.auth import require_auth, require_onboarding, require_auth_flexible, User
 from packages.clips.vision.face_tracker import FaceTracker
 
 router = APIRouter()
 store = get_job_store()
 
-# Base directory for job data
-DATA_DIR = Path("data/jobs")
-DATA_DIR.mkdir(parents=True, exist_ok=True)
+# Base directory for job data — settings.jobs_dir() ensures ~/.azelia/data/jobs by default
+DATA_DIR = settings.jobs_dir()
 
 
 def mask_key(key: str) -> str:
@@ -807,10 +802,11 @@ async def process_episode_endpoint(
 
 @router.post("/episodes/{episode_number}/upload-transcript")
 async def upload_transcript_endpoint(episode_number: int, user: User = Depends(require_auth)):
-    """Upload the transcript for a specific episode to Supabase."""
-    from server.sources.supabase_transcripts import upload_transcript
-    from packages.clips.transcription.transcriber import Transcript
-    from server.processor import BatchProcessor
+    """Disabled in v0.1.0 — Supabase transcript ingestion removed (local-first)."""
+    raise HTTPException(status_code=501, detail="Transcript upload disabled in local-first MVP")
+    # ── Unreachable, kept for reference until we remove the rest of the body ──
+    from packages.clips.transcription.transcriber import Transcript  # noqa: F401
+    from server.processor import BatchProcessor  # noqa: F401
     
     try:
         # Find episode
@@ -853,19 +849,8 @@ async def websocket_job_status(websocket: WebSocket, job_id: str, token: str = "
     Auth via ?token= query param (WebSockets can't send Authorization headers).
     """
     await websocket.accept()
-
-    # Auth guard — reject immediately if no valid token
-    if not token:
-        await websocket.send_json({"event": "error", "data": {"error": "Unauthorized"}})
-        await websocket.close(code=4001)
-        return
-    try:
-        from packages.core.auth import verify_supabase_jwt
-        verify_supabase_jwt(token)
-    except Exception:
-        await websocket.send_json({"event": "error", "data": {"error": "Unauthorized"}})
-        await websocket.close(code=4001)
-        return
+    # Local-first MVP: no real auth — server binds to 127.0.0.1.
+    # The `token` query param is kept for API compatibility but not validated.
     
     try:
         while True:

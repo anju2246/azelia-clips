@@ -1,27 +1,33 @@
-"""
-Server Routes — Application Settings
+"""Settings routes — Local-first MVP.
+
+Two LLM providers only: Claude Code (local) + Anthropic API.
+Settings persist to ~/.azelia/data/secrets.env (outside the git checkout).
 """
 
 import os
+import re
+import string
+import subprocess
 import sys
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from server.models import SettingsResponse, UpdateSettingsRequest
 from packages.core.config import settings
+from packages.core.llm_provider import claude_code_available, claude_code_authenticated, reset_llm
 from packages.core.services.model_registry import model_registry
-from server.middleware.auth import require_auth
-from packages.core.auth import User
+from server.middleware.auth import User, require_auth
+from server.models import SettingsResponse, UpdateSettingsRequest
 
 router = APIRouter()
 
 
-def _get_allowed_roots() -> list[Path]:
-    """Platform-aware allowed roots for filesystem browsing."""
-    home = Path(os.path.expanduser("~")).resolve()
-    roots = [home]
+# ─── Helpers ────────────────────────────────────────────────────────────
 
+
+def _get_allowed_roots() -> list[Path]:
+    """Platform-aware allowed roots for filesystem browsing (security)."""
+    roots = [Path.home().resolve()]
     if sys.platform == "darwin":
         volumes = Path("/Volumes")
         if volumes.exists():
@@ -32,34 +38,18 @@ def _get_allowed_roots() -> list[Path]:
             if p.exists():
                 roots.append(p.resolve())
     elif sys.platform == "win32":
-        import string
         for letter in string.ascii_uppercase:
             drive = Path(f"{letter}:\\")
             if drive.exists():
                 roots.append(drive)
-
     return roots
 
 
-API_KEY_PREFIXES = {
-    "groq_api_key": ("gsk_", "Groq keys start with 'gsk_'"),
-    "openai_api_key": ("sk-", "OpenAI keys start with 'sk-'"),
-    "anthropic_api_key": ("sk-ant-", "Anthropic keys start with 'sk-ant-'"),
-}
-
-
-def _validate_api_key(field: str, value: str) -> str | None:
-    """Validate API key format. Returns error message or None."""
-    if not value or not value.strip():
-        return None  # Empty is OK (clearing a key)
-    value = value.strip()
-    if len(value) < 10:
-        return f"API key too short (got {len(value)} chars)"
-    if field in API_KEY_PREFIXES:
-        prefix, msg = API_KEY_PREFIXES[field]
-        if not value.startswith(prefix):
-            return msg
-    return None
+def _secrets_path() -> Path:
+    """Where API keys live (outside the git checkout so self-update can't wipe them)."""
+    p = settings.data_dir / "secrets.env"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 
 def mask_key(key: str) -> str:
@@ -69,154 +59,149 @@ def mask_key(key: str) -> str:
 
 
 def _is_masked(value: str) -> bool:
-    """Check if a value is a masked placeholder (e.g. 'eyJh...lLBU') that should not be saved."""
-    return not value or '...' in value or value == '********'
+    return not value or "..." in value or value == "********"
+
+
+def _validate_anthropic_key(value: str) -> str | None:
+    if not value or not value.strip():
+        return None
+    v = value.strip()
+    if len(v) < 10:
+        return f"API key too short (got {len(v)} chars)"
+    if not v.startswith("sk-ant-"):
+        return "Anthropic keys start with 'sk-ant-'"
+    return None
+
+
+def _read_env_file(path: Path) -> dict[str, str]:
+    if not path.exists():
+        return {}
+    env: dict[str, str] = {}
+    for line in path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        env[k.strip()] = v.strip()
+    return env
+
+
+def _write_env_file(path: Path, env: dict[str, str]) -> None:
+    lines = [f"{k}={v}" for k, v in env.items()]
+    path.write_text("\n".join(lines) + "\n")
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
+# ─── Settings CRUD ──────────────────────────────────────────────────────
 
 
 @router.get("/settings", response_model=SettingsResponse)
 async def get_settings(user: User = Depends(require_auth)):
-    """Get current application settings."""
-    provider_order = [p.strip() for p in settings.ai_provider_order.split(',')] if settings.ai_provider_order else ["groq", "openai", "anthropic", "google"]
+    order = (
+        [p.strip() for p in settings.ai_provider_order.split(",") if p.strip()]
+        if settings.ai_provider_order
+        else ["claude_code", "anthropic"]
+    )
     return SettingsResponse(
         podcast_name=settings.podcast_name or "",
         podcast_dir=str(settings.podcast_dir) if settings.podcast_dir else "",
-        ai_provider_order=provider_order,
-        groq_api_key=mask_key(settings.groq_api_key),
-        groq_model=settings.groq_model,
-        openai_api_key=mask_key(settings.openai_api_key),
-        openai_model=settings.openai_model,
+        ai_provider_order=order,
         anthropic_api_key=mask_key(settings.anthropic_api_key),
         anthropic_model=settings.anthropic_model,
-        google_api_key=mask_key(settings.google_api_key),
-        google_model=settings.google_model,
-        transcript_supabase_url=settings.transcript_supabase_url,
-        transcript_supabase_key=mask_key(settings.transcript_supabase_key),
     )
+
 
 @router.post("/settings", response_model=SettingsResponse)
 async def update_settings(req: UpdateSettingsRequest, user: User = Depends(require_auth)):
-    """Update settings in .env file."""
-    # Validate API keys before saving
-    validation_errors = []
-    for field in ["groq_api_key", "openai_api_key", "anthropic_api_key"]:
-        value = getattr(req, field, None)
-        if value is not None:
-            error = _validate_api_key(field, value)
-            if error:
-                validation_errors.append(f"{field}: {error}")
-
-    if validation_errors:
-        raise HTTPException(status_code=422, detail="; ".join(validation_errors))
-
-    env_path = Path(".env")
-
-    # Read existing env
-    env_content = {}
-    if env_path.exists():
-        with open(env_path, "r") as f:
-            for line in f:
-                if "=" in line and not line.startswith("#"):
-                    key, val = line.strip().split("=", 1)
-                    env_content[key] = val
-
-    # Update values
-    if req.podcast_name:
-        env_content["PODCAST_NAME"] = req.podcast_name
-        settings.podcast_name = req.podcast_name
-
-    if req.podcast_dir:
-        env_content["PODCAST_DIR"] = req.podcast_dir
-        settings.podcast_dir = Path(req.podcast_dir)
-        
-    if req.ai_provider_order is not None:
-        order_str = ",".join(req.ai_provider_order)
-        env_content["AI_PROVIDER_ORDER"] = order_str
-        settings.ai_provider_order = order_str
-        
-    if req.groq_api_key is not None and not _is_masked(req.groq_api_key):
-        env_content["GROQ_API_KEY"] = req.groq_api_key
-        settings.groq_api_key = req.groq_api_key
-        
-    if req.groq_model is not None:
-        env_content["GROQ_MODEL"] = req.groq_model
-        settings.groq_model = req.groq_model
-        
-    if req.openai_api_key is not None and not _is_masked(req.openai_api_key):
-        env_content["OPENAI_API_KEY"] = req.openai_api_key
-        settings.openai_api_key = req.openai_api_key
-        
-    if req.openai_model is not None:
-        env_content["OPENAI_MODEL"] = req.openai_model
-        settings.openai_model = req.openai_model
-        
+    """Update settings: writes to ~/.azelia/data/secrets.env and reloads in-process."""
     if req.anthropic_api_key is not None and not _is_masked(req.anthropic_api_key):
-        env_content["ANTHROPIC_API_KEY"] = req.anthropic_api_key
+        err = _validate_anthropic_key(req.anthropic_api_key)
+        if err:
+            raise HTTPException(status_code=422, detail=err)
+
+    env_path = _secrets_path()
+    env = _read_env_file(env_path)
+
+    if req.podcast_name is not None:
+        env["PODCAST_NAME"] = req.podcast_name
+        settings.podcast_name = req.podcast_name
+    if req.podcast_dir is not None:
+        env["PODCAST_DIR"] = req.podcast_dir
+        settings.podcast_dir = Path(req.podcast_dir)
+    if req.ai_provider_order is not None:
+        # Filter to allowed providers only
+        allowed = {"claude_code", "anthropic"}
+        clean = [p for p in req.ai_provider_order if p in allowed]
+        if not clean:
+            clean = ["claude_code", "anthropic"]
+        order_str = ",".join(clean)
+        env["AI_PROVIDER_ORDER"] = order_str
+        settings.ai_provider_order = order_str
+    if req.anthropic_api_key is not None and not _is_masked(req.anthropic_api_key):
+        env["ANTHROPIC_API_KEY"] = req.anthropic_api_key
         settings.anthropic_api_key = req.anthropic_api_key
-        
     if req.anthropic_model is not None:
-        env_content["ANTHROPIC_MODEL"] = req.anthropic_model
+        env["ANTHROPIC_MODEL"] = req.anthropic_model
         settings.anthropic_model = req.anthropic_model
-        
-    if req.google_api_key is not None and not _is_masked(req.google_api_key):
-        env_content["GOOGLE_API_KEY"] = req.google_api_key
-        settings.google_api_key = req.google_api_key
 
-    if req.google_model is not None:
-        env_content["GOOGLE_MODEL"] = req.google_model
-        settings.google_model = req.google_model
-        
-    if req.transcript_supabase_url is not None and not _is_masked(req.transcript_supabase_url):
-        env_content["TRANSCRIPT_SUPABASE_URL"] = req.transcript_supabase_url
-        settings.transcript_supabase_url = req.transcript_supabase_url
+    _write_env_file(env_path, env)
+    reset_llm()  # invalidate cached provider list
 
-    if req.transcript_supabase_key is not None and not _is_masked(req.transcript_supabase_key):
-        env_content["TRANSCRIPT_SUPABASE_KEY"] = req.transcript_supabase_key
-        settings.transcript_supabase_key = req.transcript_supabase_key
+    return await get_settings(user=user)
 
-    # Write back to .env
-    with open(env_path, "w") as f:
-        for key, val in env_content.items():
-            f.write(f"{key}={val}\n")
-            
-    return await get_settings()
+
+# ─── LLM providers ──────────────────────────────────────────────────────
+
+
+@router.get("/providers")
+async def get_providers(user: User = Depends(require_auth)):
+    """Discover available LLM providers (Claude Code + Anthropic API only)."""
+    cc_info = claude_code_authenticated()
+    return {
+        "claude_code": {
+            "available": claude_code_available(),
+            "authenticated": cc_info is not None,
+            "auth_method": (cc_info or {}).get("method"),
+            "active": cc_info is not None,
+        },
+        "api_providers": [
+            {
+                "id": "anthropic",
+                "name": "Anthropic API",
+                "configured": bool(settings.anthropic_api_key),
+                "model": settings.anthropic_model,
+            }
+        ],
+        "active_primary": "claude_code" if cc_info else ("anthropic" if settings.anthropic_api_key else None),
+    }
+
 
 @router.get("/models")
 async def get_available_models(user: User = Depends(require_auth)):
-    """
-    Dynamically discover and return available AI models via native SDKs.
-    """
+    """Dynamically list available models from configured providers."""
     models = await model_registry.get_all_models()
     return {"data": [m.dict() for m in models]}
 
 
 @router.post("/models/refresh")
 async def refresh_models(user: User = Depends(require_auth)):
-    """
-    Force the model registry to re-query all provider APIs.
-    Call this after saving new API keys so the model selector updates immediately.
-    """
+    """Force model registry to re-query provider APIs."""
     models = await model_registry.force_refresh()
     return {"data": [m.dict() for m in models]}
 
 
-# ─── Ticket B — API credits validation ────────────────────────────
-# Probe each configured provider with a minimal billable request so we
-# can warn the user up-front if their key has zero credits (instead of
-# silently failing halfway through a pipeline run).
-
 @router.get("/credits/status")
 async def get_credits_status(user: User = Depends(require_auth)):
-    """Live probe of each configured provider's billing state.
-
-    Returns, per provider: {ok: bool, reason: str|null, model_used: str|null}
-    Cost per probe is negligible (~$0.00001, 1-2 tokens in/out).
-    """
+    """Quick probe of the Anthropic API key billing state."""
     results: dict = {}
 
-    # Anthropic
     if settings.anthropic_api_key and settings.anthropic_api_key.startswith("sk-ant-"):
         try:
             from anthropic import Anthropic
+
             client = Anthropic(api_key=settings.anthropic_api_key)
             client.messages.create(
                 model=settings.anthropic_model or "claude-haiku-4-5-20251001",
@@ -235,167 +220,107 @@ async def get_credits_status(user: User = Depends(require_auth)):
             elif "rate" in msg or "429" in msg:
                 reason = "rate_limited"
             else:
-                reason = f"{type(e).__name__}"
+                reason = type(e).__name__
             results["anthropic"] = {"ok": False, "reason": reason, "model_used": None}
     else:
         results["anthropic"] = {"ok": None, "reason": "not_configured", "model_used": None}
 
-    # OpenAI
-    if settings.openai_api_key and settings.openai_api_key.startswith("sk-"):
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=settings.openai_api_key)
-            client.chat.completions.create(
-                model=settings.openai_model or "gpt-4o-mini",
-                max_tokens=1,
-                messages=[{"role": "user", "content": "hi"}],
-            )
-            results["openai"] = {"ok": True, "reason": None, "model_used": settings.openai_model}
-        except Exception as e:
-            msg = str(e).lower()
-            if "quota" in msg or "insufficient" in msg or "billing" in msg:
-                reason = "credit_balance_too_low"
-            elif "authentication" in msg or "invalid" in msg:
-                reason = "invalid_key"
-            elif "rate" in msg or "429" in msg:
-                reason = "rate_limited"
-            else:
-                reason = f"{type(e).__name__}"
-            results["openai"] = {"ok": False, "reason": reason, "model_used": None}
-    else:
-        results["openai"] = {"ok": None, "reason": "not_configured", "model_used": None}
+    return {
+        "any_provider_ok": any(r.get("ok") is True for r in results.values()) or claude_code_available(),
+        "providers": results,
+    }
 
-    # Summary flag — at least one provider works
-    any_ok = any(r.get("ok") is True for r in results.values())
-    return {"any_provider_ok": any_ok, "providers": results}
+
+# ─── Filesystem browsing (for directory pickers) ────────────────────────
+
 
 @router.get("/browse")
 async def browse_directory(path: str = "~", user: User = Depends(require_auth)):
-    """
-    Browse directories on the local filesystem.
-    Used by the Settings UI to pick a podcast directory with full absolute paths.
-    """
-    # Expand ~ and resolve
+    """Browse directories — used by Settings directory picker."""
     target = Path(os.path.expanduser(path)).resolve()
-
-    # Security: restrict browsing to user home and external drives
-    home = Path(os.path.expanduser("~")).resolve()
-    allowed_roots = _get_allowed_roots()
-    if not any(target.is_relative_to(root) for root in allowed_roots):
-        return {"path": str(target), "parent": str(home), "dirs": [], "error": "Access restricted to home directory and external drives"}
-
+    if not any(target.is_relative_to(root) for root in _get_allowed_roots()):
+        return {
+            "path": str(target),
+            "parent": str(Path.home()),
+            "dirs": [],
+            "error": "Access restricted to home directory and external drives",
+        }
     if not target.exists() or not target.is_dir():
         return {"path": str(target), "parent": str(target.parent), "dirs": [], "error": "Directory not found"}
-
     dirs = []
     try:
         for entry in sorted(target.iterdir()):
-            if entry.is_dir() and not entry.name.startswith('.'):
-                # Count children to hint if it has sub-folders
+            if entry.is_dir() and not entry.name.startswith("."):
                 try:
-                    child_count = sum(1 for c in entry.iterdir() if c.is_dir() and not c.name.startswith('.'))
+                    child_count = sum(1 for c in entry.iterdir() if c.is_dir() and not c.name.startswith("."))
                 except PermissionError:
                     child_count = 0
-                dirs.append({
-                    "name": entry.name,
-                    "path": str(entry),
-                    "has_children": child_count > 0
-                })
+                dirs.append({"name": entry.name, "path": str(entry), "has_children": child_count > 0})
     except PermissionError:
         return {"path": str(target), "parent": str(target.parent), "dirs": [], "error": "Permission denied"}
-
     return {
         "path": str(target),
         "parent": str(target.parent) if target.parent != target else None,
-        "dirs": dirs
+        "dirs": dirs,
     }
+
 
 @router.get("/browse-files")
 async def browse_files(path: str = "~", user: User = Depends(require_auth)):
-    """
-    Browse directories and video files on the local filesystem.
-    Used by the Upload manual UI to pick a file without uploading.
-    """
+    """Browse directories + video files — used by manual upload picker."""
     target = Path(os.path.expanduser(path)).resolve()
-
-    # Security: restrict browsing to user home and external drives
-    home = Path(os.path.expanduser("~")).resolve()
-    allowed_roots = _get_allowed_roots()
-    if not any(target.is_relative_to(root) for root in allowed_roots):
-        return {"path": str(target), "parent": str(home), "entries": [], "error": "Access restricted to home directory and external drives"}
-
+    if not any(target.is_relative_to(root) for root in _get_allowed_roots()):
+        return {
+            "path": str(target),
+            "parent": str(Path.home()),
+            "entries": [],
+            "error": "Access restricted",
+        }
     if not target.exists() or not target.is_dir():
         return {"path": str(target), "parent": str(target.parent), "entries": [], "error": "Directory not found"}
-
     entries = []
     try:
-        # First add directories
         for entry in sorted(target.iterdir()):
-            if entry.is_dir() and not entry.name.startswith('.'):
+            if entry.is_dir() and not entry.name.startswith("."):
                 try:
-                    child_count = sum(1 for c in entry.iterdir() if c.is_dir() and not c.name.startswith('.'))
+                    child_count = sum(1 for c in entry.iterdir() if c.is_dir() and not c.name.startswith("."))
                 except PermissionError:
                     child_count = 0
-                entries.append({
-                    "name": entry.name,
-                    "path": str(entry),
-                    "is_dir": True,
-                    "has_children": child_count > 0
-                })
-                
-        # Then add supported video files
+                entries.append(
+                    {"name": entry.name, "path": str(entry), "is_dir": True, "has_children": child_count > 0}
+                )
         for entry in sorted(target.iterdir()):
-            if entry.is_file() and not entry.name.startswith('.') and entry.name.lower().endswith(('.mp4', '.mov', '.mkv')):
+            if entry.is_file() and not entry.name.startswith(".") and entry.name.lower().endswith((".mp4", ".mov", ".mkv")):
                 try:
                     size_mb = f"{entry.stat().st_size / (1024 * 1024):.1f}"
                 except OSError:
                     size_mb = "0"
-                entries.append({
-                    "name": entry.name,
-                    "path": str(entry),
-                    "is_dir": False,
-                    "size_mb": size_mb
-                })
+                entries.append({"name": entry.name, "path": str(entry), "is_dir": False, "size_mb": size_mb})
     except PermissionError:
         return {"path": str(target), "parent": str(target.parent), "entries": [], "error": "Permission denied"}
-
     return {
         "path": str(target),
         "parent": str(target.parent) if target.parent != target else None,
-        "entries": entries
+        "entries": entries,
     }
+
 
 @router.get("/resolve-path")
 async def resolve_path(name: str, user: User = Depends(require_auth)):
-    """
-    Resolve a folder name (from native showDirectoryPicker) to full absolute path(s).
-    Searches common locations: home dir, /Volumes (external drives), Desktop, Documents.
-    """
-    import os
-    import subprocess
-    import re
-
-    # Security: reject path traversal attempts explicitly
-    if '..' in name or '/' in name or '\\' in name or not name.strip():
-        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name: path traversal not allowed"}
-    # Only allow alphanumeric, hyphens, underscores, spaces (no dots)
-    if not re.match(r'^[\w\s\-]+$', name):
-        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name: only alphanumeric, spaces, hyphens allowed"}
-
-    home = Path(os.path.expanduser("~"))
-
-    # Search locations: home tree + platform-specific mount points
-    search_roots = [str(r) for r in _get_allowed_roots()]
-    
-    matches = []
-    try:
-        # Use `find` for fast filesystem search, excluding system/hidden directories
-        for root in search_roots:
-            if not Path(root).exists():
-                continue
+    """Resolve a folder name to absolute path(s) via `find`."""
+    if ".." in name or "/" in name or "\\" in name or not name.strip():
+        return {"name": name, "matches": [], "count": 0, "error": "Invalid folder name"}
+    if not re.match(r"^[\w\s\-]+$", name):
+        return {"name": name, "matches": [], "count": 0, "error": "Only alphanumeric/spaces/hyphens allowed"}
+    matches: list[str] = []
+    for root in _get_allowed_roots():
+        if not root.exists():
+            continue
+        try:
             result = subprocess.run(
                 [
-                    "find", root,
+                    "find",
+                    str(root),
                     "-maxdepth", "5",
                     "-type", "d",
                     "-name", name,
@@ -404,19 +329,14 @@ async def resolve_path(name: str, user: User = Depends(require_auth)):
                     "-not", "-path", "*/node_modules/*",
                     "-not", "-path", "*/.Trash/*",
                 ],
-                capture_output=True, text=True, timeout=10
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             for line in result.stdout.strip().split("\n"):
                 if line and Path(line).is_dir():
                     matches.append(line)
-    except (subprocess.TimeoutExpired, Exception):
-        pass
-
-    # Deduplicate
+        except (subprocess.TimeoutExpired, Exception):
+            continue
     matches = list(dict.fromkeys(matches))
-
-    return {
-        "name": name,
-        "matches": matches,
-        "count": len(matches)
-    }
+    return {"name": name, "matches": matches, "count": len(matches)}

@@ -1,7 +1,14 @@
-from pydantic import BaseModel, Field
-from typing import List, Optional
-from enum import Enum
+"""Pydantic models for the API.
+
+Local-first MVP. Restricted to Anthropic + Claude Code providers.
+"""
+
 from datetime import datetime
+from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel, Field
+
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -11,6 +18,7 @@ class JobStatus(str, Enum):
     COMPLETED = "completed"
     ERROR = "error"
     CANCELLED = "cancelled"
+
 
 class Clip(BaseModel):
     id: int
@@ -25,6 +33,7 @@ class Clip(BaseModel):
     download_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
 
+
 class JobResponse(BaseModel):
     id: str
     status: JobStatus
@@ -35,50 +44,34 @@ class JobResponse(BaseModel):
     clips: List[Clip] = []
     error: Optional[str] = None
 
+
 class ProcessRequest(BaseModel):
     min_duration: int = 30
     max_duration: int = 90
     min_score: int = 70
     subtitle_style: str = "highlight"
     transcription_source: str = "local_whisper"
-    assemblyai_key: Optional[str] = None
-    supabase_url: Optional[str] = None
-    supabase_key: Optional[str] = None
+
 
 class ProcessLocalRequest(ProcessRequest):
     video_path: str
 
-# --- New Models for Local Mode ---
 
 class SettingsResponse(BaseModel):
     podcast_name: Optional[str] = Field(default="")
     podcast_dir: Optional[str] = Field(default="")
-    ai_provider_order: List[str] = Field(default=["groq", "openai", "anthropic", "google"])
-    groq_api_key: str = Field(default="", description="Masked key")
-    groq_model: str = Field(default="llama-3.3-70b-versatile")
-    openai_api_key: str = Field(default="", description="Masked key")
-    openai_model: str = Field(default="gpt-4o")
+    ai_provider_order: List[str] = Field(default=["claude_code", "anthropic"])
     anthropic_api_key: str = Field(default="", description="Masked key")
-    anthropic_model: str = Field(default="claude-3-7-sonnet-20250219")
-    google_api_key: str = Field(default="", description="Masked key")
-    google_model: str = Field(default="gemini-2.5-pro")
-    transcript_supabase_url: str = Field(default="")
-    transcript_supabase_key: str = Field(default="", description="Masked key")
+    anthropic_model: str = Field(default="claude-sonnet-4-6")
+
 
 class UpdateSettingsRequest(BaseModel):
     podcast_name: Optional[str] = None
     podcast_dir: Optional[str] = None
     ai_provider_order: Optional[List[str]] = None
-    groq_api_key: Optional[str] = None
-    groq_model: Optional[str] = None
-    openai_api_key: Optional[str] = None
-    openai_model: Optional[str] = None
     anthropic_api_key: Optional[str] = None
     anthropic_model: Optional[str] = None
-    google_api_key: Optional[str] = None
-    google_model: Optional[str] = None
-    transcript_supabase_url: Optional[str] = None
-    transcript_supabase_key: Optional[str] = None
+
 
 class EpisodeResponse(BaseModel):
     id: str
