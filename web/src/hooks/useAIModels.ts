@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
 import { SettingsApi } from '../lib/api';
 
-// Providers matching our Python ModelRegistry
-export type AIProvider = 'openai' | 'anthropic' | 'google' | 'groq';
+/**
+ * v0.1.0 supported providers: Anthropic API + Claude Code (local subscription).
+ * Other providers (Groq, OpenAI, Google) are intentionally hidden in UI even
+ * if the backend ModelRegistry returns them.
+ */
+export type AIProvider = 'anthropic' | 'claude_code' | 'openai' | 'google' | 'groq';
+
+export const ENABLED_PROVIDERS: AIProvider[] = ['claude_code', 'anthropic'];
 
 export interface AIModel {
-    id: string; // Native Model ID directly supported by the SDK
-    name: string; // E.g. "GPT-4o", "Claude 3.7 Sonnet"
+    id: string;
+    name: string;
     provider: AIProvider;
     context_length: number;
     description: string;
@@ -33,27 +39,34 @@ export function useAIModels() {
             try {
                 const res = await SettingsApi.getModels();
                 if (!mounted) return;
-                setModels(res.data || []);
+                // Hide disabled providers at the boundary so downstream UI doesn't see them.
+                const filtered = (res.data || []).filter((m: AIModel) =>
+                    ENABLED_PROVIDERS.includes(m.provider),
+                );
+                setModels(filtered);
                 setError(null);
-            } catch (err: any) {
-                if (mounted) setError(err.message || "Failed to fetch native models");
+            } catch (err: unknown) {
+                if (mounted) setError((err as Error).message || 'Failed to fetch models');
             } finally {
                 if (mounted) setLoading(false);
             }
         }
 
         fetchModels();
-        return () => { mounted = false; };
+        return () => {
+            mounted = false;
+        };
     }, [fetchKey]);
 
-    const refetch = () => setFetchKey(k => k + 1);
+    const refetch = () => setFetchKey((k) => k + 1);
 
     const groupedModels: ModelGroup[] = [
-        { provider: "anthropic" as AIProvider, label: "Anthropic", models: models.filter(m => m.provider === "anthropic") },
-        { provider: "openai" as AIProvider, label: "OpenAI", models: models.filter(m => m.provider === "openai") },
-        { provider: "groq" as AIProvider, label: "Groq (Llama)", models: models.filter(m => m.provider === "groq") },
-        { provider: "google" as AIProvider, label: "Google (Gemini)", models: models.filter(m => m.provider === "google") },
-    ].filter(g => g.models.length > 0);
+        {
+            provider: 'anthropic' as AIProvider,
+            label: 'Anthropic',
+            models: models.filter((m) => m.provider === 'anthropic'),
+        },
+    ].filter((g) => g.models.length > 0);
 
     return { models, groupedModels, loading, error, refetch };
 }

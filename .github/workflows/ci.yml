@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same branch/PR to save minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-python:
+    name: Lint (Python)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff>=0.1.0"
+      - name: ruff check
+        run: ruff check packages/ server/
+
+  imports-python:
+    name: Imports (Python)
+    runs-on: ubuntu-latest
+    needs: lint-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install core deps only (skip heavy ML)
+        run: |
+          pip install --upgrade pip
+          # Light install: skip torch/whisper/facenet — they're tested locally
+          pip install fastapi uvicorn pydantic pydantic-settings sqlmodel rich \
+                      typer ffmpeg-python imageio-ffmpeg python-dotenv supabase \
+                      "anthropic[vertex]" google-genai PyJWT requests openai \
+                      google-api-python-client google-auth google-auth-oauthlib \
+                      isodate python-multipart httpx
+      - name: Verify server boots
+        run: python -c "import server.app; print('OK', server.app.app.version)"
+      - name: Verify CLI loads
+        run: python -c "from packages.clips.cli import app; print('OK')"
+
+  build-web:
+    name: Build (Web)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: cd web && npm install
+      - run: cd web && npm run build
