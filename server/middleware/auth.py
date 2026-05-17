@@ -1,59 +1,50 @@
-from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from packages.core.auth import verify_supabase_jwt, User
-from packages.core.config import settings
-from typing import Optional
+"""Local-only auth for Azelia Clips MVP.
 
-security = HTTPBearer(auto_error=False)
+Self-hosted, single-user, bound to 127.0.0.1 by default.
+Anyone who can reach localhost is the owner — no real authentication.
 
-def require_auth(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
+The auth dependencies are kept as no-ops so route signatures remain unchanged
+and we can re-introduce real auth later without touching every endpoint.
+"""
+
+from pydantic import BaseModel
+
+
+class User(BaseModel):
+    """Stub user object. Single local owner."""
+
+    id: str = "local"
+    email: str = "local@azelia"
+    role: str = "owner"
+
+
+LOCAL_USER = User()
+
+
+def require_auth() -> User:
+    """No-op auth: always returns the local owner."""
+    return LOCAL_USER
+
+
+def optional_auth() -> User:
+    """No-op auth: always returns the local owner."""
+    return LOCAL_USER
+
+
+def require_auth_flexible() -> User:
+    """No-op auth: always returns the local owner.
+
+    Kept for backward-compat with routes that previously accepted either
+    a Bearer token or a `?token=` query param (e.g. <video src>).
     """
-    FastAPI dependency to extract and validate the Supabase JWT.
-    Returns the decoded token as a User object on success.
-    Raises HTTPException 401 on failure.
+    return LOCAL_USER
+
+
+def require_onboarding() -> User:
+    """No-op auth: always returns the local owner.
+
+    Real onboarding gating (e.g. "has at least one LLM provider configured")
+    lives in the frontend now — the wizard guides the user before letting
+    them reach the dashboard.
     """
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
-    token = credentials.credentials
-    user = verify_supabase_jwt(token)
-    return user
-
-def optional_auth(credentials: Optional[HTTPAuthorizationCredentials] = Depends(security)) -> Optional[User]:
-    """
-    Auth dependency that is optional.
-    - If credentials are provided, validates the JWT (throws 401 if invalid).
-    - If no credentials, returns None. No fake users.
-    """
-    if credentials is None:
-        return None
-
-    return verify_supabase_jwt(credentials.credentials)
-
-def require_onboarding(credentials: HTTPAuthorizationCredentials = Depends(security)) -> User:
-    """
-    FastAPI dependency that validates auth AND checks onboarding completion.
-    Returns 428 Precondition Required if user hasn't completed onboarding
-    (content_niche is NULL in their profile).
-    """
-    if credentials is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing authorization")
-
-    token = credentials.credentials
-    user = verify_supabase_jwt(token)
-
-    try:
-        from supabase import create_client
-        sb = create_client(settings.supabase_url, settings.supabase_key)
-        res = sb.table("profiles").select("content_niche").eq("id", user.id).execute()
-
-        if res.data and res.data[0].get("content_niche") is None:
-            raise HTTPException(
-                status_code=428,
-                detail="Onboarding required. Please complete your profile setup first."
-            )
-    except HTTPException:
-        raise
-    except Exception:
-        pass  # If profile check fails, don't block the user
-
-    return user
+    return LOCAL_USER

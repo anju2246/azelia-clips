@@ -1,12 +1,15 @@
-"""Multi-provider LLM client with automatic fallback.
+"""Multi-provider LLM client — MVP restricted to Claude Code + Anthropic API.
 
-Priority order:
-1. Llama 4 Scout (Vertex AI) - Primary
-2. Llama 3.3 70B (Vertex AI) - Fallback
-3. Groq (Llama 3.3 70B) - Free fallback
+Priority (configurable via AI_PROVIDER_ORDER):
+1. Claude Code (local CLI subscription) — no API key needed, $0 cost
+2. Anthropic API — BYOK, pay per token
+
+If both are available, Claude Code is tried first.
 """
 
+import subprocess
 from typing import Any, Optional
+
 from rich.console import Console
 
 from packages.core.config import settings
@@ -14,115 +17,84 @@ from packages.core.config import settings
 console = Console()
 
 
+# ─── Provider availability detection ────────────────────────────────────
+
+
+def claude_code_available() -> bool:
+    """True if `claude` CLI is installed and authenticated."""
+    try:
+        result = subprocess.run(
+            ["claude", "--version"], capture_output=True, timeout=3, text=True
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return False
+
+
+def claude_code_authenticated() -> Optional[dict]:
+    """Returns auth info dict if Claude Code is authenticated, else None."""
+    if not claude_code_available():
+        return None
+    try:
+        # `claude` CLI doesn't have a stable JSON status command, so we run a
+        # trivial query and infer auth from exit code.
+        result = subprocess.run(
+            ["claude", "-p", "say only the word ok"],
+            capture_output=True,
+            timeout=15,
+            text=True,
+        )
+        if result.returncode == 0 and "ok" in result.stdout.lower():
+            return {"method": "subscription", "active": True}
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
+
+
+# ─── Multi-provider client ──────────────────────────────────────────────
+
+
 class MultiProviderLLM:
-    """
-    LLM client that tries multiple providers with automatic fallback.
-    
-    Usage:
-        llm = MultiProviderLLM()
-        response = llm.chat(system_prompt, user_message)
-    """
-    
+    """LLM client that tries Claude Code, then Anthropic API, with fallback."""
+
     def __init__(self):
         self.providers = self._init_providers()
-        
-    def _init_providers(self) -> list[dict]:
-        """Initialize available providers from environment based on configured priority order."""
-        providers = []
-        
-        # Determine order from settings or use default fallback order
-        provider_order_str = getattr(settings, "ai_provider_order", "groq,openai,anthropic,vertex")
-        order_list = [p.strip().lower() for p in provider_order_str.split(",") if p.strip()]
-        
-        # Build a dictionary of available valid provider configs
-        available_configs = {}
 
-        # 1. Anthropic
-        if hasattr(settings, "anthropic_api_key") and settings.anthropic_api_key:
-            # Use the model the user explicitly selected in the UI.
-            # Strip any legacy OpenRouter provider prefix (e.g. "anthropic/claude-...") 
-            # since the native Anthropic SDK doesn't use that format.
-            model_name = getattr(settings, "anthropic_model", "claude-sonnet-4-6")
-            if model_name.startswith("anthropic/"):
-                model_name = model_name.replace("anthropic/", "")
-            
-            available_configs["anthropic"] = [{
-                "name": model_name,
-                "model": model_name,
+    def _init_providers(self) -> list[dict]:
+        """Build the provider list in user-configured order."""
+        order_str = getattr(settings, "ai_provider_order", "claude_code,anthropic")
+        order = [p.strip().lower() for p in order_str.split(",") if p.strip()]
+
+        available: dict[str, dict] = {}
+
+        if "claude_code" in order and claude_code_available():
+            available["claude_code"] = {
+                "name": "claude-code-cli",
+                "type": "claude_code",
+            }
+
+        if "anthropic" in order and settings.anthropic_api_key:
+            model = settings.anthropic_model or "claude-sonnet-4-6"
+            if model.startswith("anthropic/"):
+                model = model.replace("anthropic/", "")
+            available["anthropic"] = {
+                "name": model,
+                "model": model,
                 "type": "anthropic",
                 "api_key": settings.anthropic_api_key,
-            }]
+            }
 
-        # 2. OpenAI
-        if hasattr(settings, "openai_api_key") and settings.openai_api_key:
-            model_name = getattr(settings, "openai_model", "gpt-4o")
-                
-            available_configs["openai"] = [{
-                "name": model_name,
-                "model": model_name,
-                "type": "openai",
-                "api_key": settings.openai_api_key,
-            }]
-            
-        # 3. Groq (Llama 3.3 70B fallback or custom)
-        if hasattr(settings, "groq_api_key") and settings.groq_api_key:
-            model_name = getattr(settings, "groq_model", getattr(settings, "llm_model", "llama-3.3-70b-versatile"))
-            if model_name.startswith("meta/"):
-                model_name = model_name.replace("meta/", "")
-            elif model_name.startswith("meta-llama/"):
-                model_name = model_name.replace("meta-llama/", "")
-                
-            available_configs["groq"] = [{
-                "name": model_name,
-                "model": model_name,
-                "type": "groq",
-                "api_key": settings.groq_api_key,
-            }]
+        providers = [available[name] for name in order if name in available]
 
-        # 4. Vertex AI (Google Cloud)
-        vertexai_available = True
-        try:
-            import google.auth
-        except ImportError:
-            vertexai_available = False
-            console.print("[dim]Vertex AI SDKs not installed, skipping cloud providers[/dim]")
-        
-        if vertexai_available and hasattr(settings, "gcp_project_id") and settings.gcp_project_id:
-            available_configs["vertex"] = [
-                {
-                    "name": "llama-3.3-70b-vertexai",
-                    "model": "meta/llama-3.3-70b-instruct-maas",
-                    "type": "vertexai",
-                    "project": settings.gcp_project_id,
-                    "location": getattr(settings, "gcp_location", "us-central1"),
-                },
-                {
-                    "name": "llama-4-scout-vertexai",
-                    "model": "meta/llama-4-scout-17b-16e-instruct-maas",
-                    "type": "vertexai",
-                    "project": settings.gcp_project_id,
-                    "location": "us-east5",
-                }
-            ]
-            
-        # Assemble standard list ordered by user's AI_PROVIDER_ORDER
-        for p_name in order_list:
-            if p_name in available_configs:
-                providers.extend(available_configs[p_name])
-                del available_configs[p_name] # Mark as added
-
-        # Add any remaining configured providers that weren't in the order string
-        for remaining_configs in available_configs.values():
-            providers.extend(remaining_configs)
-        
         if not providers:
             raise ValueError(
-                "No LLM providers configured. Please configure at least one API key (Groq, OpenAI, Anthropic, or Vertex) in the Settings Dashboard."
+                "No LLM providers available. Configure Anthropic API key in Settings, "
+                "or install Claude Code (https://claude.com/download) and authenticate."
             )
-        
-        console.print(f"[dim]LLM providers available: {[p['name'] for p in providers]}[/dim]")
+
+        console.print(f"[dim]LLM providers: {[p['name'] for p in providers]}[/dim]")
         return providers
-    
+
     def chat(
         self,
         system_prompt: str,
@@ -131,185 +103,69 @@ class MultiProviderLLM:
         max_retries: int = 2,
         response_format: Any = None,
     ) -> str:
-        """
-        Send a chat message, with automatic fallback on failure.
-        
-        Args:
-            system_prompt: System/context prompt
-            user_message: User message
-            temperature: Sampling temperature
-            max_retries: Max retries per provider before fallback
-            
-        Returns:
-            Response text from LLM
-        """
+        """Send a chat message, falling back across providers on failure."""
         import time
-        last_error = None
-        
+
+        last_error: Optional[Exception] = None
+
         for provider in self.providers:
             for attempt in range(max_retries):
                 try:
+                    if provider["type"] == "claude_code":
+                        return self._call_claude_code(provider, system_prompt, user_message, temperature)
                     if provider["type"] == "anthropic":
                         return self._call_anthropic(provider, system_prompt, user_message, temperature)
-                    elif provider["type"] == "openai":
-                        return self._call_openai(provider, system_prompt, user_message, temperature)
-                    elif provider["type"] == "anthropic_vertex":
-                        return self._call_anthropic_vertex(provider, system_prompt, user_message, temperature)
-                    elif provider["type"] == "vertexai":
-                        return self._call_vertexai(provider, system_prompt, user_message, temperature)
-                    elif provider["type"] == "groq":
-                        return self._call_groq(provider, system_prompt, user_message, temperature)
                 except Exception as e:
                     last_error = e
-                    error_str = str(e).lower()
-                    
-                    # Rate limit -> try next provider immediately
-                    if "rate" in error_str or "429" in str(e) or "quota" in error_str:
-                        console.print(f"[yellow]Rate limit on {provider['name']}, trying next...[/yellow]")
+                    err = str(e).lower()
+                    if "rate" in err or "429" in str(e) or "quota" in err:
+                        console.print(f"[yellow]Rate limit on {provider['name']}, trying next…[/yellow]")
                         break
-                    
-                    # Other errors, retry with exponential backoff
-                    wait_time = 2 ** attempt  # 1s, 2s, 4s, ...
+                    wait = 2**attempt
                     console.print(f"[yellow]Attempt {attempt+1} failed on {provider['name']}: {e}[/yellow]")
-                    console.print(f"[dim]   Waiting {wait_time}s before retry...[/dim]")
-                    time.sleep(wait_time)
-                    continue
-        
+                    time.sleep(wait)
+
         raise Exception(f"All LLM providers failed. Last error: {last_error}")
-    
-    def _call_anthropic(
-        self,
-        provider: dict,
-        system_prompt: str,
-        user_message: str,
-        temperature: float,
-    ) -> str:
-        """Call Anthropic API directly."""
+
+    # ─── Provider implementations ───────────────────────────────────────
+
+    def _call_anthropic(self, provider: dict, system_prompt: str, user_message: str, temperature: float) -> str:
         from anthropic import Anthropic
-        
+
         client = Anthropic(api_key=provider["api_key"])
-        
         response = client.messages.create(
             model=provider["model"],
             max_tokens=4096,
             system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_message}
-            ],
+            messages=[{"role": "user", "content": user_message}],
             temperature=temperature,
         )
-        
         return response.content[0].text
-        
-    def _call_openai(
-        self,
-        provider: dict,
-        system_prompt: str,
-        user_message: str,
-        temperature: float,
-    ) -> str:
-        """Call OpenAI API."""
-        from openai import OpenAI
-        
-        client = OpenAI(api_key=provider["api_key"])
-        
-        response = client.chat.completions.create(
-            model=provider["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=temperature,
-            max_tokens=4096,
-        )
-        
-        return response.choices[0].message.content
-    
-    def _call_anthropic_vertex(
-        self,
-        provider: dict,
-        system_prompt: str,
-        user_message: str,
-        temperature: float,
-    ) -> str:
-        """Call Claude via Anthropic's Vertex AI integration."""
-        from anthropic import AnthropicVertex
-        
-        client = AnthropicVertex(
-            project_id=provider["project"],
-            region=provider["location"],
-        )
-        
-        response = client.messages.create(
-            model=provider["model"],
-            max_tokens=4096,
-            system=system_prompt,
-            messages=[
-                {"role": "user", "content": user_message}
-            ],
-            temperature=temperature,
-        )
-        
-        return response.content[0].text
-    
-    def _call_vertexai(
-        self,
-        provider: dict,
-        system_prompt: str,
-        user_message: str,
-        temperature: float,
-    ) -> str:
-        """Call Vertex AI using google.genai SDK."""
-        from google import genai
-        from google.genai.types import GenerateContentConfig
-        
-        client = genai.Client(
-            vertexai=True,
-            project=provider["project"],
-            location=provider["location"],
-        )
-        
-        # Combine system and user prompts
+
+    def _call_claude_code(self, provider: dict, system_prompt: str, user_message: str, temperature: float) -> str:
+        """Invoke Claude Code CLI in non-interactive mode.
+
+        `claude -p` doesn't have a separate system prompt slot, so we concatenate.
+        Temperature is ignored (CLI uses defaults).
+        """
         full_prompt = f"{system_prompt}\n\n---\n\n{user_message}"
-        
-        response = client.models.generate_content(
-            model=provider["model"],
-            contents=full_prompt,
-            config=GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=4096,
-                response_mime_type="application/json",  # Force valid JSON output
-            ),
-        )
-        
-        return response.text
-    
-    def _call_groq(
-        self,
-        provider: dict,
-        system_prompt: str,
-        user_message: str,
-        temperature: float,
-    ) -> str:
-        """Call Groq API."""
-        from groq import Groq
-        
-        client = Groq(api_key=provider["api_key"])
-        
-        response = client.chat.completions.create(
-            model=provider["model"],
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=temperature,
-            max_tokens=4000,
-        )
-        
-        return response.choices[0].message.content
+        try:
+            result = subprocess.run(
+                ["claude", "-p", full_prompt],
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except subprocess.TimeoutExpired as e:
+            raise Exception("Claude Code timed out after 5 minutes") from e
+
+        if result.returncode != 0:
+            raise Exception(f"Claude Code error (exit {result.returncode}): {result.stderr[:500]}")
+        return result.stdout.strip()
 
 
-# Singleton instance
+# ─── Singleton ──────────────────────────────────────────────────────────
+
 _llm_instance: Optional[MultiProviderLLM] = None
 
 
@@ -321,6 +177,12 @@ def get_llm() -> MultiProviderLLM:
     return _llm_instance
 
 
+def reset_llm() -> None:
+    """Force the next get_llm() to reinitialize (e.g. after Settings change)."""
+    global _llm_instance
+    _llm_instance = None
+
+
 def chat(system_prompt: str, user_message: str, temperature: float = 0.7) -> str:
-    """Convenience function to chat with LLM using multi-provider fallback."""
+    """Convenience: chat using current provider order."""
     return get_llm().chat(system_prompt, user_message, temperature)

@@ -1,145 +1,73 @@
-import asyncio
-import json
-from typing import Dict, Any, Optional, Callable, Coroutine
-from datetime import datetime
-from sqlmodel import Session, select
+"""Simple in-memory async job queue backed by JobStore for persistence.
 
-from packages.core.db.engine import engine
-from packages.core.db.models import Episode
+MVP-simple: single worker, FIFO, asyncio.Queue. Restart-safety comes from
+JobStore — pending jobs at startup are re-enqueued from disk.
+"""
+
+import asyncio
+from typing import Any, Callable, Coroutine, Dict, Optional
+
 from packages.core.queue.base import BaseJobQueue
+from server.workers.job_store import get_job_store
+
 
 class SQLiteJobQueue(BaseJobQueue):
-    """
-    Local implementation of the Job Queue for the Community Tier.
-    Uses SQLite (via SQLModel's Episode table) to persist and recover jobs.
-    Uses asyncio background tasks to process them without blocking FastAPI.
-    """
-    
+    """Asyncio-based job queue. Uses JobStore for persistence."""
+
     def __init__(self):
+        self._queue: asyncio.Queue = asyncio.Queue()
         self._worker_task: Optional[asyncio.Task] = None
-        self._shutdown_event = asyncio.Event()
-        self._processor_func: Optional[Callable[[str, Dict[str, Any]], Coroutine]] = None
-        self._sleep_interval = 2.0  # seconds between polls
+        self._shutdown = asyncio.Event()
+        self._processor: Optional[Callable[[str, Dict[str, Any]], Coroutine]] = None
 
     async def enqueue(self, job_id: str, payload: Dict[str, Any]) -> str:
-        """
-        Persists the full payload to the Episode row so the worker
-        can reconstruct all settings (transcription_config, auth_token, etc.)
-        after a restart or async pickup.
-        """
-        with Session(engine) as session:
-            ep_id = payload.get("episode_id")
-            if not ep_id:
-                raise ValueError("Payload must contain 'episode_id'")
-
-            statement = select(Episode).where(Episode.id == ep_id)
-            episode = session.exec(statement).first()
-            if not episode:
-                raise ValueError(f"Episode with id {ep_id} not found")
-
-            episode.job_id = job_id
-            episode.status = "pending"
-            episode.progress_percent = 0
-            episode.payload_json = json.dumps(payload)
-            session.add(episode)
-            session.commit()
-
+        """Add a job to the queue. JobStore must already have the job created."""
+        await self._queue.put((job_id, payload))
         return job_id
 
     async def get_job_status(self, job_id: str) -> Optional[Dict[str, Any]]:
-        with Session(engine) as session:
-            statement = select(Episode).where(Episode.job_id == job_id)
-            episode = session.exec(statement).first()
-            if not episode:
-                return None
-            return {
-                "job_id": job_id,
-                "status": episode.status,
-                "progress_percent": episode.progress_percent,
-                "error_message": episode.error_message
-            }
+        store = get_job_store()
+        job = store.get_job(job_id)
+        if not job:
+            return None
+        return {
+            "job_id": job_id,
+            "status": job.status,
+            "progress_percent": job.progress,
+            "error_message": job.error,
+        }
 
     async def update_job_progress(self, job_id: str, progress: int, status: str, message: str = ""):
-        with Session(engine) as session:
-            statement = select(Episode).where(Episode.job_id == job_id)
-            episode = session.exec(statement).first()
-            if episode:
-                episode.progress_percent = progress
-                # Do not overwrite 'completed' or 'failed' with generic 'processing' randomly
-                if episode.status not in ["completed", "failed"]:
-                    episode.status = status
-                session.add(episode)
-                session.commit()
+        get_job_store().update_progress(job_id, progress, message, status=status)
 
     async def mark_job_failed(self, job_id: str, error_message: str):
-        with Session(engine) as session:
-            statement = select(Episode).where(Episode.job_id == job_id)
-            episode = session.exec(statement).first()
-            if episode:
-                episode.status = "failed"
-                episode.error_message = error_message
-                session.add(episode)
-                session.commit()
+        get_job_store().fail_job(job_id, error_message)
 
     def register_worker(self, task_func: Callable[[str, Dict[str, Any]], Coroutine]):
-        """Registers the async function that actually runs the heavy pipeline."""
-        self._processor_func = task_func
+        self._processor = task_func
 
     async def start_workers(self, num_workers: int = 1):
-        """Starts a background poller that grabs 'pending' jobs one by one."""
-        self._shutdown_event.clear()
-        
-        async def poll_loop():
-            while not self._shutdown_event.is_set():
-                if self._processor_func is None:
-                    await asyncio.sleep(self._sleep_interval)
+        self._shutdown.clear()
+
+        async def worker_loop():
+            while not self._shutdown.is_set():
+                try:
+                    job_id, payload = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+                except asyncio.TimeoutError:
                     continue
-                    
-                job_to_process = None
-                with Session(engine) as session:
-                    # Find ONE pending job
-                    statement = select(Episode).where(Episode.status == "pending").limit(1)
-                    pending_ep = session.exec(statement).first()
-                    
-                    if pending_ep:
-                        # Lock it so other workers don't grab it (if we had multiple)
-                        pending_ep.status = "processing"
-                        session.add(pending_ep)
-                        session.commit()
-                        
-                        # Restore full payload persisted at enqueue time
-                        if pending_ep.payload_json:
-                            restored_payload = json.loads(pending_ep.payload_json)
-                        else:
-                            # Fallback for episodes enqueued before this fix
-                            restored_payload = {
-                                "episode_id": pending_ep.id,
-                                "video_path": pending_ep.video_path,
-                                "user_id": pending_ep.user_id,
-                            }
-                        job_to_process = {
-                            "job_id": pending_ep.job_id,
-                            "payload": restored_payload,
-                        }
-                
-                if job_to_process:
-                    # Run the designated heavy processor function
-                    # It is awaited so it blocks this specific worker coroutine
-                    try:
-                        await self._processor_func(
-                            job_to_process["job_id"], 
-                            job_to_process["payload"]
-                        )
-                        # The processor_func should internally call update_job_progress(..., "completed")
-                    except Exception as e:
-                        await self.mark_job_failed(job_to_process["job_id"], str(e))
-                else:
-                    # Sleep if no jobs
-                    await asyncio.sleep(self._sleep_interval)
-                    
-        self._worker_task = asyncio.create_task(poll_loop())
+                if self._processor is None:
+                    continue
+                try:
+                    await self._processor(job_id, payload)
+                except Exception as e:  # noqa: BLE001
+                    await self.mark_job_failed(job_id, str(e))
+
+        self._worker_task = asyncio.create_task(worker_loop())
 
     async def stop_workers(self):
-        self._shutdown_event.set()
+        self._shutdown.set()
         if self._worker_task:
-            await self._worker_task
+            try:
+                await asyncio.wait_for(self._worker_task, timeout=5.0)
+            except asyncio.TimeoutError:
+                self._worker_task.cancel()

@@ -11,8 +11,10 @@ import sqlite3
 import googleapiclient.discovery
 from google.oauth2.credentials import Credentials
 
-from packages.core.services.telemetry import TelemetryService
-from packages.core.llm_provider import get_llm
+# NOTE: TelemetryService removed in local-first MVP (v0.1.0).
+# This module is currently unused — YouTube historical sync returns 501.
+# Re-enable in v0.1.1 with local-only persistence (no central telemetry).
+from packages.core.llm_provider import get_llm  # noqa: F401
 
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
@@ -40,11 +42,11 @@ class YouTubeHistoricalExtractor:
 
     def __init__(
         self,
-        telemetry_service: TelemetryService,
+        telemetry_service=None,  # kept for API compat; ignored in local-first MVP
         anthropic_model: Optional[str] = None,
         output_language: str = "English",
     ):
-        self.telemetry = telemetry_service
+        self.telemetry = None  # local-first: no central telemetry
         self.llm = get_llm()
         self.anthropic_model = anthropic_model or self.DEFAULT_ANTHROPIC_MODEL
         # Human-readable language label (e.g. "Spanish", "Japanese"). Used in
@@ -513,22 +515,8 @@ no prose):
             except Exception as e:
                 logger.error("Failed to store analysis for %s: %s", v_id, e)
 
-            # ─── Telemetry (Safe Switch) ───
-            if self.SUPABASE_SYNC_ENABLED:
-                self.telemetry.track_youtube_performance(
-                    user_id=user_id,
-                    youtube_id=v_id,
-                    views=metrics.get("views", 0),
-                    likes=metrics.get("likes", 0),
-                    comments=metrics.get("comments", 0),
-                    duration_seconds=duration_delta.total_seconds(),
-                    hook_type=analysis.get("hook_type"),
-                    predicted_score=analysis.get("engagement_potential"),
-                    category=analysis.get("core_topics", ["General"])[0] if analysis.get("core_topics") else "General",
-                    episode_format=analysis.get("episode_format", "solo"),
-                )
-            else:
-                logger.info("📦 Supabase sync paused (Local Intelligence mode). Data stored locally only.")
+            # Telemetry removed in local-first MVP — data stays in local SQLite.
+            logger.info("Stored locally (telemetry disabled in v0.1.0).")
 
             processed_count += 1
 
