@@ -42,6 +42,14 @@ class Settings(BaseSettings):
     anthropic_api_key: str = Field(default="", description="Anthropic API key for Claude")
     anthropic_model: str = Field(default="claude-sonnet-4-6", description="Selected Anthropic model")
 
+    # ── User-owned transcript DB (optional, BYO Supabase) ──────────────
+    # If the user already has their podcast transcripts in their own Supabase
+    # project, they can configure these in Settings → Integrations. The local
+    # pipeline will pull transcripts from there instead of re-running Whisper.
+    # Azelia has nothing to do with this DB — it's the user's own infra.
+    transcript_supabase_url: str = Field(default="", description="User's own Supabase URL for transcript ingestion (optional)")
+    transcript_supabase_key: str = Field(default="", description="User's own Supabase service key for transcripts (optional)")
+
     # ── Optional HuggingFace token for speaker diarization (Pyannote) ──
     hf_token: str = Field(default="", alias="HF_TOKEN", description="HuggingFace token for Pyannote diarization (optional)")
 

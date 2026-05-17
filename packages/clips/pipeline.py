@@ -215,9 +215,20 @@ class BatchProcessor:
         # DUAL PIPELINE: Use Supabase for curation (with speaker timing)
         #                WhisperX only for final clip transcription (word-level)
         
-        # Supabase transcript source removed in local-first MVP. use_supabase is always False.
-        if False:  # was: self.use_supabase
-            pass
+        # If the user has their own Supabase configured for transcripts, try
+        # that first. Falls through to local/WhisperX if not configured or fails.
+        if self.use_supabase:
+            console.print("[dim]   Loading transcript from your Supabase…[/dim]")
+            from server.sources.supabase_transcripts import get_transcript_from_supabase
+            transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
+            if transcript is None:
+                console.print("[yellow]   Not found in your Supabase, falling back to local.[/yellow]")
+                if episode.transcript_path and episode.transcript_path.exists():
+                    transcript = Transcript.load(episode.transcript_path)
+                else:
+                    console.print("[dim]   Transcribing episode (this takes time)...[/dim]")
+                    transcript = self._transcribe_video(episode.video_path, job_id=job_id)
+                    transcript.save(episode.episode_folder / "transcript.json")
         else:
             # Traditional mode: local transcript or WhisperX
             if episode.transcript_path and episode.transcript_path.exists():
