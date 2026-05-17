@@ -1,0 +1,81 @@
+---
+import '../styles/global.css';
+---
+
+<html lang="es" class="dark">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width" />
+        <title>Conectando YouTube... | Azelia</title>
+        <meta name="theme-color" content="#020617" />
+    </head>
+    <body class="bg-zinc-950 min-h-screen flex items-center justify-center">
+        <div id="status" class="flex flex-col items-center gap-4 text-center p-8">
+            <div
+                class="w-10 h-10 border-2 border-red-500 border-t-transparent rounded-full animate-spin"
+            >
+            </div>
+            <p class="text-zinc-300 text-sm">Conectando tu canal de YouTube...</p>
+        </div>
+
+        <script>
+            import { supabase } from '../lib/supabase';
+
+            const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+
+            async function handleCallback() {
+                const params = new URLSearchParams(window.location.search);
+                const code = params.get('code');
+                const statusEl = document.getElementById('status')!;
+
+                if (!code) {
+                    statusEl.innerHTML = `<p class="text-red-400">Authorization code not received.</p>`;
+                    setTimeout(() => window.location.replace('/dashboard'), 2000);
+                    return;
+                }
+
+                try {
+                    const { data } = await supabase.auth.getSession();
+                    const token = data?.session?.access_token;
+                    if (!token) throw new Error('Session expired — sign in again');
+
+                    const origin = window.location.origin
+                        .replace('127.0.0.1', 'localhost')
+                        .replace('0.0.0.0', 'localhost');
+
+                    const res = await fetch(`${API_BASE}/analytics/youtube/sync-with-code`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            Authorization: `Bearer ${token}`,
+                        },
+                        body: JSON.stringify({ code, redirect_uri: origin + '/youtube-connect' }),
+                    });
+
+                    const result = await res.json();
+                    if (!res.ok) throw new Error(result.detail || 'Error conectando YouTube');
+
+                    statusEl.innerHTML = `
+                        <div class="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
+                            <svg class="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                            </svg>
+                        </div>
+                        <p class="text-white font-medium">${result.channel_name || 'Canal'} conectado</p>
+                        <p class="text-zinc-400 text-xs">${result.total_shorts ?? 0} videos sincronizados · Redirigiendo...</p>
+                    `;
+                } catch (e: any) {
+                    statusEl.innerHTML = `
+                        <p class="text-red-400 font-medium">Error conectando YouTube</p>
+                        <p class="text-zinc-500 text-xs">${e.message}</p>
+                        <p class="text-zinc-600 text-xs">Redirigiendo al dashboard...</p>
+                    `;
+                }
+
+                setTimeout(() => window.location.replace('/dashboard'), 2500);
+            }
+
+            handleCallback();
+        </script>
+    </body>
+</html>
