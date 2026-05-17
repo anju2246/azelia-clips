@@ -240,6 +240,11 @@ class BatchProcessor:
                 console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
                 ep_id_str = f"EP{episode.episode_number:03d}"
                 transcript = self._transcribe_video(episode.video_path, job_id=job_id, episode_id=ep_id_str)
+                if transcript is None:
+                    raise RuntimeError(
+                        f"Could not obtain a transcript for {ep_id_str}: "
+                        "no Supabase row, no local transcript.json, and Whisper returned nothing."
+                    )
                 # Save transcript for future use
                 transcript_out = episode.episode_folder / "transcript.json"
                 transcript.save(transcript_out)
