@@ -61,11 +61,29 @@ async def processing_worker(job_id: str, payload: Dict[str, Any]):
             return processor.process_single(file_path, job_id=job_id)
 
         clips_count = await asyncio.to_thread(run_processing)
-        store.complete_job(job_id, clips_count)
+
+        # Don't clobber paused/cancelled state with 'completed' when the
+        # pipeline returned early because of a pause/cancel signal.
+        current = store.get_job(job_id)
+        if current and current.status in ("paused", "cancelled"):
+            store.update_progress(
+                job_id,
+                current.progress,
+                f"⏸️ {current.status} ({clips_count} clips so far)",
+                status=current.status,
+            )
+        else:
+            store.complete_job(job_id, clips_count)
 
     except Exception as e:  # noqa: BLE001 — top-level worker safety net
         traceback.print_exc()
         store.fail_job(job_id, str(e))
+    finally:
+        try:
+            from server.dependencies import clear_abort_event
+            clear_abort_event(job_id)
+        except Exception:
+            pass
 
 
 # Register worker to listen for queue jobs
