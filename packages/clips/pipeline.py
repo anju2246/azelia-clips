@@ -87,9 +87,14 @@ class BatchProcessor:
         from packages.clips.transcription.driver import TranscriptionDriver
         self.transcription_config = transcription_config or {}
         self.transcription_driver = TranscriptionDriver.get_source_from_config(self.transcription_config)
-        
+
         # Analytics sync removed in local-first MVP (no central DB)
         self.analytics_sync = None
+
+        # Abort signal — pipeline polls this between heavy steps to honor
+        # pause / cancel without crashing concurrent MLX workers.
+        # Set by the /pause and /cancel endpoints via server.dependencies.
+        self.abort_event = None
         
         if not self.base_path.exists():
             raise FileNotFoundError(
@@ -158,9 +163,14 @@ class BatchProcessor:
         
         return episodes
     
+    def _aborted(self) -> bool:
+        """True if pause/cancel was triggered for this job — used to short-circuit
+        the render loop between heavy steps so concurrent MLX workers can't collide."""
+        return bool(self.abort_event and self.abort_event.is_set())
+
     def process_episode(
-        self, 
-        episode: EpisodeConfig, 
+        self,
+        episode: EpisodeConfig,
         start_from_clip: int = 0,
         job_id: str = None,
     ) -> int:
@@ -176,10 +186,19 @@ class BatchProcessor:
             Number of clips generated
         """
         # Note: .env is loaded automatically by src.config.settings
-        
+
         # Import job store for pause checking
         from server.workers.job_store import get_job_store
         store = get_job_store() if job_id else None
+
+        # Attach the per-job abort_event so checkpoints can detect pause/cancel.
+        # Falls back to no-op if dependencies module isn't available (e.g. CLI).
+        if job_id and not self.abort_event:
+            try:
+                from server.dependencies import get_abort_event
+                self.abort_event = get_abort_event(job_id)
+            except Exception:
+                self.abort_event = None
         
         from packages.clips.transcription.transcriber import Transcript
         from packages.clips.curation.pipeline import CurationPipeline
@@ -400,12 +419,19 @@ class BatchProcessor:
             if i <= start_from_clip:
                 console.print(f"[dim]   Skipping clip_{i:02d} (already processed)[/dim]")
                 continue
-            
-            # Check for pause request
+
+            # In-process abort check — set by /pause and /cancel.
+            # Surfaces faster than the JobStore poll below because no DB round-trip.
+            if self._aborted():
+                console.print(f"[yellow]⏸️ Pipeline aborted at clip {i-1}/{len(valid_clips)} (pause/cancel)[/yellow]")
+                return clips_generated
+
+            # Belt-and-suspenders: also poll the JobStore in case the abort
+            # event was missed (e.g. process restart between pause and resume).
             if store and job_id:
                 current_job = store.get_job(job_id)
-                if current_job and current_job.status == 'paused':
-                    console.print(f"[yellow]⏸️ Job paused at clip {i-1}/{len(valid_clips)}[/yellow]")
+                if current_job and current_job.status in ('paused', 'cancelled'):
+                    console.print(f"[yellow]⏸️ Job {current_job.status} at clip {i-1}/{len(valid_clips)}[/yellow]")
                     return clips_generated
             
             score = clip.virality_score.total
