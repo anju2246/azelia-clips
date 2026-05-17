@@ -759,6 +759,14 @@ async def process_episode_endpoint(
     )
     
     # Prepare batch processor for single episode
+    # Respect user-owned Supabase if configured (either per-request or in settings)
+    t_url_ep = req.supabase_url or settings.transcript_supabase_url or None
+    t_key_ep = req.supabase_key or settings.transcript_supabase_key or None
+    eff_source_ep = req.transcription_source
+    if t_url_ep and t_key_ep and req.transcription_source == "local_whisper":
+        eff_source_ep = "supabase_custom"
+    use_sb = eff_source_ep == "supabase_custom"
+
     def run_batch_task(job_id, ep_num):
         try:
             store.update_progress(job_id, 5, "Initializing batch processor...")
@@ -767,9 +775,12 @@ async def process_episode_endpoint(
                 min_duration=req.min_duration,
                 max_duration=req.max_duration,
                 min_score=req.min_score,
+                use_supabase=use_sb,
                 transcription_config={
-                    "source_type": "local_whisper" if req.transcription_source == "supabase_custom" else req.transcription_source,
+                    "source_type": eff_source_ep,
                     "assemblyai_api_key": getattr(req, "assemblyai_key", None),
+                    "supabase_url": t_url_ep,
+                    "supabase_key": t_key_ep,
                 },
             )
             
