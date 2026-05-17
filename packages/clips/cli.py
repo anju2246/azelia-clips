@@ -60,9 +60,15 @@ def process(
             console.print("[red]Error:[/red] WhisperX not installed. Run: pip install -e '.[asr]'")
             raise typer.Exit(1)
 
-    # Supabase upload removed in local-first MVP — `--upload` flag is a no-op.
+    # Optional: upload to USER's own Supabase project (not Azelia's)
     if upload:
-        console.print("[yellow]Note: --upload disabled in local-first MVP. Transcript stays local.[/yellow]")
+        from packages.core.config import settings as _s
+        if not (_s.transcript_supabase_url and _s.transcript_supabase_key):
+            console.print("[yellow]--upload requires TRANSCRIPT_SUPABASE_URL/KEY in your settings. Skipped.[/yellow]")
+        else:
+            from server.sources.supabase_transcripts import upload_transcript
+            ep_id = video.stem.split(" ")[0] if video.name.startswith("EP") else video.stem
+            upload_transcript(transcript, ep_id)
 
     # Step 2: Curate clips
     curator = ClipCurator()

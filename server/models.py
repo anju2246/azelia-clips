@@ -51,6 +51,10 @@ class ProcessRequest(BaseModel):
     min_score: int = 70
     subtitle_style: str = "highlight"
     transcription_source: str = "local_whisper"
+    # Optional: user-owned Supabase for transcript ingestion (not Azelia's)
+    supabase_url: Optional[str] = None
+    supabase_key: Optional[str] = None
+    assemblyai_key: Optional[str] = None
 
 
 class ProcessLocalRequest(ProcessRequest):
@@ -63,6 +67,9 @@ class SettingsResponse(BaseModel):
     ai_provider_order: List[str] = Field(default=["claude_code", "anthropic"])
     anthropic_api_key: str = Field(default="", description="Masked key")
     anthropic_model: str = Field(default="claude-sonnet-4-6")
+    # User-owned Supabase for transcripts (optional)
+    transcript_supabase_url: str = Field(default="")
+    transcript_supabase_key: str = Field(default="", description="Masked key")
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -71,6 +78,8 @@ class UpdateSettingsRequest(BaseModel):
     ai_provider_order: Optional[List[str]] = None
     anthropic_api_key: Optional[str] = None
     anthropic_model: Optional[str] = None
+    transcript_supabase_url: Optional[str] = None
+    transcript_supabase_key: Optional[str] = None
 
 
 class EpisodeResponse(BaseModel):

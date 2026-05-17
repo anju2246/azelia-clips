@@ -92,11 +92,19 @@ async def process_video(
         subtitle_style=subtitle_style
     )
     
-    # Local-first MVP: only local_whisper / assemblyai supported.
-    # The supabase_url/key form fields are kept for API compat but ignored.
+    # Build transcription config. The user can optionally route through their
+    # own Supabase if they have transcripts there — Azelia has no Supabase of
+    # its own anymore.
+    t_url = supabase_url or settings.transcript_supabase_url or None
+    t_key = supabase_key or settings.transcript_supabase_key or None
+    effective_source = transcription_source
+    if t_url and t_key and transcription_source == "local_whisper":
+        effective_source = "supabase_custom"
     transcription_config = {
-        "source_type": "local_whisper" if transcription_source == "supabase_custom" else transcription_source,
+        "source_type": effective_source,
         "assemblyai_api_key": assemblyai_key,
+        "supabase_url": t_url,
+        "supabase_key": t_key,
     }
     
     # Initialize Job in Store (Legacy for UI compatibility)
@@ -180,10 +188,17 @@ async def process_local_video(
         except Exception as e:
             raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
         
-    # Local-first MVP: supabase_url/key in request are ignored.
+    # User-owned Supabase opt-in (transcripts only — Azelia has no DB)
+    t_url = req.supabase_url or settings.transcript_supabase_url or None
+    t_key = req.supabase_key or settings.transcript_supabase_key or None
+    effective_source = req.transcription_source
+    if t_url and t_key and req.transcription_source == "local_whisper":
+        effective_source = "supabase_custom"
     transcription_config = {
-        "source_type": "local_whisper" if req.transcription_source == "supabase_custom" else req.transcription_source,
+        "source_type": effective_source,
         "assemblyai_api_key": getattr(req, "assemblyai_key", None),
+        "supabase_url": t_url,
+        "supabase_key": t_key,
     }
 
     # If job is already running, just return it
@@ -785,11 +800,19 @@ async def process_episode_endpoint(
 
 @router.post("/episodes/{episode_number}/upload-transcript")
 async def upload_transcript_endpoint(episode_number: int, user: User = Depends(require_auth)):
-    """Disabled in v0.1.0 — Supabase transcript ingestion removed (local-first)."""
-    raise HTTPException(status_code=501, detail="Transcript upload disabled in local-first MVP")
-    # ── Unreachable, kept for reference until we remove the rest of the body ──
-    from packages.clips.transcription.transcriber import Transcript  # noqa: F401
-    from server.processor import BatchProcessor  # noqa: F401
+    """Upload an episode's local transcript to the user's own Supabase project.
+
+    Requires TRANSCRIPT_SUPABASE_URL and TRANSCRIPT_SUPABASE_KEY configured in
+    Settings → Integrations. Returns 412 if not configured.
+    """
+    if not (settings.transcript_supabase_url and settings.transcript_supabase_key):
+        raise HTTPException(
+            status_code=412,
+            detail="Configure your own Supabase URL and key in Settings → Integrations first.",
+        )
+    from server.sources.supabase_transcripts import upload_transcript
+    from packages.clips.transcription.transcriber import Transcript
+    from server.processor import BatchProcessor
     
     try:
         # Find episode
