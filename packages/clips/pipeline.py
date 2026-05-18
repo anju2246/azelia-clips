@@ -684,11 +684,22 @@ class BatchProcessor:
         looks up transcripts by episode_id, and per-clip temp files don't
         have an episode_id. The episode-level transcription_driver is only
         for the full episode (where the user keeps their canonical transcripts).
+
+        We pin the diarizer to num_speakers=2 for per-clip slices. On 30-90s
+        of audio, ECAPA's silhouette-based auto-detect often picks k=3 from
+        acoustic drift in a single speaker (different breathing pace, mic
+        proximity changes, etc.), creating a phantom SPEAKER_NN whose
+        segments are actually one of the real speakers. That phantom maps
+        to a face via the bijective matcher's surplus-fallback, and when
+        the phantom's segments fire the camera shows the WRONG person.
+        Forcing k=2 is the right product call: podcast clips are almost
+        always 2-person dialogue. Multi-person panels would still suffer
+        but the episode-level transcript path keeps auto-detect for those.
         """
         from packages.clips.transcription.local_whisper import LocalWhisperSource
 
         if not hasattr(self, "_local_whisper_clip_source"):
-            self._local_whisper_clip_source = LocalWhisperSource()
+            self._local_whisper_clip_source = LocalWhisperSource(num_speakers_hint=2)
         try:
             return self._local_whisper_clip_source.get_transcript(str(clip_path))
         except Exception as e:
