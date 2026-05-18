@@ -1108,6 +1108,32 @@ async def process_episode_endpoint(
             message=existing.message
         )
 
+    # Re-process: wipe the cached curation + clip files so the pipeline
+    # doesn't short-circuit on existing artifacts. Without this, every
+    # clip's "skip if final already exists" check hits and we return
+    # clips_generated=0 instantly — UI shows "Done" without re-rendering.
+    if req.force_reset:
+        ep_folder = _episode_folder_for(episode_number)
+        if ep_folder is not None:
+            removed = []
+            curation = ep_folder / "curation.json"
+            if curation.exists():
+                curation.unlink()
+                removed.append("curation.json")
+            clips_root = ep_folder / "clips"
+            for sub in ("approved", "review"):
+                d = clips_root / sub
+                if d.exists():
+                    shutil.rmtree(d, ignore_errors=True)
+                    removed.append(f"clips/{sub}")
+            if removed:
+                print(f"[force_reset] EP{episode_number:03d} → removed: {removed}")
+        # Drop the old DB row too so the resolver picks a fresh job_status
+        try:
+            store.delete_job(job_id)
+        except Exception:
+            pass
+
     # Initialize Job
     store.create_job(
         job_id=job_id,
