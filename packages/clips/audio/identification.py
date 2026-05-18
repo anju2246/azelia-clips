@@ -140,9 +140,16 @@ def detect_face_identities(
     # and then build a "mini video" or detect frame-by-frame.
     # Simplest: write frames to a temp folder and run MTCNN on each.
 
+    # NOTE: frames are written to `out_dir/.frames/` instead of a
+    # TemporaryDirectory because we need the frame files to OUTLIVE the
+    # detection loop — cropping happens AFTER clustering, and tmp dirs
+    # auto-delete on exit, leaving cv2.imread to silently fail. We clean
+    # up these frames at the end.
+    frames_dir = out_dir / ".frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
     detections: list[dict] = []
-    with tempfile.TemporaryDirectory(prefix="azelia_id_frames_") as tmp:
-        tmp = Path(tmp)
+    if True:  # keep structural scope so the rest of the body indents the same
+        tmp = frames_dir
         # 1. Extract frames
         frame_paths: list[tuple[float, Path]] = []
         for i, ts in enumerate(timestamps):
@@ -171,7 +178,13 @@ def detect_face_identities(
         # can be any size. Since this only runs once per episode (~30 s),
         # CPU is fine.
         device = "cpu"
-        mtcnn = MTCNN(keep_all=True, device=device, post_process=False)
+        # post_process=True normalizes the cropped face tensor to the
+        # range InceptionResnetV1 was trained on. Without it the
+        # embeddings collapse — different people land at cosine sim
+        # ~0.96, which makes the whole clustering useless. The
+        # FaceTracker hits this same gotcha (its detect_faces() uses
+        # the default post_process=True), so we mirror that.
+        mtcnn = MTCNN(keep_all=True, device=device, post_process=True)
         embedder = InceptionResnetV1(pretrained="vggface2").eval().to(device)
 
         for ts, fp in frame_paths:
@@ -211,7 +224,11 @@ def detect_face_identities(
 
     cluster_ids: list[int] = [-1] * len(detections)
     centroids: list[np.ndarray] = []
-    SIM_THRESHOLD = 0.65
+    # FaceNet/VGGFace2 same-person cosine sim is typically 0.65-0.85;
+    # different-person sims sit around 0.3-0.55. 0.70 is the sweet spot
+    # that merges the same person across lighting variations without
+    # collapsing two distinct guests into one identity.
+    SIM_THRESHOLD = 0.70
     for i, e in enumerate(normalized):
         if not centroids:
             centroids.append(e.copy())
@@ -228,11 +245,16 @@ def detect_face_identities(
             centroids.append(e.copy())
             cluster_ids[i] = len(centroids) - 1
 
-    # Drop singletons — likely transient (motion blur, passers-by).
+    # Keep the TOP clusters by member count. We don't drop singletons
+    # outright — in a podcast that mostly shows one person on screen,
+    # the second face can legitimately appear only once or twice in a
+    # 30-frame sample, and dropping it would leave us with one identity.
+    # Cap at 4 to filter out background extras (audience, sponsors, etc.).
     counts: dict[int, int] = {}
     for cid in cluster_ids:
         counts[cid] = counts.get(cid, 0) + 1
-    valid_clusters = {cid for cid, n in counts.items() if n >= 2}
+    sorted_clusters = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    valid_clusters = {cid for cid, _ in sorted_clusters[:4]}
 
     # 4. For each valid cluster, save the highest-confidence frame's face
     # crop AND the centroid embedding. The embedding is what lets the
@@ -265,6 +287,15 @@ def detect_face_identities(
         "Identity detection: %d detections → %d clusters → %d kept",
         len(detections), len(counts), len(thumbnails),
     )
+
+    # Clean up the intermediate sampled frames — we only needed them to
+    # detect + crop. Keeping them around would litter the user's drive.
+    try:
+        import shutil as _shutil
+        _shutil.rmtree(frames_dir, ignore_errors=True)
+    except Exception:
+        pass
+
     return thumbnails
 
 
@@ -333,6 +364,28 @@ def extract_speaker_samples(
     return results
 
 
+def _diarize_full_episode(video_path: Path) -> list[dict]:
+    """Run ECAPA diarization on the full episode to produce speaker
+    segments — used as fallback when the user's transcript lacks labels.
+
+    Returns a list of {start, end, speaker} dicts. Empty on failure.
+    """
+    try:
+        from packages.clips.audio.speaker_id import SpeakerIdentifier
+    except ImportError:
+        return []
+    try:
+        # Episode level → keep auto-detect across 2..4 speakers.
+        identifier = SpeakerIdentifier(num_speakers=None, min_speakers=2, max_speakers=4)
+        with tempfile.TemporaryDirectory(prefix="azelia_preflight_diariz_") as tmp:
+            wav = Path(tmp) / "audio.wav"
+            SpeakerIdentifier._extract_audio(video_path, wav)
+            return identifier.diarize(wav) or []
+    except Exception as e:
+        logger.warning("Preflight ECAPA fallback failed: %s", e)
+        return []
+
+
 def prepare_identification(
     episode_folder: Path,
     speaker_segments: list[dict],
@@ -340,9 +393,10 @@ def prepare_identification(
     """Run the full preflight: face thumbnails + voice samples + manifest.
 
     `speaker_segments` comes from the user's transcript (Supabase or
-    local Whisper). The manifest is what the modal endpoint serves.
-    Idempotent — re-running on an episode that already has artifacts
-    just refreshes the manifest from disk.
+    local Whisper). If it's empty (the user's source doesn't carry
+    speaker labels for this episode), we run an episode-level ECAPA
+    pass to generate them — costs ~30-60 s but unblocks the L3 flow
+    on transcripts that are otherwise unusable.
     """
     out_dir = episode_folder / ".identification"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -357,7 +411,17 @@ def prepare_identification(
 
     # 1. Faces.
     thumbnails = detect_face_identities(video_path, out_dir)
-    # 2. Voice samples.
+
+    # 2. Voice samples. If the transcript brought no speaker info, run
+    # ECAPA on the full episode to generate it. Episode-level diarization
+    # uses auto-detect (2-4 speakers) because here we have plenty of data
+    # — unlike the per-clip path which is pinned to k=2.
+    if not speaker_segments:
+        logger.info(
+            "Transcript has no speaker labels — running ECAPA on full episode"
+        )
+        speaker_segments = _diarize_full_episode(video_path)
+
     samples = extract_speaker_samples(video_path, speaker_segments, out_dir)
 
     manifest = {
