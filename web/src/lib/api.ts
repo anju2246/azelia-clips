@@ -1,7 +1,15 @@
 // Azelia Clips API Client
 // Interfaces matching server/models.py
 
-export type JobStatus = 'pending' | 'processing' | 'paused' | 'resuming' | 'completed' | 'error' | 'failed' | 'cancelled';
+export type JobStatus =
+  | "pending"
+  | "processing"
+  | "paused"
+  | "resuming"
+  | "completed"
+  | "error"
+  | "failed"
+  | "cancelled";
 
 export interface Clip {
   id: number;
@@ -96,28 +104,31 @@ export interface IntelligenceInsights {
 }
 
 // Global API Configuration
-const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
+const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || "/api";
 
-import { supabase } from './supabase';
+import { supabase } from "./supabase";
 
 /**
  * Helper for making typed fetch requests
  */
-async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
+async function fetchApi<T>(
+  endpoint: string,
+  options: RequestInit = {},
+): Promise<T> {
   const url = `${API_BASE}${endpoint}`;
 
   // Default headers (can be overridden by options.headers)
   const headers = new Headers(options.headers || {});
-  if (!headers.has('Accept')) {
-    headers.set('Accept', 'application/json');
+  if (!headers.has("Accept")) {
+    headers.set("Accept", "application/json");
   }
 
   // Inject Auth token from Supabase session
-  if (!headers.has('Authorization')) {
+  if (!headers.has("Authorization")) {
     try {
       const { data } = await supabase.auth.getSession();
       if (data?.session?.access_token) {
-        headers.set('Authorization', `Bearer ${data.session.access_token}`);
+        headers.set("Authorization", `Bearer ${data.session.access_token}`);
       }
     } catch (e) {
       // Silently continue — the backend will return 401 if auth is required
@@ -144,14 +155,14 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
 
 export const ClipsApi = {
   // Episodes / History
-  getEpisodes: () => fetchApi<EpisodeResponse[]>('/episodes'),
-  getHistory: () => fetchApi<any[]>('/jobs/history'),
+  getEpisodes: () => fetchApi<EpisodeResponse[]>("/episodes"),
+  getHistory: () => fetchApi<any[]>("/jobs/history"),
 
   processEpisode: (episodeNum: number, req: ProcessRequest = {}) =>
     fetchApi<JobResponse>(`/episodes/${episodeNum}/process`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req)
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
     }),
 
   // Jobs
@@ -160,7 +171,7 @@ export const ClipsApi = {
   // File Upload Process (Fallback if no episodes folder)
   processVideo: (file: File, req: ProcessRequest) => {
     const formData = new FormData();
-    formData.append('file', file);
+    formData.append("file", file);
 
     // Append other form fields
     Object.entries(req).forEach(([key, value]) => {
@@ -169,27 +180,27 @@ export const ClipsApi = {
       }
     });
 
-    return fetchApi<JobResponse>('/process', {
-      method: 'POST',
-      body: formData
+    return fetchApi<JobResponse>("/process", {
+      method: "POST",
+      body: formData,
     });
   },
 
   // Zero-upload local processing
   processLocalVideo: (req: ProcessLocalRequest) =>
-    fetchApi<JobResponse>('/process-local', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req)
+    fetchApi<JobResponse>("/process-local", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
     }),
 
   // Approve a clip (move from review/ to approved/)
   approveClip: (jobId: string, filename: string) =>
-    fetchApi<any>(`/clips/${jobId}/${filename}/approve`, { method: 'POST' }),
+    fetchApi<any>(`/clips/${jobId}/${filename}/approve`, { method: "POST" }),
 
   // Reject a clip (move to rejected/, auto-deleted after 30 days)
   rejectClip: (jobId: string, filename: string) =>
-    fetchApi<any>(`/clips/${jobId}/${filename}/reject`, { method: 'POST' }),
+    fetchApi<any>(`/clips/${jobId}/${filename}/reject`, { method: "POST" }),
 
   // List rejected clips for a job
   getRejectedClips: (jobId: string) =>
@@ -197,36 +208,38 @@ export const ClipsApi = {
 
   // Restore a rejected clip back to review
   restoreClip: (jobId: string, filename: string) =>
-    fetchApi<any>(`/clips/${jobId}/${filename}/restore`, { method: 'POST' }),
+    fetchApi<any>(`/clips/${jobId}/${filename}/restore`, { method: "POST" }),
 
   // Open clip location in Finder (macOS)
   openClipLocation: (jobId: string, filename: string) =>
-    fetchApi<any>(`/clips/${jobId}/${filename}/open`, { method: 'POST' }),
+    fetchApi<any>(`/clips/${jobId}/${filename}/open`, { method: "POST" }),
 };
 
 // --- SETTINGS API ---
 
 export const SettingsApi = {
-  getSettings: () => fetchApi<SettingsResponse>('/settings'),
-  getModels: () => fetchApi<{data: any[]}>('/models'),
-  refreshModels: () => fetchApi<{data: any[]}>('/models/refresh', { method: 'POST' }),
+  getSettings: () => fetchApi<SettingsResponse>("/settings"),
+  getModels: () => fetchApi<{ data: any[] }>("/models"),
+  refreshModels: () =>
+    fetchApi<{ data: any[] }>("/models/refresh", { method: "POST" }),
 
   updateSettings: (req: UpdateSettingsRequest) =>
-    fetchApi<SettingsResponse>('/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req)
-    })
+    fetchApi<SettingsResponse>("/settings", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req),
+    }),
 };
 
 // --- INTELLIGENCE & ANALYTICS API ---
 
 export const IntelligenceApi = {
-  getInsights: () => fetchApi<IntelligenceInsights>('/analytics/insights'),
+  getInsights: () => fetchApi<IntelligenceInsights>("/analytics/insights"),
 
-  getYouTubeStatus: () => fetchApi<any>('/connections/youtube'),
+  getYouTubeStatus: () => fetchApi<any>("/connections/youtube"),
 
-  fetchYouTubeAnalytics: () => fetchApi<any>('/analytics/fetch-youtube', { method: 'POST' })
+  fetchYouTubeAnalytics: () =>
+    fetchApi<any>("/analytics/fetch-youtube", { method: "POST" }),
 };
 
 /**
@@ -234,12 +247,12 @@ export const IntelligenceApi = {
  * Handles both absolute (http://...) and relative (/api) API_BASE values.
  */
 export function getWebSocketUrl(endpoint: string): string {
-  if (API_BASE.startsWith('http')) {
+  if (API_BASE.startsWith("http")) {
     // Absolute URL: just swap protocol
-    const wsBase = API_BASE.replace(/^http/, 'ws');
+    const wsBase = API_BASE.replace(/^http/, "ws");
     return `${wsBase}${endpoint}`;
   }
   // Relative URL: build from current window location
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return `${protocol}//${window.location.host}${API_BASE}${endpoint}`;
 }
