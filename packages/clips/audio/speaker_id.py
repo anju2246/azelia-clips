@@ -42,6 +42,13 @@ class SpeakerIdentifier:
         # result["samples_map"] → {"SPEAKER_00": "speaker_00_sample.wav"}
     """
 
+    # After diarize() runs, this maps each speaker label produced in the
+    # last call to that cluster's centroid embedding (192-D L2-normalized).
+    # Used by the pipeline to:
+    # - persist episode-level voice fingerprints at preflight
+    # - match per-clip local speakers back to the saved global identities
+    last_centroids: dict[str, "np.ndarray"]
+
     def __init__(
         self,
         num_speakers: int | None = 2,
@@ -60,6 +67,7 @@ class SpeakerIdentifier:
         self.min_speakers = min_speakers
         self.max_speakers = max_speakers
         self._encoder = None  # lazy-loaded
+        self.last_centroids = {}
 
     # ------------------------------------------------------------------
     # Model loading
@@ -198,6 +206,24 @@ class SpeakerIdentifier:
                 cluster_order.append(int(lbl))
         cluster_to_speaker = {c: f"SPEAKER_{i:02d}" for i, c in enumerate(cluster_order)}
 
+        # Stash each speaker's centroid embedding so callers can persist
+        # them (preflight) or compare against them later (per-clip
+        # global-relabel match). Centroids are computed as the L2-normalized
+        # mean of the embeddings that fell into each cluster.
+        # NOTE: _auto_select_k returns a Python list; coerce to np.array so
+        # `labels_arr == cid` does elementwise comparison, not list==int.
+        labels_arr = np.asarray(labels)
+        centroids: dict[str, np.ndarray] = {}
+        for cid in cluster_order:
+            members = emb_matrix[labels_arr == cid]
+            if len(members) == 0:
+                continue
+            norms = np.linalg.norm(members, axis=1, keepdims=True)
+            mean = (members / np.clip(norms, 1e-6, None)).mean(axis=0)
+            mean = mean / max(float(np.linalg.norm(mean)), 1e-6)
+            centroids[cluster_to_speaker[cid]] = mean
+        self.last_centroids = centroids
+
         raw: list[dict] = []
         for start_t, lbl in zip(window_starts, labels):
             raw.append(
@@ -212,6 +238,89 @@ class SpeakerIdentifier:
         if segments:
             segments[-1]["end"] = min(segments[-1]["end"], round(total_seconds, 3))
 
+        return segments
+
+    # ------------------------------------------------------------------
+    # Diarization against known centroids (relabel-only mode)
+    # ------------------------------------------------------------------
+
+    def diarize_against_centroids(
+        self,
+        audio_path: Path,
+        centroids: dict[str, "np.ndarray"],
+    ) -> list[dict]:
+        """Run diarization but skip KMeans — assign each window to the
+        closest provided centroid by cosine similarity.
+
+        Used by the per-clip pipeline when episode-level voice fingerprints
+        exist. Output segments are labeled with the centroid KEYS
+        (e.g. the episode-level SPEAKER_NN that the labels file
+        references), so the face tracker's locked speaker→face map
+        actually finds them. Without this step, per-clip ECAPA invents
+        fresh SPEAKER_NN IDs every run and the labels file can't match.
+        """
+        try:
+            import torch
+            import torchaudio  # type: ignore
+        except ImportError as exc:
+            raise ImportError(
+                "torchaudio is required for diarization.\n"
+                "Install: pip install torchaudio\n"
+                f"Original: {exc}"
+            ) from exc
+
+        import numpy as np
+
+        if not centroids:
+            return []
+
+        self._ensure_model()
+
+        waveform, sr = torchaudio.load(str(audio_path))
+        if sr != 16000:
+            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
+            waveform = resampler(waveform)
+            sr = 16000
+
+        total_samples = waveform.shape[1]
+        total_seconds = total_samples / sr
+        window_sec = 2.0
+        hop_sec = 1.0
+        window_samples = int(window_sec * sr)
+        hop_samples = int(hop_sec * sr)
+
+        # Pre-normalize centroids once.
+        cent_names = list(centroids.keys())
+        cent_arr = np.stack([centroids[k] for k in cent_names])
+        norms = np.linalg.norm(cent_arr, axis=1, keepdims=True)
+        cent_arr = cent_arr / np.clip(norms, 1e-6, None)
+
+        raw: list[dict] = []
+        start = 0
+        while start + window_samples <= total_samples:
+            chunk = waveform[:, start : start + window_samples]
+            with torch.no_grad():
+                emb = self._encoder.encode_batch(chunk).squeeze().cpu().numpy()
+            n = float(np.linalg.norm(emb))
+            if n < 1e-6:
+                start += hop_samples
+                continue
+            emb_n = emb / n
+            sims = cent_arr @ emb_n  # (K,)
+            best = int(np.argmax(sims))
+            raw.append({
+                "start": round(start / sr, 3),
+                "end": round(start / sr + window_sec, 3),
+                "speaker": cent_names[best],
+            })
+            start += hop_samples
+
+        if not raw:
+            return [{"start": 0.0, "end": total_seconds, "speaker": cent_names[0]}]
+
+        segments = _merge_segments(raw)
+        if segments:
+            segments[-1]["end"] = min(segments[-1]["end"], round(total_seconds, 3))
         return segments
 
     # ------------------------------------------------------------------

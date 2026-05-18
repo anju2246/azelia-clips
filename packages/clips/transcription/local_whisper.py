@@ -9,7 +9,11 @@ console = Console()
 class LocalWhisperSource(TranscriptionSource):
     """Transcribes audio using local Whisper (MLX or OpenAI)."""
 
-    def __init__(self, num_speakers_hint: Optional[int] = None):
+    def __init__(
+        self,
+        num_speakers_hint: Optional[int] = None,
+        voice_centroids: Optional[dict] = None,
+    ):
         """
         Args:
             num_speakers_hint: If set, force the ECAPA diarizer to use
@@ -21,8 +25,17 @@ class LocalWhisperSource(TranscriptionSource):
                 that gets mapped to the wrong face. The pipeline pins
                 this to 2 when slicing per-clip. Episode-level transcription
                 leaves it None so auto-detect handles panels of 3+.
+            voice_centroids: When set, the per-clip diarization skips
+                KMeans entirely and assigns each window to the closest
+                centroid by cosine similarity. The output segments are
+                labeled with the centroid KEYS (the stable episode-level
+                SPEAKER_NN that the user labeled in the modal) instead
+                of fresh per-clip IDs. Without this, the per-clip
+                speaker IDs collide with the labels file 50% of the
+                time and the camera follows the wrong person.
         """
         self.num_speakers_hint = num_speakers_hint
+        self.voice_centroids = voice_centroids
 
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Always valid for local execution."""
@@ -145,7 +158,13 @@ class LocalWhisperSource(TranscriptionSource):
                 assign_speakers_to_transcript,
             )
 
-            if self.num_speakers_hint is not None:
+            if self.voice_centroids:
+                console.print(
+                    f"[dim]Diarizing with ECAPA-TDNN against {len(self.voice_centroids)} "
+                    f"saved voice fingerprint(s) — labels are stable per episode.[/dim]"
+                )
+                identifier = SpeakerIdentifier()
+            elif self.num_speakers_hint is not None:
                 console.print(
                     f"[dim]Diarizing with ECAPA-TDNN (forced k={self.num_speakers_hint})…[/dim]"
                 )
@@ -165,7 +184,18 @@ class LocalWhisperSource(TranscriptionSource):
             with tempfile.TemporaryDirectory(prefix="azelia_diarize_") as tmpdir:
                 wav_path = Path(tmpdir) / "audio.wav"
                 SpeakerIdentifier._extract_audio(video_path, wav_path)
-                ecapa_segments = identifier.diarize(wav_path)
+                if self.voice_centroids:
+                    # Hydrate the dict into numpy arrays for cosine math.
+                    import numpy as np
+                    centroids_arr = {
+                        k: np.asarray(v, dtype=float)
+                        for k, v in self.voice_centroids.items()
+                    }
+                    ecapa_segments = identifier.diarize_against_centroids(
+                        wav_path, centroids_arr
+                    )
+                else:
+                    ecapa_segments = identifier.diarize(wav_path)
 
             # ECAPA returns plain dicts; assign_speakers_to_transcript()
             # expects objects with .start / .end / .speaker attributes
