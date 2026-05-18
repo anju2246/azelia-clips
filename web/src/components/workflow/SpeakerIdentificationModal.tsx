@@ -11,7 +11,9 @@ interface SpeakerIdentificationModalProps {
 
 interface SpeakerLabel {
   name: string;
-  face_id: string | null;
+  // Multi-select: the user can pick several thumbnails for the SAME
+  // person if the embedder split them across "phantom" identities.
+  face_ids: string[];
 }
 
 export const SpeakerIdentificationModal: React.FC<
@@ -32,14 +34,15 @@ export const SpeakerIdentificationModal: React.FC<
         if (cancelled) return;
         setFaces(data.faces);
         setSpeakers(data.speakers);
-        // Seed from existing labels if any.
+        // Seed from existing labels if any. Tolerate both new schema
+        // (face_ids array) and legacy schema (single face_id).
         const seed: Record<string, SpeakerLabel> = {};
         for (const spk of data.speakers) {
           const prior = data.existing_labels?.[spk];
-          seed[spk] = {
-            name: prior?.name || "",
-            face_id: prior?.face_id || null,
-          };
+          let face_ids: string[] = [];
+          if (prior?.face_ids?.length) face_ids = prior.face_ids;
+          else if (prior?.face_id) face_ids = [prior.face_id];
+          seed[spk] = { name: prior?.name || "", face_ids };
         }
         setLabels(seed);
       } catch (e: any) {
@@ -60,20 +63,36 @@ export const SpeakerIdentificationModal: React.FC<
     }));
   };
 
+  // Toggle a face thumbnail for a speaker. Clicking an unselected face
+  // adds it to that speaker's set; clicking a selected face removes it.
+  // Multi-select: same person split across thumbnails (phantoms) can be
+  // grouped under one speaker.
+  const toggleFace = (speakerId: string, faceId: string) => {
+    setLabels((prev) => {
+      const cur = prev[speakerId] || { name: "", face_ids: [] };
+      const has = cur.face_ids.includes(faceId);
+      const next = has
+        ? cur.face_ids.filter((f) => f !== faceId)
+        : [...cur.face_ids, faceId];
+      return { ...prev, [speakerId]: { ...cur, face_ids: next } };
+    });
+  };
+
   const canSubmit = speakers.every(
     (s) =>
-      (labels[s]?.name?.trim() || "").length > 0 && labels[s]?.face_id != null,
+      (labels[s]?.name?.trim() || "").length > 0 &&
+      (labels[s]?.face_ids?.length || 0) > 0,
   );
 
   const handleConfirm = async () => {
     if (!canSubmit) return;
     setSaving(true);
     try {
-      const payload: Record<string, { name: string; face_id: string }> = {};
+      const payload: Record<string, { name: string; face_ids: string[] }> = {};
       for (const s of speakers) {
         payload[s] = {
           name: labels[s].name.trim(),
-          face_id: labels[s].face_id!,
+          face_ids: labels[s].face_ids,
         };
       }
       await ClipsApi.identifySaveLabels(episodeNum, { labels: payload });
@@ -177,15 +196,20 @@ export const SpeakerIdentificationModal: React.FC<
                   </div>
 
                   <p className="text-xs text-zinc-500 mb-2">
-                    Pick the face that matches this voice:
+                    Pick every face that matches this voice. If the same
+                    person shows up split into multiple thumbnails (e.g.
+                    different angle/lighting), select all of them — they
+                    get treated as one identity.
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {faces.map((fid) => {
-                      const selected = labels[spk]?.face_id === fid;
+                      const selected = (labels[spk]?.face_ids || []).includes(
+                        fid,
+                      );
                       return (
                         <button
                           key={fid}
-                          onClick={() => updateLabel(spk, { face_id: fid })}
+                          onClick={() => toggleFace(spk, fid)}
                           className={`rounded-lg overflow-hidden border-2 transition-all cursor-pointer ${
                             selected
                               ? "border-brand-500 ring-2 ring-brand-500/30"

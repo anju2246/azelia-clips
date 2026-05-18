@@ -225,10 +225,13 @@ def detect_face_identities(
     cluster_ids: list[int] = [-1] * len(detections)
     centroids: list[np.ndarray] = []
     # FaceNet/VGGFace2 same-person cosine sim is typically 0.65-0.85;
-    # different-person sims sit around 0.3-0.55. 0.70 is the sweet spot
-    # that merges the same person across lighting variations without
-    # collapsing two distinct guests into one identity.
-    SIM_THRESHOLD = 0.70
+    # different-person sits around 0.2-0.5. 0.65 errs slightly toward
+    # under-merging — when a real person ends up split into 2-3
+    # clusters because of lighting/angle drift, the UI lets the user
+    # multi-select those phantoms onto the same speaker. Better than
+    # the opposite failure (two distinct people merged into one),
+    # which the user CAN'T fix from the modal.
+    SIM_THRESHOLD = 0.65
     for i, e in enumerate(normalized):
         if not centroids:
             centroids.append(e.copy())

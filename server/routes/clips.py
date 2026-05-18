@@ -680,17 +680,28 @@ async def identify_save_labels(
     if not isinstance(labels, dict) or not labels:
         raise HTTPException(status_code=400, detail="labels must be a non-empty dict")
 
-    # Light validation: each entry needs a name AND a face_id.
+    # Normalize each entry to {name, face_ids: [...]}.
+    # Backward compat: accept legacy single face_id by lifting into face_ids.
+    normalized: dict = {}
     for spk, info in labels.items():
         if not isinstance(info, dict):
             raise HTTPException(status_code=400, detail=f"{spk} is not an object")
-        if not info.get("name") or not info.get("face_id"):
+        name = (info.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail=f"{spk} missing name")
+        face_ids = info.get("face_ids")
+        if face_ids is None:
+            single = info.get("face_id")
+            face_ids = [single] if single else []
+        face_ids = [f for f in (face_ids or []) if f]
+        if not face_ids:
             raise HTTPException(
-                status_code=400, detail=f"{spk} missing name or face_id"
+                status_code=400, detail=f"{spk} must have at least one face_id"
             )
+        normalized[spk] = {"name": name, "face_ids": face_ids}
 
-    save_labels(folder, labels)
-    return {"status": "saved", "count": len(labels)}
+    save_labels(folder, normalized)
+    return {"status": "saved", "count": len(normalized)}
 
 
 @router.delete("/episodes/{episode_number}/identify/labels")

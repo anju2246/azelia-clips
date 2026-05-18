@@ -216,7 +216,10 @@ export const ClipsApi = {
     fetchApi<{
       labeled: boolean;
       skipped: boolean;
-      labels: Record<string, { name: string; face_id: string }> | null;
+      labels: Record<
+        string,
+        { name: string; face_ids?: string[]; face_id?: string }
+      > | null;
     }>(`/episodes/${episodeNum}/identify/status`),
 
   identifyPrepare: (episodeNum: number) =>
@@ -224,7 +227,10 @@ export const ClipsApi = {
       episode_id: string;
       faces: string[];
       speakers: string[];
-      existing_labels: Record<string, { name: string; face_id: string }> | null;
+      existing_labels: Record<
+        string,
+        { name: string; face_ids?: string[]; face_id?: string }
+      > | null;
     }>(`/episodes/${episodeNum}/identify/prepare`, { method: "POST" }),
 
   identifyFaceUrl: (episodeNum: number, faceId: string) =>
@@ -237,7 +243,7 @@ export const ClipsApi = {
     episodeNum: number,
     payload: {
       skipped?: boolean;
-      labels?: Record<string, { name: string; face_id: string }>;
+      labels?: Record<string, { name: string; face_ids: string[] }>;
     },
   ) =>
     fetchApi<{ status: string; count?: number }>(
