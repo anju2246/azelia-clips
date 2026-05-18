@@ -252,13 +252,13 @@ export const DashboardController: React.FC = () => {
   const handleResumeEpisode = async (episodeNum: number) => {
     guardWithApiKey(async () => {
       const jobId = `EP${String(episodeNum).padStart(3, "0")}-process`;
-      const loadingToast = toast.loading("Reanudando...");
+      const loadingToast = toast.loading("Resuming…");
       try {
         await ClipsApi.resumeJob(jobId);
-        toast.success("Reanudando procesamiento", { id: loadingToast });
+        toast.success("Resuming processing", { id: loadingToast });
         setAndPersistJobId(jobId);
       } catch (error: any) {
-        toast.error(error.message || "No se pudo reanudar", {
+        toast.error(error.message || "Could not resume", {
           id: loadingToast,
         });
       }

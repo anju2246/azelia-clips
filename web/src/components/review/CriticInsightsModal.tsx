@@ -108,12 +108,12 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
       updateDraft(k, { verdict, saving: false });
       toast.success(
         verdict === "agree"
-          ? "Feedback guardado — de acuerdo"
-          : "Feedback guardado — en desacuerdo",
+          ? "Feedback saved — agreed"
+          : "Feedback saved — disagreed",
       );
     } catch (e: any) {
       updateDraft(k, { saving: false });
-      toast.error(e?.message || "No se pudo guardar el feedback");
+      toast.error(e?.message || "Could not save feedback");
     }
   };
 
@@ -128,8 +128,8 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
             </h2>
             <p className="text-zinc-400 text-sm mt-1">
               {available
-                ? `${approved.length} aprobados · ${rejected.length} rechazados. Dejá feedback en cada uno — tu nota se guarda y mejora futuras curaciones.`
-                : emptyMessage || "No hay decisiones guardadas para este job."}
+                ? `${approved.length} approved · ${rejected.length} rejected. Leave feedback on each one — your notes are saved and improve future curations.`
+                : emptyMessage || "No saved decisions for this job."}
             </p>
           </div>
           <button
@@ -145,7 +145,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
           {loading ? (
             <div className="flex items-center justify-center py-12 text-zinc-500">
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
-              Cargando decisiones…
+              Loading decisions…
             </div>
           ) : (
             <>
@@ -154,12 +154,12 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                   <div className="flex items-center gap-2 mb-2">
                     <BookOpen className="w-4 h-4 text-indigo-300" />
                     <h3 className="text-indigo-200 text-sm font-semibold">
-                      Lo que el Critic ha aprendido ({learnings.length})
+                      What the Critic has learned ({learnings.length})
                     </h3>
                   </div>
                   <p className="text-xs text-indigo-200/70 mb-3">
-                    Reglas destiladas de tus notas pasadas. Se aplican en
-                    cada run.
+                    Rules distilled from your past notes. Applied on every
+                    run.
                   </p>
                   <ul className="space-y-2">
                     {learnings.map((L, i) => (
@@ -180,7 +180,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
           )}
           {!loading && rejected.length === 0 && available && (
             <div className="text-center py-8 text-zinc-400">
-              El Critic no rechazó ningún candidato en este run.
+              The Critic didn't reject any candidate in this run.
             </div>
           )}
           {!loading && rejected.length > 0 &&
@@ -201,7 +201,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                   <div className="flex justify-between items-start gap-3 mb-2">
                     <div className="flex-1 min-w-0">
                       <h3 className="text-white font-medium leading-snug">
-                        {d.title || "(sin título)"}
+                        {d.title || "(no title)"}
                       </h3>
                       {d.summary && (
                         <p className="text-zinc-400 text-sm mt-1">
@@ -217,10 +217,10 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
 
                   <div className="mt-3 p-3 bg-red-950/20 border border-red-900/40 rounded-lg">
                     <p className="text-red-300 text-xs font-semibold mb-1">
-                      Razón del Critic:
+                      Critic's reasoning:
                     </p>
                     <p className="text-red-200/90 text-sm">
-                      {d.reasoning || "(sin razón provista)"}
+                      {d.reasoning || "(no reason provided)"}
                     </p>
                   </div>
 
@@ -230,7 +230,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                       onChange={(e) =>
                         updateDraft(k, { note: e.target.value })
                       }
-                      placeholder="Explicá por qué estás de acuerdo o en desacuerdo. Esta nota se guarda y se usa para mejorar futuras curaciones."
+                      placeholder="Explain why you agree or disagree. This note is saved and used to improve future curations."
                       rows={2}
                       className="w-full px-3 py-2 bg-black/40 border border-zinc-800 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none resize-none"
                     />
@@ -247,7 +247,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                       }`}
                     >
                       <ThumbsUp className="w-3.5 h-3.5" />
-                      {isAgree ? "De acuerdo ✓" : "De acuerdo"}
+                      {isAgree ? "Agree ✓" : "Agree"}
                     </button>
                     <button
                       disabled={draft.saving}
@@ -259,7 +259,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                       }`}
                     >
                       <ThumbsDown className="w-3.5 h-3.5" />
-                      {isDisagree ? "En desacuerdo ✓" : "En desacuerdo"}
+                      {isDisagree ? "Disagree ✓" : "Disagree"}
                     </button>
                   </div>
                 </div>

@@ -162,7 +162,15 @@ def detect_face_identities(
             logger.error("facenet_pytorch not installed: %s", e)
             return {}
 
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        # Force CPU for the preflight pass. MPS adaptive pooling crashes on
+        # input sizes that don't divide evenly by the pool kernel
+        # (https://github.com/pytorch/pytorch/issues/96056), and MTCNN's
+        # P-Net hits exactly that path on arbitrary frame dimensions. The
+        # main FaceTracker happens to avoid it because it pre-resizes
+        # frames consistently; the preflight pulls raw ffmpeg frames which
+        # can be any size. Since this only runs once per episode (~30 s),
+        # CPU is fine.
+        device = "cpu"
         mtcnn = MTCNN(keep_all=True, device=device, post_process=False)
         embedder = InceptionResnetV1(pretrained="vggface2").eval().to(device)
 
