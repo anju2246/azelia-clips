@@ -735,23 +735,64 @@ class FaceTracker:
                 
         cap.release()
         
-        speaker_face_map = {}
-        # Mapping algorithm
+        # Build the full (speaker × face) motion matrix once. Greedy
+        # bijection on top — without this, the highest-motion face wins
+        # every speaker and they all end up tracking the same person.
+        # That's what produced "two speakers both mapped to FACE_01" on
+        # EP021 clip 8, with the close-up never pivoting.
+        motion_matrix: dict = {}
         for speaker in pyannote_speakers:
-            best_iid = None
-            best_motion = -1.0
-            
+            motion_matrix[speaker] = {}
             for iid in valid_identities:
                 scores = motion_scores[speaker][iid]
-                avg_motion = float(np.mean(scores)) if scores else 0.0
-                if avg_motion > best_motion:
-                    best_motion = avg_motion
+                motion_matrix[speaker][iid] = float(np.mean(scores)) if scores else 0.0
+
+        speaker_face_map = {}
+        remaining_speakers = list(pyannote_speakers)
+        remaining_faces = list(valid_identities)
+
+        # Step 1: greedy biyective match. Pick the strongest (speaker,
+        # face) pair, lock it in, remove BOTH from the pool, repeat.
+        # Equivalent to Hungarian assignment when speakers ≤ faces, which
+        # is the common podcast case.
+        while remaining_speakers and remaining_faces:
+            best_pair = None  # (speaker, face, motion)
+            for sp in remaining_speakers:
+                for fc in remaining_faces:
+                    m = motion_matrix[sp][fc]
+                    if best_pair is None or m > best_pair[2]:
+                        best_pair = (sp, fc, m)
+            if best_pair is None:
+                break
+            sp, fc, motion = best_pair
+            speaker_face_map[sp] = fc
+            remaining_speakers.remove(sp)
+            remaining_faces.remove(fc)
+            console.print(
+                f"[green]   ✓ {sp} mapped to {fc} (motion: {motion:.2f})[/green]"
+            )
+
+        # Step 2: if there are still unmatched speakers (more speakers
+        # than valid faces — happens with panels of 3 on a 2-face stream),
+        # fall back to per-speaker highest-motion across ALL faces. This
+        # can produce duplicate mappings, which is still better than
+        # leaving the speaker unmapped (the trajectory would then have
+        # gaps where the close-up freezes).
+        for sp in remaining_speakers:
+            best_iid = None
+            best_motion = -1.0
+            for iid in valid_identities:
+                m = motion_matrix[sp][iid]
+                if m > best_motion:
+                    best_motion = m
                     best_iid = iid
-                    
             if best_iid:
-                speaker_face_map[speaker] = best_iid
-                console.print(f"[green]   ✓ {speaker} mapped to {best_iid} (motion: {best_motion:.2f})[/green]")
-                
+                speaker_face_map[sp] = best_iid
+                console.print(
+                    f"[yellow]   ⚠ {sp} fell back to {best_iid} "
+                    f"(motion: {best_motion:.2f}, face already mapped)[/yellow]"
+                )
+
         return speaker_face_map
 
     # ─── Trajectory generation ───────────────────────────────────────────
