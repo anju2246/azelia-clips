@@ -5,7 +5,6 @@ import { LibraryView } from './LibraryView';
 import { LiveProcessingWidget } from './LiveProcessingWidget';
 import { MissingApiKeyModal } from './MissingApiKeyModal';
 import { YouTubeNudge } from '../analytics/YouTubeNudge';
-import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 import { CreditsStatusBanner } from './CreditsStatusBanner';
 import { FirstVisitHint } from './FirstVisitHint';
 import { ClipsApi, SettingsApi } from '../../lib/api';
@@ -28,7 +27,6 @@ async function fetchWithAuth(endpoint: string, options: RequestInit = {}) {
 const JOB_STORAGE_KEY = 'azelia_active_job_id';
 
 export const DashboardController: React.FC = () => {
-    const [userTier, setUserTier] = useState<string | null>(null);
     const [youtubeConnected, setYoutubeConnected] = useState<boolean>(false);
     const [orphanJob, setOrphanJob] = useState<{ id: string; message: string } | null>(null);
     const [activeJobId, setActiveJobId] = useState<string | null>(() => {
@@ -43,14 +41,6 @@ export const DashboardController: React.FC = () => {
     const [showApiKeyModal, setShowApiKeyModal] = useState(false);
     const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
     const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
-
-    // Fetch user tier to decide whether to show Pro upgrade card
-    useEffect(() => {
-        fetchWithAuth('/upgrade/status')
-            .then(r => r.ok ? r.json() : null)
-            .then(d => { if (d) setUserTier(d.tier); })
-            .catch(() => {});
-    }, []);
 
     // Fetch YouTube connection status so the Pro card doesn't nudge
     // users who already connected during onboarding.
@@ -277,18 +267,7 @@ export const DashboardController: React.FC = () => {
                   Pro is shown to free users. Once on Pro, YouTube nudge appears
                   until connected. Dismiss is session-only for YouTube so it keeps
                   showing on future visits until the user actually connects. */}
-            {userTier === 'free' ? (
-                <ProUpgradeCard
-                    onActivated={() => setUserTier('pro')}
-                    youtubeConnected={youtubeConnected}
-                    onYouTubeConnected={() => setYoutubeConnected(true)}
-                />
-            ) : !youtubeConnected ? (
-                <YouTubeNudge
-                    connected={youtubeConnected}
-                    onConnected={() => setYoutubeConnected(true)}
-                />
-            ) : null}
+            {/* Pro tier removed in v0.1.0 */}
 
             {/* 2. Alerts — credits banner only shows when something's wrong. */}
             <CreditsStatusBanner />
