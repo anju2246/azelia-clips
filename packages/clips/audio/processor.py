@@ -37,8 +37,9 @@ def process_video_with_audio_normalization(
         str(output_video)
     ]
     
+    from packages.core.process_registry import run_tracked
     try:
-        subprocess.run(cmd, capture_output=True, check=True)
+        run_tracked(cmd, capture_output=True, check=True)
         console.print(f"[green]✓[/green] Audio normalized")
     except subprocess.CalledProcessError as e:
         console.print(f"[red]Error normalizing audio: {e.stderr.decode() if e.stderr else str(e)}[/red]")
@@ -48,7 +49,7 @@ def process_video_with_audio_normalization(
             "-c:v", "copy", "-c:a", "copy",
             str(output_video)
         ]
-        subprocess.run(cmd_fallback, capture_output=True, check=True)
+        run_tracked(cmd_fallback, capture_output=True, check=True)
         console.print(f"[yellow]⚠[/yellow] Fallback to original audio due to error")
         
     return output_video

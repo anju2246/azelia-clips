@@ -132,18 +132,18 @@ def run_ffmpeg(
         subprocess.TimeoutExpired: If command exceeds timeout
         subprocess.CalledProcessError: If check=True and command fails
     """
+    # Routed through the per-job subprocess registry so /pause and /cancel
+    # can SIGTERM in-flight renders instantly. Outside a job context it
+    # behaves exactly like subprocess.run().
+    from packages.core.process_registry import run_tracked
     try:
-        result = subprocess.run(
+        return run_tracked(
             cmd,
+            timeout=timeout,
             capture_output=capture_output,
             text=True,
-            timeout=timeout,
+            check=check,
         )
-        if check and result.returncode != 0:
-            raise subprocess.CalledProcessError(
-                result.returncode, cmd, result.stdout, result.stderr
-            )
-        return result
     except subprocess.TimeoutExpired:
         console.print(f"[red]⚠️ FFmpeg timeout after {timeout}s[/red]")
         raise

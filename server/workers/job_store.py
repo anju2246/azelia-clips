@@ -252,6 +252,19 @@ class JobStore:
             )
             conn.commit()
             return result.rowcount > 0
+
+    def delete_job(self, job_id: str) -> bool:
+        """Hard-delete a job row. Used by /cancel to leave no trace.
+
+        Returns True if a row was deleted. After this, get_job() returns None
+        and the UI's orphan-job recovery banner won't surface the job.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            result = conn.execute(
+                "DELETE FROM jobs WHERE job_id = ?", (job_id,)
+            )
+            conn.commit()
+            return result.rowcount > 0
     
     def set_total_clips(self, job_id: str, total_clips: int):
         """Set total clips count (called after curation)."""
