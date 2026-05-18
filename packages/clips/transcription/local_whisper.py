@@ -86,35 +86,92 @@ class LocalWhisperSource(TranscriptionSource):
         )
 
     def _try_diarize(self, video_path: Path, transcript: Transcript) -> Transcript:
+        """Attempt speaker diarization with automatic backend selection.
+
+        Order of preference:
+        1. **pyannote** — if HF_TOKEN is set AND pyannote.audio is importable.
+           Best quality (detects overlap, fine-grained turns) but requires
+           the user to accept the model terms on HuggingFace.
+        2. **ECAPA-TDNN** (SpeechBrain) — fallback. 100% offline, no token,
+           Apache 2.0. Slightly lower quality but auto-detects 2-4 speakers
+           via silhouette score. This is the default for Azelia's MIT
+           local-first install.
+        3. **Skip** — if neither backend is available, the transcript keeps
+           its empty speaker fields and the face tracker falls back to the
+           largest-face heuristic.
+
+        Any exception during diarization is swallowed so transcription
+        always succeeds end-to-end.
         """
-        Attempt speaker diarization. Gracefully skips if:
-        - No HF_TOKEN configured
-        - pyannote.audio not installed
-        - Any runtime error
-        
-        The transcript is returned with or without speaker labels.
-        """
+        # ── 1. Try pyannote first if the user opted in via HF_TOKEN ──
         try:
             from packages.clips.transcription.diarizer import (
                 get_diarizer,
                 assign_speakers_to_transcript,
             )
 
-            # Singleton — pyannote's Pipeline is ~500 MB and ~10-20 s to
-            # deserialize. Per-clip re-load was the perceived "slow face
-            # tracking" symptom.
             diarizer = get_diarizer()
-            if not diarizer.is_available:
-                console.print(
-                    "[dim]Speaker diarization skipped (no HF_TOKEN set). "
-                    "Set HF_TOKEN in .env for speaker identification.[/dim]"
-                )
+            if diarizer.is_available:
+                console.print("[dim]Diarizing with pyannote (HF_TOKEN detected)…[/dim]")
+                diarization_segments = diarizer.diarize(video_path)
+                assign_speakers_to_transcript(transcript.segments, diarization_segments)
                 return transcript
-            
-            diarization_segments = diarizer.diarize(video_path)
-            assign_speakers_to_transcript(transcript.segments, diarization_segments)
-            
         except Exception as e:
-            console.print(f"[yellow]⚠ Diarization failed: {e}. Continuing without speaker labels.[/yellow]")
-        
+            console.print(
+                f"[yellow]⚠ pyannote failed ({type(e).__name__}: {str(e)[:80]}). "
+                "Falling back to ECAPA-TDNN.[/yellow]"
+            )
+
+        # ── 2. Fall back to ECAPA-TDNN (no HF_TOKEN needed) ──
+        try:
+            from packages.clips.audio.speaker_id import SpeakerIdentifier
+            from packages.clips.transcription.diarizer import (
+                DiarizationSegment,
+                assign_speakers_to_transcript,
+            )
+
+            console.print(
+                "[dim]Diarizing with ECAPA-TDNN (offline, auto-detect 2-4 speakers)…[/dim]"
+            )
+            # num_speakers=None → silhouette-based auto-detect across 2..max.
+            identifier = SpeakerIdentifier(
+                num_speakers=None, min_speakers=2, max_speakers=4
+            )
+            # ECAPA's run() also extracts per-speaker audio samples to disk —
+            # we only need the segment list here, so call diarize() directly
+            # via the same audio extraction path used by run().
+            import tempfile
+            with tempfile.TemporaryDirectory(prefix="azelia_diarize_") as tmpdir:
+                wav_path = Path(tmpdir) / "audio.wav"
+                SpeakerIdentifier._extract_audio(video_path, wav_path)
+                ecapa_segments = identifier.diarize(wav_path)
+
+            # ECAPA returns plain dicts; assign_speakers_to_transcript()
+            # expects objects with .start / .end / .speaker attributes
+            # (matching the DiarizationSegment dataclass shape).
+            diarization_segments = [
+                DiarizationSegment(
+                    start=s["start"], end=s["end"], speaker=s["speaker"]
+                )
+                for s in ecapa_segments
+            ]
+            assign_speakers_to_transcript(transcript.segments, diarization_segments)
+            unique = {s.speaker for s in diarization_segments}
+            console.print(
+                f"[green]✓[/green] ECAPA diarization: {len(unique)} speakers, "
+                f"{len(diarization_segments)} segments"
+            )
+            return transcript
+
+        except ImportError as e:
+            console.print(
+                "[dim]Speaker diarization skipped — neither pyannote (HF_TOKEN) "
+                f"nor ECAPA (SpeechBrain) is available: {e}[/dim]"
+            )
+        except Exception as e:
+            console.print(
+                f"[yellow]⚠ ECAPA diarization failed: {e}. "
+                "Continuing without speaker labels.[/yellow]"
+            )
+
         return transcript
