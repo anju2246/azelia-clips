@@ -42,8 +42,23 @@ class SpeakerIdentifier:
         # result["samples_map"] → {"SPEAKER_00": "speaker_00_sample.wav"}
     """
 
-    def __init__(self, num_speakers: int = 2) -> None:
+    def __init__(
+        self,
+        num_speakers: int | None = 2,
+        min_speakers: int = 2,
+        max_speakers: int = 4,
+    ) -> None:
+        """
+        Args:
+            num_speakers: Exact number of speakers. If None, auto-detect by
+                trying k=min_speakers..max_speakers and picking the one with
+                the best silhouette score.
+            min_speakers: Lower bound for auto-detect (default 2).
+            max_speakers: Upper bound for auto-detect (default 4).
+        """
         self.num_speakers = num_speakers
+        self.min_speakers = min_speakers
+        self.max_speakers = max_speakers
         self._encoder = None  # lazy-loaded
 
     # ------------------------------------------------------------------
@@ -115,6 +130,7 @@ class SpeakerIdentifier:
             import torch
             import torchaudio  # type: ignore
             from sklearn.cluster import KMeans  # type: ignore
+            from sklearn.metrics import silhouette_score  # type: ignore
         except ImportError as exc:
             raise ImportError(
                 "torchaudio and scikit-learn are required for diarization.\n"
@@ -159,9 +175,21 @@ class SpeakerIdentifier:
 
         emb_matrix = np.stack(embeddings)  # (N, 192)
 
-        n_clusters = min(self.num_speakers, len(embeddings))
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
-        labels = kmeans.fit_predict(emb_matrix)
+        # Cluster — either with the explicit num_speakers override or by
+        # auto-detecting via silhouette score across min..max candidates.
+        if self.num_speakers is not None:
+            n_clusters = min(self.num_speakers, len(embeddings))
+            kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init="auto")
+            labels = kmeans.fit_predict(emb_matrix)
+        else:
+            n_clusters, labels = _auto_select_k(
+                emb_matrix,
+                k_min=self.min_speakers,
+                k_max=min(self.max_speakers, len(embeddings) - 1),
+                silhouette_score=silhouette_score,
+                KMeans=KMeans,
+            )
+            logger.info("Auto-detected %d speaker(s)", n_clusters)
 
         # Map cluster indices to SPEAKER_XX labels (sorted by first appearance)
         cluster_order: list[int] = []
@@ -291,6 +319,57 @@ class SpeakerIdentifier:
 # ------------------------------------------------------------------
 # Helpers (module-level, not methods)
 # ------------------------------------------------------------------
+
+
+def _auto_select_k(
+    emb_matrix,
+    k_min: int,
+    k_max: int,
+    *,
+    silhouette_score,
+    KMeans,
+) -> tuple[int, list]:
+    """Try k_min..k_max clusters, return the (k, labels) with the best
+    silhouette score.
+
+    Silhouette score measures how well each point fits its cluster vs the
+    next-best cluster. Higher = cleaner separation. We use it as a cheap
+    proxy for "how many distinct voices are actually here". If k_max is
+    too low (single-speaker audio), we fall back to k=1.
+    """
+    import numpy as np
+
+    if k_min < 2:
+        k_min = 2
+    if k_max < k_min:
+        # Fewer windows than minimum k → degenerate, return single cluster.
+        return 1, [0] * len(emb_matrix)
+
+    best_k = k_min
+    best_labels = None
+    best_score = -1.0
+
+    for k in range(k_min, k_max + 1):
+        if k >= len(emb_matrix):
+            break
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init="auto")
+        labels = kmeans.fit_predict(emb_matrix)
+        if len(set(labels)) < 2:
+            continue
+        score = float(silhouette_score(emb_matrix, labels, metric="cosine"))
+        logger.info("  k=%d → silhouette=%.4f", k, score)
+        if score > best_score:
+            best_score = score
+            best_k = k
+            best_labels = labels
+
+    if best_labels is None:
+        # All candidates collapsed → fall back to k_min with default labels.
+        kmeans = KMeans(n_clusters=k_min, random_state=42, n_init="auto")
+        best_labels = kmeans.fit_predict(emb_matrix)
+        best_k = k_min
+
+    return best_k, list(best_labels)
 
 
 def _merge_segments(raw: list[dict]) -> list[dict]:
