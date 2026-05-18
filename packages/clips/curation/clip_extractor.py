@@ -90,7 +90,8 @@ class ClipExtractor:
             str(output_path),
         ]
 
-        result = subprocess.run(
+        from packages.core.process_registry import run_tracked
+        result = run_tracked(
             cmd,
             capture_output=True,
             text=True,

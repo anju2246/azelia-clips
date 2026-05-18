@@ -191,7 +191,8 @@ class VideoReframer:
         # Remove empty args
         cmd = [c for c in cmd if c]
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        from packages.core.process_registry import run_tracked
+        result = run_tracked(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg crop failed: {result.stderr[-500:]}")
     
@@ -344,9 +345,10 @@ def reframe_video(
             str(wide_path)
         ]
         
+        from packages.core.process_registry import run_tracked
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as p:
             p.add_task("Encoding wide shot...", total=None)
-            wide_result = subprocess.run(cmd_wide, capture_output=True, text=True)
+            wide_result = run_tracked(cmd_wide, capture_output=True, text=True)
         
         if wide_result.returncode != 0:
             console.print(f"[red]Wide shot encoding failed[/red]")
@@ -386,7 +388,7 @@ def reframe_video(
         
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as p:
             p.add_task("Stacking videos...", total=None)
-            result = subprocess.run(cmd_stack, capture_output=True, text=True)
+            result = run_tracked(cmd_stack, capture_output=True, text=True)
         
         # TempFileManager handles cleanup automatically - no need for manual unlink
         

@@ -573,30 +573,82 @@ async def restore_clip(job_id: str, filename: str, user: User = Depends(require_
 
 @router.post("/jobs/{job_id}/cancel")
 async def cancel_job(job_id: str, user: User = Depends(require_auth)):
-    """Cancel a running job. The pipeline stops at the next clip boundary."""
+    """Cancel a running job and wipe its workspace.
+
+    Library jobs (id starts with EPNNN-): we kill in-flight ffmpeg, drop the
+    JobStore row and clear curation.json so the next "Process" starts fresh.
+    We do NOT delete the clips already rendered to the user's drive — those
+    are theirs to keep (use the "Reset / start fresh" button for full wipe).
+
+    Upload jobs (UUID id): full wipe — kill ffmpeg + delete the job folder
+    under DATA_DIR + drop the JobStore row. "As if nothing happened."
+    """
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status not in ("processing", "pending", "paused", "resuming"):
         raise HTTPException(status_code=400, detail=f"Job is not running (status: {job.status})")
+
+    # 1. Tell the pipeline to stop at the next checkpoint.
     if not store.cancel_job(job_id):
         raise HTTPException(status_code=400, detail="Could not cancel job")
+
+    # 2. Set the abort_event so the pipeline returns at the next clip boundary.
     try:
         from server.dependencies import get_abort_event
         get_abort_event(job_id).set()
     except Exception:
         pass
-    return {"status": "cancelled", "job_id": job_id}
+
+    # 3. Kill any in-flight ffmpeg subprocesses immediately. The pipeline's
+    #    per-clip try/except absorbs the CalledProcessError; abort_event then
+    #    short-circuits the next iteration. Killed in ~0.5 s, not ~60 s.
+    killed = 0
+    try:
+        from packages.core.process_registry import kill_job_subprocesses
+        killed = kill_job_subprocesses(job_id)
+    except Exception:
+        pass
+
+    # 4. Wipe workspace. Upload jobs: nuke DATA_DIR/{job_id}. Library jobs:
+    #    only nuke curation.json so the next run starts fresh (we never touch
+    #    clips the user already rendered to their own drive).
+    is_library_job = job_id.upper().startswith("EP") and "-" in job_id
+    workspace = DATA_DIR / job_id
+    try:
+        if is_library_job:
+            curation = workspace / "curation.json"
+            if curation.exists():
+                curation.unlink()
+        else:
+            if workspace.exists():
+                shutil.rmtree(workspace, ignore_errors=True)
+    except Exception:
+        pass
+
+    # 5. Drop the row — UI treats this as "no active job", goes back to upload.
+    try:
+        store.delete_job(job_id)
+    except Exception:
+        pass
+
+    return {
+        "status": "cancelled",
+        "job_id": job_id,
+        "killed_subprocesses": killed,
+        "workspace_removed": not is_library_job,
+    }
 
 
 @router.post("/jobs/{job_id}/pause")
 async def pause_job(job_id: str, user: User = Depends(require_auth)):
-    """Pause a running job at the next clip boundary.
+    """Pause a running job INSTANTLY.
 
-    The pipeline checkpoints after each clip — pause may take up to the
-    length of the current clip render (~60s) to surface. To prevent
-    concurrent workers when /resume is called, we record a 'paused_at'
-    timestamp; resume refuses if the timestamp is too recent.
+    SIGTERMs every ffmpeg subprocess registered to the job (typically the
+    in-flight clip render), so the pipeline returns within ~0.5 s instead of
+    waiting for the current clip to finish (~60 s previously). Resume
+    re-renders the in-flight clip from scratch; already-checkpointed clips
+    are skipped via start_from_clip.
     """
     job = store.get_job(job_id)
     if not job:
@@ -610,10 +662,16 @@ async def pause_job(job_id: str, user: User = Depends(require_auth)):
         get_abort_event(job_id).set()
     except Exception:
         pass
+    killed = 0
+    try:
+        from packages.core.process_registry import kill_job_subprocesses
+        killed = kill_job_subprocesses(job_id)
+    except Exception:
+        pass
     return {
         "status": "paused",
         "job_id": job_id,
-        "note": "Pipeline may take up to ~60s to actually stop. Wait before pressing Resume.",
+        "killed_subprocesses": killed,
     }
 
 
@@ -636,10 +694,10 @@ async def resume_job_endpoint(
     if job.status != "paused":
         raise HTTPException(status_code=400, detail=f"Job is not paused (status: {job.status})")
 
-    # Race-condition guard: if pause was triggered very recently, the previous
-    # worker may still be mid-clip (ffmpeg/Whisper) and starting a second
-    # BatchProcessor now causes a SIGSEGV from concurrent MLX model usage.
-    # Refuse with 425 Too Early; UI can retry in a few seconds.
+    # Race-condition guard. /pause now SIGTERMs ffmpeg synchronously, so the
+    # old 60 s wait is overkill — but Whisper / MLX inference is not a killable
+    # subprocess and can still hold the worker thread for a few seconds after
+    # pause. Keep a small 5 s guard to avoid double-loading MLX models.
     try:
         from datetime import datetime, timezone
         updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00")) if job.updated_at else None
@@ -648,8 +706,8 @@ async def resume_job_endpoint(
                 updated = updated.replace(tzinfo=timezone.utc)
             now = datetime.now(timezone.utc)
             secs_since_pause = (now - updated).total_seconds()
-            if secs_since_pause < 60:
-                wait_secs = int(60 - secs_since_pause)
+            if secs_since_pause < 5:
+                wait_secs = max(1, int(5 - secs_since_pause))
                 raise HTTPException(
                     status_code=425,
                     detail=f"Pipeline still settling from pause. Try again in {wait_secs}s.",

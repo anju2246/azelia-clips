@@ -199,6 +199,14 @@ class BatchProcessor:
                 self.abort_event = get_abort_event(job_id)
             except Exception:
                 self.abort_event = None
+
+        # Register this thread as the active job so ffmpeg subprocesses spawned
+        # during clip rendering are killable via kill_job_subprocesses(job_id)
+        # from the /pause and /cancel endpoints — instant abort, not "wait for
+        # the current clip to finish".
+        if job_id:
+            from packages.core.process_registry import set_active_job
+            set_active_job(job_id)
         
         from packages.clips.transcription.transcriber import Transcript
         from packages.clips.curation.pipeline import CurationPipeline
@@ -228,12 +236,14 @@ class BatchProcessor:
         episode.clips_folder.mkdir(exist_ok=True)
         
         if store and job_id:
-            store.update_progress(job_id, 29, "Fase 3: Cargando transcripción local...")
-            
+            # Honest progress label — reflects which transcript source is being tried first.
+            store.update_progress(
+                job_id,
+                29,
+                "Fetching transcript from your Supabase…" if self.use_supabase else "Loading transcript…",
+            )
+
         # Step 1: Get transcript
-        # DUAL PIPELINE: Use Supabase for curation (with speaker timing)
-        #                WhisperX only for final clip transcription (word-level)
-        
         # If the user has their own Supabase configured for transcripts, try
         # that first. Falls through to local/WhisperX on any failure (not found,
         # DNS error, auth, anything) so a misconfigured/down Supabase never
@@ -246,8 +256,12 @@ class BatchProcessor:
                 transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
                 if transcript is None:
                     console.print("[yellow]   Not found in your Supabase — falling back to local.[/yellow]")
+                    if store and job_id:
+                        store.update_progress(job_id, 30, "Supabase miss — using local transcript")
             except Exception as e:
                 console.print(f"[yellow]   Supabase fetch failed ({type(e).__name__}: {str(e)[:80]}) — falling back to local.[/yellow]")
+                if store and job_id:
+                    store.update_progress(job_id, 30, "Supabase error — using local transcript")
                 transcript = None
 
         if transcript is None:
@@ -549,9 +563,19 @@ class BatchProcessor:
                 torch.mps.synchronize()
             
             gc.collect()
-        
+
+        # Clear the active-job marker so subprocesses spawned by unrelated
+        # work in this thread later (unlikely but possible) aren't registered
+        # under a job that has finished.
+        if job_id:
+            try:
+                from packages.core.process_registry import set_active_job
+                set_active_job(None)
+            except Exception:
+                pass
+
         return clips_generated
-    
+
     def _extract_clip(self, source: Path, output: Path, start: float, end: float) -> None:
         """Extract a clip segment using FFmpeg."""
         duration = end - start
