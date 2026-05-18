@@ -17,11 +17,45 @@ console = Console()
 # much feedback the user has logged. The first two limit the example COUNT;
 # the third caps any single field's length; the fourth is the hard char
 # ceiling on the whole memory block — if we hit it we stop adding examples,
-# never silently overflow.
+# never silently overflow. Learnings (long-term memory) have their own
+# separate cap in learning_synthesizer.py; the two blocks together stay
+# well under 6 kB even at saturation.
 _MAX_DISAGREEMENTS = 8
 _MAX_AGREEMENTS = 4
 _MAX_FIELD_CHARS = 220
 _MAX_MEMORY_CHARS = 2800
+
+
+def _format_learnings_block() -> str:
+    """Render the persistent learnings as a prompt section.
+
+    Distinct from raw feedback (which is short-term and consumed once),
+    learnings are the Critic's long-term memory — distilled rules that
+    stay in the prompt on every run. The synthesizer in
+    learning_synthesizer.py keeps the table bounded so this block is
+    always small.
+    """
+    try:
+        from server.workers.job_store import get_job_store
+        rows = get_job_store().get_critic_learnings()
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+
+    lines = [
+        "## Persistent Learnings (your accumulated rules from past user feedback)",
+        "",
+        "These are durable rules distilled from prior runs. Apply them as a baseline.",
+        "If raw feedback below contradicts a learning, weight the feedback (it's newer).",
+        "",
+    ]
+    for L in rows:
+        cat = L.get("category") or "general"
+        ev = L.get("evidence_count") or 1
+        text = (L.get("text") or "").strip()
+        lines.append(f"- [{cat} · evidence={ev}] {text}")
+    return "\n".join(lines)
 
 
 def _trunc(text: str | None, max_chars: int = _MAX_FIELD_CHARS) -> str:
@@ -190,18 +224,23 @@ class CriticAgent:
         try:
             from packages.core.taxonomy import language_label as _lang_label
 
-            # Pull unconsumed feedback. `feedback_ids` are the rows actually
-            # included in the prompt — we mark exactly those as consumed
-            # ONLY after the LLM call succeeds. If the call errors out or
-            # we hit the fallback path, the feedback stays unconsumed and
-            # will be tried again next run.
+            # Two memory layers, concatenated:
+            #   1. Persistent learnings — distilled rules from prior
+            #      synthesis runs, always shown.
+            #   2. New unconsumed feedback — shown verbatim exactly once.
+            # The synthesizer (triggered after this call succeeds) folds
+            # the consumed feedback into learnings, then the raw notes can
+            # safely fade.
+            learnings_block = _format_learnings_block()
             feedback_memory, feedback_ids = _format_feedback_memory()
+            memory_block = "\n\n".join(b for b in (learnings_block, feedback_memory) if b)
+
             formatted_system_prompt = CRITIC_SYSTEM.format(
                 min_duration=min_duration,
                 max_duration=max_duration,
                 podcast_context=config.get_podcast_context_block(),
                 output_language=_lang_label(config.language),
-                user_feedback_memory=feedback_memory,
+                user_feedback_memory=memory_block,
             )
             
             response_raw = self._llm.chat(
@@ -231,14 +270,38 @@ class CriticAgent:
             if feedback_ids:
                 try:
                     from server.workers.job_store import get_job_store
-                    marked = get_job_store().mark_critic_feedback_consumed(feedback_ids)
+                    store = get_job_store()
+                    marked = store.mark_critic_feedback_consumed(feedback_ids)
                     if marked:
                         console.print(
                             f"[dim]   Marked {marked} feedback note(s) as consumed.[/dim]"
                         )
+
+                    # Synthesize the just-consumed feedback into the
+                    # durable learnings table. One extra LLM call per run
+                    # that had consumable feedback — acceptable cost in
+                    # exchange for actual Critic improvement over time.
+                    # If the call fails the learnings stay as-is; the
+                    # raw feedback is gone for this run but will still
+                    # have influenced THIS Critic call.
+                    consumed_rows = [
+                        r for r in store.get_all_critic_feedback()
+                        if r.get("id") in set(feedback_ids)
+                    ]
+                    if consumed_rows:
+                        from packages.clips.curation.agents.learning_synthesizer import (
+                            synthesize,
+                        )
+                        new_learnings = synthesize(consumed_rows)
+                        if new_learnings is not None:
+                            n = store.replace_critic_learnings(new_learnings)
+                            console.print(
+                                f"[dim]   Synthesized {n} persistent learning(s) "
+                                f"from {len(consumed_rows)} note(s).[/dim]"
+                            )
                 except Exception as e:
                     console.print(
-                        f"[yellow]   Could not mark feedback consumed: {e}[/yellow]"
+                        f"[yellow]   Feedback / learning update skipped: {e}[/yellow]"
                     )
 
             # Surface rejected clips with reasoning. Otherwise a Critic that

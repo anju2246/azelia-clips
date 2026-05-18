@@ -210,6 +210,19 @@ export const ClipsApi = {
       workspace_removed?: boolean;
     }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
 
+  getCriticLearnings: () =>
+    fetchApi<{
+      count: number;
+      learnings: Array<{
+        id: number;
+        text: string;
+        category: string | null;
+        evidence_count: number;
+        created_at: string;
+        updated_at: string;
+      }>;
+    }>("/critic-learnings"),
+
   getCriticDecisions: (jobId: string) =>
     fetchApi<{
       episode_id: string;

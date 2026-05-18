@@ -547,6 +547,19 @@ async def get_critic_decisions(job_id: str, user: User = Depends(require_auth)):
     }
 
 
+@router.get("/critic-learnings")
+async def get_critic_learnings(user: User = Depends(require_auth)):
+    """Return the Critic's current long-term learnings.
+
+    These are distilled rules built up over time from the user's feedback
+    notes (via the LearningSynthesizer). Shown in the UI so the user can
+    see what the Critic has internalized; injected into the Critic's
+    system prompt on every run as persistent guidance.
+    """
+    learnings = store.get_critic_learnings()
+    return {"count": len(learnings), "learnings": learnings}
+
+
 @router.post("/critic-feedback")
 async def save_critic_feedback(payload: dict, user: User = Depends(require_auth)):
     """Save the user's verdict on a Critic rejection (or approval).
