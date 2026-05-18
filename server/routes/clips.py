@@ -954,20 +954,48 @@ async def list_episodes(user: User = Depends(require_auth)):
             return []
         from server.processor import BatchProcessor
         processor = BatchProcessor(external_drive_path=settings.podcast_dir)
-             
+
         episodes = processor.discover_episodes(start=1, end=9999)
-        
-        return [
-            EpisodeResponse(
-                id=f"EP{ep.episode_number:03d}",
-                number=ep.episode_number,
-                title=ep.episode_folder.name,
-                has_video=ep.video_path.exists(),
-                has_transcript=True if ep.transcript_path else False,
-                is_processed=((ep.clips_folder / "approved").exists() or (ep.clips_folder / "review").exists()),
-                path=str(ep.episode_folder)
-            ) for ep in episodes
-        ]
+
+        # Cross-reference with JobStore so "Done" reflects an actually
+        # completed job, not just the presence of a half-rendered folder
+        # left over from an in-flight or aborted run.
+        latest_jobs = store.get_latest_jobs_per_episode()
+
+        out: list[EpisodeResponse] = []
+        for ep in episodes:
+            ep_id = f"EP{ep.episode_number:03d}"
+            job = latest_jobs.get(ep_id)
+            has_clips_folder = (ep.clips_folder / "approved").exists() or (
+                ep.clips_folder / "review"
+            ).exists()
+
+            if job is not None:
+                # A run exists for this episode — trust JobStore.
+                is_done = job.status == "completed"
+                job_status = job.status
+                job_progress = job.progress
+            else:
+                # No run on record — fall back to disk so legacy episodes
+                # processed before JobStore tracking still surface as done.
+                is_done = has_clips_folder
+                job_status = None
+                job_progress = None
+
+            out.append(
+                EpisodeResponse(
+                    id=ep_id,
+                    number=ep.episode_number,
+                    title=ep.episode_folder.name,
+                    has_video=ep.video_path.exists(),
+                    has_transcript=True if ep.transcript_path else False,
+                    is_processed=is_done,
+                    path=str(ep.episode_folder),
+                    job_status=job_status,
+                    job_progress=job_progress,
+                )
+            )
+        return out
     except Exception as e:
         print(f"Error listing episodes: {e}")
         return []

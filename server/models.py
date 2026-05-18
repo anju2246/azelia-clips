@@ -90,3 +90,8 @@ class EpisodeResponse(BaseModel):
     has_transcript: bool
     is_processed: bool
     path: str
+    # Job state surfaced to the UI so the library card can show
+    # "Procesando" / "Pausado" instead of falsely claiming "Done"
+    # just because a half-rendered clips/ folder exists on disk.
+    job_status: str | None = None  # None | processing | paused | completed | failed | cancelled
+    job_progress: int | None = None

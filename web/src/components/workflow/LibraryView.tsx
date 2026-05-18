@@ -7,6 +7,9 @@ import {
   AlertCircle,
   FolderOpen,
   Search,
+  Loader2,
+  Pause,
+  XCircle,
 } from "lucide-react";
 import { ClipsApi, type EpisodeResponse } from "../../lib/api";
 import toast from "react-hot-toast";
@@ -15,22 +18,63 @@ interface LibraryViewProps {
   onProcessEpisode: (episodeNum: number) => void;
 }
 
+// 60s cache so navigating Dashboard ↔ Review doesn't re-scan the disk every time
+const EPISODES_CACHE_KEY = "az_episodes_cache_v1";
+const EPISODES_CACHE_TTL_MS = 60_000;
+
 export const LibraryView: React.FC<LibraryViewProps> = ({
   onProcessEpisode,
 }) => {
-  const [episodes, setEpisodes] = useState<EpisodeResponse[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  // Seed from sessionStorage if cache is fresh — avoids a fresh disk scan
+  // on every dashboard return (disk wake-up on USB drives is the slow path).
+  const [episodes, setEpisodes] = useState<EpisodeResponse[]>(() => {
+    try {
+      const raw = sessionStorage.getItem(EPISODES_CACHE_KEY);
+      if (!raw) return [];
+      const { at, data } = JSON.parse(raw);
+      if (Date.now() - at < EPISODES_CACHE_TTL_MS) return data;
+    } catch {
+      /* ignore */
+    }
+    return [];
+  });
+  const [isLoading, setIsLoading] = useState(episodes.length === 0);
   const [searchQuery, setSearchQuery] = useState("");
 
   useEffect(() => {
     loadEpisodes();
   }, []);
 
+  // Poll while any episode has an active job so the badge / button reflect
+  // live status instead of staying stuck at the cached value (paused, 96%,
+  // etc). We poll the cheap /episodes endpoint — it's a directory scan plus
+  // one SQL query against jobs.db, no model loads.
+  useEffect(() => {
+    const hasActive = episodes.some(
+      (e) =>
+        e.job_status === "processing" ||
+        e.job_status === "pending" ||
+        e.job_status === "resuming" ||
+        e.job_status === "paused",
+    );
+    if (!hasActive) return;
+    const id = setInterval(loadEpisodes, 4000);
+    return () => clearInterval(id);
+  }, [episodes]);
+
   const loadEpisodes = async () => {
-    setIsLoading(true);
+    if (episodes.length === 0) setIsLoading(true);
     try {
       const data = await ClipsApi.getEpisodes();
       setEpisodes(data);
+      try {
+        sessionStorage.setItem(
+          EPISODES_CACHE_KEY,
+          JSON.stringify({ at: Date.now(), data }),
+        );
+      } catch {
+        /* sessionStorage full or disabled — ignore */
+      }
     } catch (error: any) {
       toast.error("Failed to load library: " + error.message);
     } finally {
@@ -137,15 +181,49 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
                 <div className="bg-brand-500/10 text-brand-400 text-xs font-bold px-2 py-1 rounded-md">
                   EP {ep.number.toString().padStart(3, "0")}
                 </div>
-                {ep.is_processed ? (
-                  <div className="flex items-center gap-1 text-green-400 text-xs">
-                    <CheckCircle2 className="w-3 h-3" /> Processed
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-1 text-zinc-500 text-xs">
-                    <Clock className="w-3 h-3" /> Pending
-                  </div>
-                )}
+                {(() => {
+                  const s = ep.job_status;
+                  if (
+                    s === "processing" ||
+                    s === "pending" ||
+                    s === "resuming"
+                  ) {
+                    return (
+                      <div className="flex items-center gap-1 text-brand-400 text-xs">
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        {s === "resuming" ? "Resuming" : "Processing"}
+                        {ep.job_progress != null && ` ${ep.job_progress}%`}
+                      </div>
+                    );
+                  }
+                  if (s === "paused") {
+                    return (
+                      <div className="flex items-center gap-1 text-yellow-400 text-xs">
+                        <Pause className="w-3 h-3" /> Paused
+                        {ep.job_progress != null && ` ${ep.job_progress}%`}
+                      </div>
+                    );
+                  }
+                  if (s === "failed") {
+                    return (
+                      <div className="flex items-center gap-1 text-red-400 text-xs">
+                        <XCircle className="w-3 h-3" /> Failed
+                      </div>
+                    );
+                  }
+                  if (ep.is_processed) {
+                    return (
+                      <div className="flex items-center gap-1 text-green-400 text-xs">
+                        <CheckCircle2 className="w-3 h-3" /> Done
+                      </div>
+                    );
+                  }
+                  return (
+                    <div className="flex items-center gap-1 text-zinc-500 text-xs">
+                      <Clock className="w-3 h-3" /> Pending
+                    </div>
+                  );
+                })()}
               </div>
 
               <h3
@@ -179,19 +257,35 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               </div>
 
               <div className="mt-auto">
-                <button
-                  onClick={() => onProcessEpisode(ep.number)}
-                  disabled={!ep.has_video}
-                  className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
-                    !ep.has_video
-                      ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                      : ep.is_processed
-                        ? "bg-white/5 hover:bg-white/10 text-white border border-white/10"
-                        : "bg-brand-600 hover:bg-brand-500 text-white"
-                  }`}
-                >
-                  {ep.is_processed ? "Process Again" : "Extract Clips"}
-                </button>
+                {(() => {
+                  const s = ep.job_status;
+                  const isActive =
+                    s === "processing" ||
+                    s === "pending" ||
+                    s === "resuming" ||
+                    s === "paused";
+                  return (
+                    <button
+                      onClick={() => onProcessEpisode(ep.number)}
+                      disabled={!ep.has_video || isActive}
+                      className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
+                        !ep.has_video || isActive
+                          ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                          : ep.is_processed
+                            ? "bg-white/5 hover:bg-white/10 text-white border border-white/10"
+                            : "bg-brand-600 hover:bg-brand-500 text-white"
+                      }`}
+                    >
+                      {isActive
+                        ? s === "paused"
+                          ? "Paused — resume from widget"
+                          : "Processing…"
+                        : ep.is_processed
+                          ? "Process Again"
+                          : "Extract Clips"}
+                    </button>
+                  );
+                })()}
               </div>
             </div>
           ))}

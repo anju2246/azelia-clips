@@ -95,6 +95,16 @@ export interface EpisodeResponse {
   has_transcript: boolean;
   is_processed: boolean;
   path: string;
+  job_status?:
+    | "processing"
+    | "paused"
+    | "pending"
+    | "resuming"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | null;
+  job_progress?: number | null;
 }
 
 export interface IntelligenceInsights {
