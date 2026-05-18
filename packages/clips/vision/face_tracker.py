@@ -894,37 +894,72 @@ class FaceTracker:
         crop_points: list[tuple[float, int, int]] = []
         last_center_x = video_width // 2
         last_center_y = video_height // 2
-        
-        # Determine active speaker per frame
+        last_speaker_id: str | None = None
+
+        # Within a single speaker's segment the face moves around naturally —
+        # leaning, tilting, gesturing. Following every micro-shift makes the
+        # crop look robotic. Two-layer smoothing fixes it:
+        #
+        #   1. DEADZONE — while the face stays within ±DEADZONE_PX of the
+        #      current crop center, don't move at all.
+        #   2. EMA — once outside the deadzone, ease toward the target with
+        #      an exponential moving average so the camera glides rather
+        #      than teleports.
+        #
+        # Speaker changes BYPASS both: we snap immediately to the new face,
+        # because the swap is what the user actually wants to see. Lerping
+        # across a pivot would feel laggy.
+        DEADZONE_PX = 120
+        SMOOTH_ALPHA = 0.18
+
         for t in timestamps:
             active_speaker_id = None
-            
-            # Find the speaker active at this timestamp
-            # Sort to get deterministic behavior on overlapping segments
             active_segs = [s for s in speaker_segments if s["start"] <= t <= s["end"]]
             if active_segs:
-                # Pick the longest active segment to avoid brief overlaps overriding
                 active_seg = max(active_segs, key=lambda s: s["end"] - s["start"])
                 active_speaker_id = speaker_face_map.get(active_seg["speaker"])
 
-            # Active face center computation
             if active_speaker_id:
-                # Try to get exact position at this frame
                 current_faces = by_timestamp[t]
-                my_face = next((f for f in current_faces if f.identity_id == active_speaker_id), None)
+                my_face = next(
+                    (f for f in current_faces if f.identity_id == active_speaker_id),
+                    None,
+                )
                 if my_face:
-                    center_x, center_y = my_face.center_x, my_face.center_y
+                    target_x, target_y = my_face.center_x, my_face.center_y
                 else:
-                    center_x, center_y = identity_positions.get(active_speaker_id, (last_center_x, last_center_y))
-                    
-                last_center_x = center_x
-                last_center_y = center_y
-            else:
-                center_x = last_center_x
-                center_y = last_center_y
+                    target_x, target_y = identity_positions.get(
+                        active_speaker_id, (last_center_x, last_center_y)
+                    )
 
-            center_x = max(min_x, min(max_x, center_x))
-            crop_points.append((t, center_x, center_y))
+                speaker_changed = (
+                    last_speaker_id is not None
+                    and active_speaker_id != last_speaker_id
+                )
+                if speaker_changed or last_speaker_id is None:
+                    # Pivot — snap so the camera lands on the new speaker
+                    # exactly when their voice comes in.
+                    last_center_x = target_x
+                    last_center_y = target_y
+                elif abs(target_x - last_center_x) > DEADZONE_PX:
+                    # Real movement outside the deadzone — glide toward it.
+                    last_center_x = int(
+                        last_center_x * (1 - SMOOTH_ALPHA)
+                        + target_x * SMOOTH_ALPHA
+                    )
+                    last_center_y = int(
+                        last_center_y * (1 - SMOOTH_ALPHA)
+                        + target_y * SMOOTH_ALPHA
+                    )
+                # else: inside deadzone, hold last_center_x — the
+                # speaker is just being a person, no camera move needed.
+
+                last_speaker_id = active_speaker_id
+
+            # If no active speaker (gap between segments), freeze the
+            # last position rather than drifting.
+            center_x = max(min_x, min(max_x, last_center_x))
+            crop_points.append((t, center_x, last_center_y))
 
         return crop_points
 
