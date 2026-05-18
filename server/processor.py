@@ -28,37 +28,60 @@ class SingleVideoProcessor(BatchProcessor):
         )
         self.base_path.mkdir(parents=True, exist_ok=True)
         
-    def process_single(self, video_path: Path, job_id: str) -> int:
-        """Process a single video file."""
-        # Create a dummy EpisodeConfig
-        # First try to use the original file's directory if it is a symlink (which means it's a local file upload)
-        # If it's a symlink, os.path.realpath resolves to original location
+    def process_single(
+        self,
+        video_path: Path,
+        job_id: str,
+        start_from_clip: int = 0,
+    ) -> int:
+        """Process a single video file (upload-flow entry-point).
+
+        Mirrors the library-flow capabilities so pause/resume work identically:
+        - extracts episode_number from the folder name (regex EP\\d+) instead of
+          hard-coding 0, so Supabase lookups (`get_transcript_from_supabase("EP097")`)
+          succeed when the video lives in a real EP-numbered folder.
+        - accepts start_from_clip so resume can skip already-rendered clips.
+        """
+        # If video_path is a symlink (typical for /api/process-local), resolve
+        # to the real folder so clips render alongside the source video.
         try:
             original_path = Path(os.path.realpath(video_path))
             original_dir = original_path.parent
-            # Check if we have write access by testing with a fast creation access check
             if os.access(original_dir, os.W_OK):
                 episode_folder = original_dir
-                console.print(f"[green]✓ Local write access confirmed -> Exporting clips to {episode_folder}/clips[/green]")
+                console.print(
+                    f"[green]✓ Local write access confirmed -> Exporting clips to {episode_folder}/clips[/green]"
+                )
             else:
                 episode_folder = video_path.parent
-                console.print(f"[yellow]⚠️ No write access to {original_dir} -> Using job folder {episode_folder}[/yellow]")
-        except Exception as e:
+                console.print(
+                    f"[yellow]⚠️ No write access to {original_dir} -> Using job folder {episode_folder}[/yellow]"
+                )
+        except Exception:
             episode_folder = video_path.parent
-            console.print(f"[yellow]⚠️ Could not resolve original path -> Using job folder {episode_folder}[/yellow]")
-        
-        # Auto-detect existing transcript in the same folder as the video (or job folder as fallback)
+            console.print(
+                f"[yellow]⚠️ Could not resolve original path -> Using job folder {episode_folder}[/yellow]"
+            )
+
+        # Auto-detect existing transcript next to the video.
         transcript_path = video_path.parent / "transcript.json"
-        
+
+        # Extract real episode number from the folder so the same EP id used by
+        # the library flow reaches BatchProcessor (Supabase lookups, naming, etc).
+        import re
+        ep_match = re.search(r"EP(\d+)", episode_folder.name, re.IGNORECASE)
+        episode_number = int(ep_match.group(1)) if ep_match else 0
+
         config = EpisodeConfig(
-            episode_number=0, # Dummy number
+            episode_number=episode_number,
             episode_folder=episode_folder,
             video_path=video_path,
-            transcript_path=transcript_path if transcript_path.exists() else None
+            transcript_path=transcript_path if transcript_path.exists() else None,
         )
-        
-        console.print(f"[bold green]🚀 Starting single file processing for Job {job_id}[/bold green]")
-        
-        # Reuse the core logic from parent
-        # Note: parent process_episode writes to episode.clips_folder -> job_folder/clips
-        return self.process_episode(config, job_id=job_id)
+
+        console.print(
+            f"[bold green]🚀 Starting single file processing for Job {job_id}[/bold green]"
+        )
+        return self.process_episode(
+            config, job_id=job_id, start_from_clip=start_from_clip
+        )
