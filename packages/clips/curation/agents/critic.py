@@ -13,6 +13,86 @@ from packages.clips.curation.models import FinderCandidate, CriticResponse, Crit
 
 console = Console()
 
+def _format_feedback_memory(max_disagreements: int = 12, max_agreements: int = 6) -> str:
+    """Pull user feedback from the JobStore and turn it into a prompt block.
+
+    Strategy:
+    - Disagreements are the corrections — the user telling the Critic
+      "you were wrong to kill these". Prioritize them (more recent first,
+      up to max_disagreements).
+    - Agreements act as positive reinforcement — fewer needed.
+    - Empty notes are dropped; the textual note IS the signal. A verdict
+      without a note is just a click; we don't want to teach from clicks.
+
+    The Critic is told to apply these as soft guidance, not hard rules,
+    so it doesn't blindly reverse every decision similar to a single
+    user disagreement.
+    """
+    try:
+        from server.workers.job_store import get_job_store
+    except Exception:
+        return ""  # server module not on the path (e.g. running CLI-only)
+
+    try:
+        rows = get_job_store().get_all_critic_feedback()
+    except Exception:
+        return ""
+    if not rows:
+        return ""
+
+    disagreements = [
+        r for r in rows
+        if r.get("user_verdict") == "disagree" and (r.get("user_note") or "").strip()
+    ][:max_disagreements]
+    agreements = [
+        r for r in rows
+        if r.get("user_verdict") == "agree" and (r.get("user_note") or "").strip()
+    ][:max_agreements]
+
+    if not disagreements and not agreements:
+        return ""
+
+    parts: list[str] = [
+        "## User Feedback Memory",
+        "",
+        "The following are examples from PRIOR runs where the user reviewed your",
+        "decisions and explained whether you got them right or wrong. Treat them",
+        "as soft guidance, not hard rules — apply the same reasoning when you see",
+        "similar candidates today, but don't blindly reverse a decision just",
+        "because one prior case looked similar.",
+    ]
+
+    if disagreements:
+        parts.append("")
+        parts.append("### Cases where the user DISAGREED with your rejection")
+        parts.append("(you were too strict — be more permissive with similar clips)")
+        for r in disagreements:
+            title = (r.get("title") or "(untitled clip)").strip()
+            reasoning = (r.get("critic_reasoning") or "").strip()
+            note = (r.get("user_note") or "").strip()
+            ep = r.get("episode_id") or ""
+            parts.append(
+                f"- [{ep}] \"{title}\" — you rejected it saying: \"{reasoning}\". "
+                f"User said: \"{note}\""
+            )
+
+    if agreements:
+        parts.append("")
+        parts.append("### Cases where the user AGREED with your rejection")
+        parts.append("(you got it right — keep rejecting clips that match this pattern)")
+        for r in agreements:
+            title = (r.get("title") or "(untitled clip)").strip()
+            reasoning = (r.get("critic_reasoning") or "").strip()
+            note = (r.get("user_note") or "").strip()
+            ep = r.get("episode_id") or ""
+            parts.append(
+                f"- [{ep}] \"{title}\" — you rejected it saying: \"{reasoning}\". "
+                f"User confirmed: \"{note}\""
+            )
+
+    return "\n".join(parts)
+
+
 class CriticAgent:
     """
     Critic Agent: Evaluates and filters weak candidates proposed by the Finder.
@@ -68,6 +148,7 @@ class CriticAgent:
                 max_duration=max_duration,
                 podcast_context=config.get_podcast_context_block(),
                 output_language=_lang_label(config.language),
+                user_feedback_memory=_format_feedback_memory(),
             )
             
             response_raw = self._llm.chat(
