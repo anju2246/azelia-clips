@@ -78,8 +78,26 @@ class CriticAgent:
                 response_obj = CriticResponse(**parsed_dict)
             else:
                 response_obj = response_raw if isinstance(response_raw, CriticResponse) else CriticResponse(**json.loads(response_raw.model_dump_json()))
-                
-            return response_obj.approved_only
+
+            # Surface rejected clips with reasoning. Otherwise a Critic that
+            # eats 16/18 candidates looks like a silent bug — the user has
+            # no way to tell whether the Critic was right or just harsh.
+            approved = response_obj.approved_only
+            rejected = [c for c in response_obj.approved_clips if not c.approved]
+            if rejected:
+                console.print(
+                    f"[yellow]✗ Critic rejected {len(rejected)}/"
+                    f"{len(response_obj.approved_clips)} candidates:[/yellow]"
+                )
+                for i, c in enumerate(rejected, 1):
+                    dur = c.end_time - c.start_time
+                    title = (c.title or "(no title)")[:60]
+                    reason = (c.reasoning or "(no reason)")[:90]
+                    console.print(
+                        f"  [dim]{i:>2}. [{c.start_time:.0f}-{c.end_time:.0f}s "
+                        f"·{dur:.0f}s] {title} — {reason}[/dim]"
+                    )
+            return approved
             
         except Exception as e:
             console.print(f"[red]Failed to run CriticAgent: {e}[/red]")
