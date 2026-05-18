@@ -123,6 +123,20 @@ class JobStore:
                 CREATE INDEX IF NOT EXISTS idx_critic_feedback_episode
                 ON critic_feedback(episode_id)
             """)
+            # Migration: add consumed_at so each piece of feedback is fed to
+            # the Critic exactly once. Without this, the prompt keeps
+            # showing the same 12 'most recent' rows every run — repetition
+            # wastes tokens and doesn't reinforce new learnings. NULL =
+            # unseen by any Critic run yet. Re-submitting feedback for the
+            # same clip resets it to NULL (it's NEW feedback).
+            try:
+                conn.execute("ALTER TABLE critic_feedback ADD COLUMN consumed_at TEXT")
+            except sqlite3.OperationalError:
+                pass  # Column exists
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_critic_feedback_unconsumed
+                ON critic_feedback(consumed_at)
+            """)
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_status 
                 ON jobs(status)
@@ -300,16 +314,22 @@ class JobStore:
         """
         now = datetime.utcnow().isoformat()
         with sqlite3.connect(self.db_path) as conn:
+            # consumed_at is set to NULL both on INSERT and on UPDATE so the
+            # next Critic run treats this row as NEW. If the user re-opens
+            # the modal and tweaks an existing note, that's a fresh signal
+            # — we must not treat it as "already consumed".
             conn.execute(
                 """
                 INSERT INTO critic_feedback
                   (episode_id, start_time, end_time, title, summary,
-                   critic_reasoning, user_verdict, user_note, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   critic_reasoning, user_verdict, user_note, created_at,
+                   consumed_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
                 ON CONFLICT(episode_id, start_time, end_time) DO UPDATE SET
                   user_verdict = excluded.user_verdict,
                   user_note    = excluded.user_note,
-                  created_at   = excluded.created_at
+                  created_at   = excluded.created_at,
+                  consumed_at  = NULL
                 """,
                 (
                     episode_id,
@@ -348,6 +368,46 @@ class JobStore:
                 "SELECT * FROM critic_feedback ORDER BY created_at DESC"
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_unconsumed_critic_feedback(self, limit: int = 24) -> list[dict]:
+        """Rows the Critic has never been told about, newest first.
+
+        `limit` is a belt-and-suspenders cap in case the user logs a huge
+        backlog of feedback at once — the in-prompt formatter applies its
+        own per-bucket caps on top.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                """
+                SELECT * FROM critic_feedback
+                WHERE consumed_at IS NULL
+                ORDER BY created_at DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def mark_critic_feedback_consumed(self, row_ids: list[int]) -> int:
+        """Mark the given feedback rows as 'the Critic has seen this'.
+
+        Called by the Critic right after it successfully uses them in a
+        run, so the next run only sees feedback the user has added since.
+        Returns the number of rows updated.
+        """
+        if not row_ids:
+            return 0
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            placeholders = ",".join("?" * len(row_ids))
+            result = conn.execute(
+                f"UPDATE critic_feedback SET consumed_at = ? "
+                f"WHERE id IN ({placeholders}) AND consumed_at IS NULL",
+                (now, *row_ids),
+            )
+            conn.commit()
+            return result.rowcount
 
     def delete_job(self, job_id: str) -> bool:
         """Hard-delete a job row. Used by /cancel to leave no trace.
