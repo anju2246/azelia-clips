@@ -1154,13 +1154,26 @@ def _load_labeled_speaker_face_map_from_store(
     # Invert global→local so we can resolve label.face_id → local_face_id.
     global_to_local = {v: k for k, v in local_to_global.items()}
 
+    # Build a multi-membership lookup so any local face matching ANY
+    # of the speaker's mapped global faces resolves to the same speaker.
+    # Users can mark several phantom thumbnails (FACE_01, FACE_02, ...)
+    # as the same person, and we honor every one.
     speaker_face_map: dict[str, str] = {}
     for spk_id, info in labels.items():
         if not isinstance(info, dict):
             continue
-        target_global = info.get("face_id")
-        if target_global and target_global in global_to_local:
-            speaker_face_map[spk_id] = global_to_local[target_global]
+        face_ids = info.get("face_ids")
+        if face_ids is None:
+            single = info.get("face_id")
+            face_ids = [single] if single else []
+        for target_global in face_ids or []:
+            local = global_to_local.get(target_global)
+            if local is not None:
+                speaker_face_map[spk_id] = local
+                # The mouth-motion code expects a single best face per
+                # speaker — first match wins, others act as fallbacks
+                # if this one ever drops out (handled per-frame below).
+                break
 
     return speaker_face_map
 
