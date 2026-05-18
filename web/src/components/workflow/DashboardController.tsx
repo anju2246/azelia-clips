@@ -3,6 +3,7 @@ import { Loader2, Activity } from "lucide-react";
 import { UploadZone } from "./UploadZone";
 import { LibraryView } from "./LibraryView";
 import { LiveProcessingWidget } from "./LiveProcessingWidget";
+import { SpeakerIdentificationModal } from "./SpeakerIdentificationModal";
 import { MissingApiKeyModal } from "./MissingApiKeyModal";
 import { YouTubeNudge } from "../analytics/YouTubeNudge";
 import { CreditsStatusBanner } from "./CreditsStatusBanner";
@@ -46,6 +47,12 @@ export const DashboardController: React.FC = () => {
   const [showApiKeyModal, setShowApiKeyModal] = useState(false);
   const [hasApiKey, setHasApiKey] = useState<boolean | null>(null); // null = loading
   const [pendingAction, setPendingAction] = useState<(() => void) | null>(null);
+  // Speaker identification (L3) — modal shown before processing if the
+  // user hasn't already labeled this episode.
+  const [identifyEp, setIdentifyEp] = useState<{
+    episodeNum: number;
+    forceReset: boolean;
+  } | null>(null);
 
   // Fetch YouTube connection status so the Pro card doesn't nudge
   // users who already connected during onboarding.
@@ -194,22 +201,51 @@ export const DashboardController: React.FC = () => {
     }
   };
 
+  // Actually trigger the backend processing. Called after the user
+  // either labels speakers in the modal or skips it. force_reset wipes
+  // cached curation/clips when the user came in via "Process Again".
+  const launchProcess = async (episodeNum: number, forceReset: boolean) => {
+    const loadingToast = toast.loading("Starting episode processing...");
+    try {
+      const response = await ClipsApi.processEpisode(episodeNum, {
+        ...getPipelineDefaults(),
+        ...(forceReset ? { force_reset: true } : {}),
+      });
+      toast.success("Episode processing started!", { id: loadingToast });
+      setAndPersistJobId(response.id);
+    } catch (error: any) {
+      console.error(error);
+      toast.error(error.message || "Failed to process episode", {
+        id: loadingToast,
+      });
+    }
+  };
+
+  // Entry-point: before kicking off processing, gate on whether the
+  // user has already identified speakers for this episode. If not,
+  // open the L3 modal; otherwise go straight to render.
+  const ensureIdentifiedThenProcess = async (
+    episodeNum: number,
+    forceReset = false,
+  ) => {
+    try {
+      const status = await ClipsApi.identifyStatus(episodeNum);
+      if (status.labeled || status.skipped) {
+        await launchProcess(episodeNum, forceReset);
+      } else {
+        setIdentifyEp({ episodeNum, forceReset });
+      }
+    } catch (e: any) {
+      // If status fails (network etc.), fall back to direct launch so
+      // we never block the user on a broken pre-flight.
+      console.error("identifyStatus failed", e);
+      await launchProcess(episodeNum, forceReset);
+    }
+  };
+
   const handleProcessEpisode = async (episodeNum: number) => {
     guardWithApiKey(async () => {
-      const loadingToast = toast.loading("Starting episode processing...");
-      try {
-        const response = await ClipsApi.processEpisode(
-          episodeNum,
-          getPipelineDefaults(),
-        );
-        toast.success("Episode processing started!", { id: loadingToast });
-        setAndPersistJobId(response.id);
-      } catch (error: any) {
-        console.error(error);
-        toast.error(error.message || "Failed to process episode", {
-          id: loadingToast,
-        });
-      }
+      await ensureIdentifiedThenProcess(episodeNum, false);
     });
   };
 
@@ -231,20 +267,7 @@ export const DashboardController: React.FC = () => {
 
   const handleResetEpisode = async (episodeNum: number) => {
     guardWithApiKey(async () => {
-      const loadingToast = toast.loading("Starting fresh processing...");
-      try {
-        const response = await ClipsApi.processEpisode(episodeNum, {
-          ...getPipelineDefaults(),
-          force_reset: true,
-        });
-        toast.success("Processing from scratch!", { id: loadingToast });
-        setAndPersistJobId(response.id);
-      } catch (error: any) {
-        console.error(error);
-        toast.error(error.message || "Failed to process episode", {
-          id: loadingToast,
-        });
-      }
+      await ensureIdentifiedThenProcess(episodeNum, true);
     });
   };
 
@@ -398,6 +421,18 @@ export const DashboardController: React.FC = () => {
           }
         }}
       />
+
+      {identifyEp && (
+        <SpeakerIdentificationModal
+          episodeNum={identifyEp.episodeNum}
+          onClose={() => setIdentifyEp(null)}
+          onConfirm={() => {
+            const ep = identifyEp;
+            setIdentifyEp(null);
+            if (ep) launchProcess(ep.episodeNum, ep.forceReset);
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -210,6 +210,50 @@ export const ClipsApi = {
       workspace_removed?: boolean;
     }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
 
+  // ── Speaker identification (L3) ────────────────────────────────────
+
+  identifyStatus: (episodeNum: number) =>
+    fetchApi<{
+      labeled: boolean;
+      skipped: boolean;
+      labels: Record<string, { name: string; face_id: string }> | null;
+    }>(`/episodes/${episodeNum}/identify/status`),
+
+  identifyPrepare: (episodeNum: number) =>
+    fetchApi<{
+      episode_id: string;
+      faces: string[];
+      speakers: string[];
+      existing_labels: Record<string, { name: string; face_id: string }> | null;
+    }>(`/episodes/${episodeNum}/identify/prepare`, { method: "POST" }),
+
+  identifyFaceUrl: (episodeNum: number, faceId: string) =>
+    `/api/episodes/${episodeNum}/identify/face/${faceId}.jpg`,
+
+  identifyAudioUrl: (episodeNum: number, speakerId: string) =>
+    `/api/episodes/${episodeNum}/identify/audio/${speakerId}.wav`,
+
+  identifySaveLabels: (
+    episodeNum: number,
+    payload: {
+      skipped?: boolean;
+      labels?: Record<string, { name: string; face_id: string }>;
+    },
+  ) =>
+    fetchApi<{ status: string; count?: number }>(
+      `/episodes/${episodeNum}/identify/labels`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  identifyClearLabels: (episodeNum: number) =>
+    fetchApi<{ status: string }>(`/episodes/${episodeNum}/identify/labels`, {
+      method: "DELETE",
+    }),
+
   getCriticLearnings: () =>
     fetchApi<{
       count: number;

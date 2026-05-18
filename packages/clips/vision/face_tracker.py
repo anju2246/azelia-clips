@@ -808,6 +808,7 @@ class FaceTracker:
         video_height: int,
         speaker_segments: list[dict] | None = None,
         target_aspect: float = 9 / 16,
+        episode_folder: Path | str | None = None,
     ) -> list[tuple[float, int, int]]:
         """Generate crop trajectory based on active speaker mapping.
         
@@ -842,11 +843,24 @@ class FaceTracker:
         # Filter out segments with no speaker label (transcript segments)
         speaker_segments = [s for s in speaker_segments if s["speaker"]]
 
-        # Get active speaker mapping via mouth motion
-        speaker_face_map = self.map_speakers_via_mouth_motion(
-            video_path, detections, speaker_segments, start_time, end_time
+        # If the user labeled speakers↔faces at the episode level (L3),
+        # use that locked mapping instead of guessing via mouth motion.
+        # Falls through to mouth-motion if no labels, the user explicitly
+        # skipped, or face embeddings don't match strongly enough.
+        speaker_face_map = _load_labeled_speaker_face_map_from_store(
+            video_path, self.identity_store, speaker_segments,
+            episode_folder=episode_folder,
         )
-        
+        if speaker_face_map:
+            console.print(
+                f"[green]   ✓ Using saved labels for {len(speaker_face_map)} speaker(s)[/green]"
+            )
+        else:
+            # No labels (or user skipped) → mouth-motion mapping.
+            speaker_face_map = self.map_speakers_via_mouth_motion(
+                video_path, detections, speaker_segments, start_time, end_time
+            )
+
         if not speaker_face_map:
             console.print("[yellow]⚠ Mouth motion mapping failed, falling back to largest face tracking[/yellow]")
             return self.get_smooth_crop_trajectory(
@@ -1038,6 +1052,118 @@ class FaceTracker:
 
 
 # ─── Compatibility wrapper ───────────────────────────────────────────────────
+
+def _find_episode_folder(video_path: Path) -> Path | None:
+    """Walk up from a clip path to find the episode folder (the one
+    that contains `speaker_face_labels.json` and `.identification/`).
+    """
+    for c in (video_path.parent, video_path.parent.parent):
+        if (c / "speaker_face_labels.json").exists():
+            return c
+    return None
+
+
+def _load_labeled_speaker_face_map_from_store(
+    video_path: Path | str,
+    identity_store: "IdentityStore",
+    speaker_segments: list[dict],
+    episode_folder: Path | str | None = None,
+) -> dict[str, str]:
+    """Return a locked speaker→face mapping built from the user's L3 labels.
+
+    Returns {} if no labels exist, the user explicitly skipped, or the
+    per-clip face embeddings can't be matched confidently against the
+    saved episode-level identities. The caller then falls back to L2 or
+    mouth-motion guessing.
+
+    The match works in two stages:
+      1. Per-clip detections produce local FACE_XX identity clusters
+         with FaceNet embeddings stored on each FaceDetection.
+      2. We compare each local cluster's centroid against the episode's
+         saved face embeddings (face_embeddings.json from preflight).
+         A cosine-sim ≥ 0.55 wins; weaker matches are dropped.
+      3. The labels file says "SPEAKER_XX (episode-level) → name → face_id
+         (episode-level)". We map episode FACE_XX → matched local FACE_YY
+         and return {SPEAKER_XX: FACE_YY}.
+
+    Per-clip speakers may not match episode-level speaker IDs, which is
+    why we ALSO map per-clip speakers by majority match. For now (v1)
+    we assume per-clip speaker labels correspond 1:1 to episode-level
+    labels — true when the user uses Supabase transcripts with stable A/B
+    speakers, partially true with ECAPA-per-clip. Voice-embedding matching
+    is the proper fix (v2).
+    """
+    import json
+    from pathlib import Path as _Path
+    import numpy as np
+
+    vp = _Path(video_path)
+    if episode_folder is not None:
+        ep = _Path(episode_folder)
+    else:
+        ep = _find_episode_folder(vp)
+    if ep is None or not (ep / "speaker_face_labels.json").exists():
+        return {}
+    episode_folder = ep
+
+    labels_path = episode_folder / "speaker_face_labels.json"
+    try:
+        labels = json.loads(labels_path.read_text())
+    except Exception:
+        return {}
+    if labels.get("_skipped") or not labels:
+        return {}
+
+    embeddings_path = episode_folder / ".identification" / "face_embeddings.json"
+    if not embeddings_path.exists():
+        return {}
+    try:
+        saved_embs = {
+            k: np.asarray(v, dtype=float)
+            for k, v in json.loads(embeddings_path.read_text()).items()
+        }
+    except Exception:
+        return {}
+    if not saved_embs or not identity_store.identities:
+        return {}
+
+    # Match each local identity centroid against the saved embeddings.
+    # We use the prototype that IdentityStore already maintains as a
+    # running-average L2-normalized embedding — no need to recompute.
+    local_to_global: dict[str, str] = {}
+    for ident in identity_store.identities:
+        centroid = np.asarray(ident.embedding, dtype=float)
+        # Already normalized by IdentityStore, but renormalize defensively.
+        n = float(np.linalg.norm(centroid))
+        if n < 1e-6:
+            continue
+        centroid = centroid / n
+        best_global = None
+        best_sim = -1.0
+        for gid, gemb in saved_embs.items():
+            sim = float(np.dot(centroid, gemb))
+            if sim > best_sim:
+                best_sim = sim
+                best_global = gid
+        if best_global is not None and best_sim >= 0.55:
+            local_to_global[ident.face_id] = best_global
+
+    if not local_to_global:
+        return {}
+
+    # Invert global→local so we can resolve label.face_id → local_face_id.
+    global_to_local = {v: k for k, v in local_to_global.items()}
+
+    speaker_face_map: dict[str, str] = {}
+    for spk_id, info in labels.items():
+        if not isinstance(info, dict):
+            continue
+        target_global = info.get("face_id")
+        if target_global and target_global in global_to_local:
+            speaker_face_map[spk_id] = global_to_local[target_global]
+
+    return speaker_face_map
+
 
 def track_face(
     video_path: Path | str,

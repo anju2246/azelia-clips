@@ -547,6 +547,166 @@ async def get_critic_decisions(job_id: str, user: User = Depends(require_auth)):
     }
 
 
+@router.get("/episodes/{episode_number}/identify/status")
+async def identify_status(episode_number: int, user: User = Depends(require_auth)):
+    """Has the user already labeled speakers for this episode?
+
+    UI calls this before kicking off processing to decide whether to
+    show the speaker-identification modal or proceed straight to
+    rendering with the locked mapping.
+    """
+    from packages.clips.audio.identification import load_labels
+    folder = _episode_folder_for(episode_number)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    labels = load_labels(folder)
+    return {
+        "labeled": labels is not None and not labels.get("_skipped"),
+        "skipped": bool(labels and labels.get("_skipped")),
+        "labels": labels,
+    }
+
+
+@router.post("/episodes/{episode_number}/identify/prepare")
+async def identify_prepare(episode_number: int, user: User = Depends(require_auth)):
+    """Run the preflight: detect face thumbnails + extract per-speaker
+    audio samples. Returns a manifest with face/speaker IDs the UI
+    needs to populate the modal.
+
+    Synchronous on purpose — the modal blocks waiting for this. Costs
+    ~20-40 s on a 30 min episode (30 sampled frames + MTCNN + N short
+    ffmpeg cuts for audio samples).
+    """
+    from packages.clips.audio.identification import (
+        prepare_identification, load_labels,
+    )
+    folder = _episode_folder_for(episode_number)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    # Pull speaker segments from whichever transcript exists. Supabase
+    # transcripts already store speaker labels (A→SPEAKER_00 etc.);
+    # local transcripts get them from ECAPA via _try_diarize.
+    transcript_path = folder / "transcript.json"
+    segments: list[dict] = []
+    if transcript_path.exists():
+        try:
+            data = json.loads(transcript_path.read_text())
+            for s in data.get("segments", []):
+                if s.get("speaker"):
+                    segments.append({
+                        "start": float(s["start"]),
+                        "end": float(s["end"]),
+                        "speaker": s["speaker"],
+                    })
+        except Exception as e:
+            print(f"[identify] could not parse transcript: {e}")
+
+    try:
+        manifest = prepare_identification(folder, segments)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Preflight failed: {e}")
+
+    return {
+        "episode_id": f"EP{episode_number:03d}",
+        "faces": manifest["faces"],
+        "speakers": manifest["speakers"],
+        "existing_labels": load_labels(folder),
+    }
+
+
+@router.get("/episodes/{episode_number}/identify/face/{face_id}.jpg")
+async def identify_face_thumb(
+    episode_number: int, face_id: str, user: User = Depends(require_auth),
+):
+    """Serve the cropped face thumbnail for one identity."""
+    folder = _episode_folder_for(episode_number)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    safe = (folder / ".identification").resolve()
+    target = (safe / f"{face_id}.jpg").resolve()
+    if not target.is_relative_to(safe) or not target.exists():
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return FileResponse(target, media_type="image/jpeg")
+
+
+@router.get("/episodes/{episode_number}/identify/audio/{speaker_id}.wav")
+async def identify_audio_sample(
+    episode_number: int, speaker_id: str, user: User = Depends(require_auth),
+):
+    """Serve the speaker's audio sample (6-7 s WAV)."""
+    folder = _episode_folder_for(episode_number)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    safe = (folder / ".identification").resolve()
+    target = (safe / f"{speaker_id}.wav").resolve()
+    if not target.is_relative_to(safe) or not target.exists():
+        raise HTTPException(status_code=404, detail="Audio not found")
+    return FileResponse(target, media_type="audio/wav")
+
+
+@router.post("/episodes/{episode_number}/identify/labels")
+async def identify_save_labels(
+    episode_number: int,
+    payload: dict,
+    user: User = Depends(require_auth),
+):
+    """Persist the user's speaker↔face mapping.
+
+    Payload shape:
+        {
+          "skipped": false,
+          "labels": {
+            "SPEAKER_00": {"name": "Juan Pablo", "face_id": "FACE_01"},
+            "SPEAKER_01": {"name": "Santiago Cortés", "face_id": "FACE_00"}
+          }
+        }
+
+    `skipped=true` short-circuits L3 and tells the pipeline to use L2
+    (episode-level auto mapping) for this episode.
+    """
+    from packages.clips.audio.identification import save_labels
+    folder = _episode_folder_for(episode_number)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Episode not found")
+
+    if payload.get("skipped"):
+        save_labels(folder, {"_skipped": True})
+        return {"status": "skipped"}
+
+    labels = payload.get("labels") or {}
+    if not isinstance(labels, dict) or not labels:
+        raise HTTPException(status_code=400, detail="labels must be a non-empty dict")
+
+    # Light validation: each entry needs a name AND a face_id.
+    for spk, info in labels.items():
+        if not isinstance(info, dict):
+            raise HTTPException(status_code=400, detail=f"{spk} is not an object")
+        if not info.get("name") or not info.get("face_id"):
+            raise HTTPException(
+                status_code=400, detail=f"{spk} missing name or face_id"
+            )
+
+    save_labels(folder, labels)
+    return {"status": "saved", "count": len(labels)}
+
+
+@router.delete("/episodes/{episode_number}/identify/labels")
+async def identify_clear_labels(
+    episode_number: int, user: User = Depends(require_auth),
+):
+    """Wipe the saved labels so the modal shows again on next process."""
+    folder = _episode_folder_for(episode_number)
+    if folder is None:
+        raise HTTPException(status_code=404, detail="Episode not found")
+    path = folder / "speaker_face_labels.json"
+    if path.exists():
+        path.unlink()
+    return {"status": "cleared"}
+
+
 @router.get("/critic-learnings")
 async def get_critic_learnings(user: User = Depends(require_auth)):
     """Return the Critic's current long-term learnings.
