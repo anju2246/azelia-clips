@@ -267,10 +267,20 @@ async def get_jobs_history(user: User = Depends(require_auth)):
     sorted_jobs = sorted(jobs.values(), key=lambda j: j.created_at, reverse=True)
     
     for job in sorted_jobs:
-        # Check if clips actually exist before counting as processed
-        clips_dir = DATA_DIR / job.job_id / "clips"
-        has_approved = (clips_dir / "approved").exists() and any((clips_dir / "approved").iterdir())
-        has_review = (clips_dir / "review").exists() and any((clips_dir / "review").iterdir())
+        # Check if clips actually exist before counting as processed.
+        # Library jobs render into {podcast_dir}/EPNNN - .../clips/, NOT
+        # into DATA_DIR/{job_id}/clips/, so we need the resolver here.
+        clips_dir = _resolve_clips_dir(job.job_id, job.episode_id)
+        approved = clips_dir / "approved"
+        review = clips_dir / "review"
+        try:
+            has_approved = approved.exists() and any(approved.iterdir())
+        except (PermissionError, OSError):
+            has_approved = False
+        try:
+            has_review = review.exists() and any(review.iterdir())
+        except (PermissionError, OSError):
+            has_review = False
         
         # Determine format
         is_episode = job.episode_id.startswith("EP") and len(job.episode_id) == 5
@@ -315,6 +325,56 @@ def _load_curation(job_dir: Path) -> list:
     except Exception:
         return []
 
+
+# Cache of EP-number → episode folder. Library jobs render clips into the
+# user's own drive (`{podcast_dir}/EPNNN - …/clips/`), NOT under DATA_DIR,
+# so every clips endpoint needs to know where to look. Scanning podcast_dir
+# is cheap (one iterdir) but we cache anyway so /jobs/history with 100
+# episodes doesn't re-scan 100 times.
+_episode_folder_cache: dict[int, Path] = {}
+
+
+def _episode_folder_for(ep_num: int) -> Path | None:
+    cached = _episode_folder_cache.get(ep_num)
+    if cached and cached.exists():
+        return cached
+    try:
+        for folder in settings.podcast_dir.iterdir():
+            if not folder.is_dir():
+                continue
+            name = folder.name
+            if not name.upper().startswith(f"EP{ep_num:03d}"):
+                continue
+            _episode_folder_cache[ep_num] = folder
+            return folder
+    except (FileNotFoundError, OSError):
+        return None
+    return None
+
+
+def _resolve_clips_dir(job_id: str, episode_id: str | None = None) -> Path:
+    """Return the clips/ directory for a job, regardless of flow.
+
+    - Upload jobs (UUID): `DATA_DIR/{job_id}/clips`
+    - Library jobs (id starts with EPNNN- and episode is on disk): the
+      `clips/` folder inside the matching `{podcast_dir}/EPNNN - …/`
+      folder. Falls back to the DATA_DIR layout if discovery fails so
+      callers always get a valid Path.
+    """
+    default = DATA_DIR / job_id / "clips"
+    ep_id = (episode_id or "").upper()
+    if not ep_id.startswith("EP"):
+        # Try to parse from job_id (jobs are typically `EP024-process` etc.)
+        upper = job_id.upper()
+        if upper.startswith("EP"):
+            ep_id = upper.split("-")[0]
+    if ep_id.startswith("EP") and ep_id[2:].isdigit():
+        ep_num = int(ep_id[2:])
+        folder = _episode_folder_for(ep_num)
+        if folder is not None:
+            return folder / "clips"
+    return default
+
 @router.get("/jobs/{job_id}", response_model=JobResponse)
 async def get_job(job_id: str, user: User = Depends(require_auth)):
     """Get job status."""
@@ -322,12 +382,14 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     
-    # Collect generated clips
+    # Collect generated clips. For library jobs the clips_dir is on the
+    # user's drive (resolved from podcast_dir + EP folder); curation.json
+    # lives next to it. For upload jobs both live under DATA_DIR/{job_id}.
     clips = []
-    if job.status in ["processing", "completed"]:
-        job_dir = DATA_DIR / job_id
-        clips_dir = job_dir / "clips"
-        
+    if job.status in ["processing", "completed", "paused"]:
+        clips_dir = _resolve_clips_dir(job_id, job.episode_id)
+        job_dir = clips_dir.parent
+
         # Try to load curation metadata for richer clip info
         curation = _load_curation(job_dir)
         
@@ -344,9 +406,15 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
                 }
             return {"title": f"Clip {index}", "summary": "", "score": 0, "start_time": 0, "end_time": 0}
         
-        # Scan approved folder
+        # Scan approved folder. Skip AppleDouble shadow files (`._clip_XX.mp4`)
+        # that macOS creates on non-HFS drives — they have the same glob hit
+        # but are 4 KB metadata stubs, not real clips.
         if (clips_dir / "approved").exists():
-            for i, clip_file in enumerate(sorted((clips_dir / "approved").glob("*.mp4"))):
+            approved_files = [
+                p for p in sorted((clips_dir / "approved").glob("*.mp4"))
+                if not p.name.startswith("._")
+            ]
+            for i, clip_file in enumerate(approved_files):
                 # Extract clip number from filename (clip_01.mp4 -> 1)
                 try:
                     clip_num = int(clip_file.stem.split("_")[1])
@@ -367,10 +435,14 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
                     download_url=f"/api/clips/{job_id}/{clip_file.name}"
                 ))
         
-        # Scan review folder
+        # Scan review folder (same AppleDouble filter as above).
         if (clips_dir / "review").exists():
             base_id = len(clips)
-            for i, clip_file in enumerate(sorted((clips_dir / "review").glob("*.mp4"))):
+            review_files = [
+                p for p in sorted((clips_dir / "review").glob("*.mp4"))
+                if not p.name.startswith("._")
+            ]
+            for i, clip_file in enumerate(review_files):
                 try:
                     clip_num = int(clip_file.stem.split("_")[1])
                 except (IndexError, ValueError):
@@ -410,7 +482,10 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
 async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
     """List all rejected clips for a job, with age info."""
     import time
-    clips_dir = (DATA_DIR / job_id / "clips" / "rejected").resolve()
+    job = store.get_job(job_id)
+    clips_dir = (
+        _resolve_clips_dir(job_id, job.episode_id if job else None) / "rejected"
+    ).resolve()
     
     if not clips_dir.exists():
         return []
@@ -418,6 +493,8 @@ async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
     now = time.time()
     results = []
     for f in sorted(clips_dir.glob("*.mp4")):
+        if f.name.startswith("._"):
+            continue
         age_seconds = now - f.stat().st_mtime
         days_remaining = max(0, 30 - int(age_seconds / 86400))
         dur = _get_video_duration(f)
@@ -434,7 +511,8 @@ async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
 @router.get("/clips/{job_id}/{filename}")
 async def get_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Serve a generated clip."""
-    safe_dir = (DATA_DIR / job_id / "clips").resolve()
+    job = store.get_job(job_id)
+    safe_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     
     # Check approved folder
     path_approved = (safe_dir / "approved" / filename).resolve()
@@ -466,7 +544,8 @@ async def get_clip(job_id: str, filename: str, user: User = Depends(require_auth
 async def open_clip_location(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Open the local folder containing the clip (macOS)."""
     import subprocess
-    safe_dir = (DATA_DIR / job_id / "clips").resolve()
+    job = store.get_job(job_id)
+    safe_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     
     path_approved = (safe_dir / "approved" / filename).resolve()
     path_review = (safe_dir / "review" / filename).resolve()
@@ -491,7 +570,8 @@ async def open_clip_location(job_id: str, filename: str, user: User = Depends(re
 async def approve_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Approve a clip: move it from review/ to approved/."""
     import shutil
-    clips_dir = (DATA_DIR / job_id / "clips").resolve()
+    job = store.get_job(job_id)
+    clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     
     source = clips_dir / "review" / filename
     dest = clips_dir / "approved" / filename
@@ -517,7 +597,8 @@ async def approve_clip(job_id: str, filename: str, user: User = Depends(require_
 async def reject_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Reject a clip: move it to rejected/ (auto-deleted after 30 days)."""
     import shutil
-    clips_dir = (DATA_DIR / job_id / "clips").resolve()
+    job = store.get_job(job_id)
+    clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     rejected_dir = clips_dir / "rejected"
     rejected_dir.mkdir(parents=True, exist_ok=True)
     
@@ -548,7 +629,8 @@ async def reject_clip(job_id: str, filename: str, user: User = Depends(require_a
 async def restore_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Restore a rejected clip back to the review folder."""
     import shutil
-    clips_dir = (DATA_DIR / job_id / "clips").resolve()
+    job = store.get_job(job_id)
+    clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     source = clips_dir / "rejected" / filename
     
     if not source.exists():
