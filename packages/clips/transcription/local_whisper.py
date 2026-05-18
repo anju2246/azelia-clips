@@ -8,7 +8,22 @@ console = Console()
 
 class LocalWhisperSource(TranscriptionSource):
     """Transcribes audio using local Whisper (MLX or OpenAI)."""
-    
+
+    def __init__(self, num_speakers_hint: Optional[int] = None):
+        """
+        Args:
+            num_speakers_hint: If set, force the ECAPA diarizer to use
+                this exact number of speakers instead of silhouette-based
+                auto-detect. For PER-CLIP diarization (short 30-90s audio
+                slices) auto-detect is too aggressive — silhouette score
+                often picks k=3 on a 1-on-1 interview because of acoustic
+                drift across the clip, producing a phantom SPEAKER_NN
+                that gets mapped to the wrong face. The pipeline pins
+                this to 2 when slicing per-clip. Episode-level transcription
+                leaves it None so auto-detect handles panels of 3+.
+        """
+        self.num_speakers_hint = num_speakers_hint
+
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Always valid for local execution."""
         return True
@@ -130,13 +145,19 @@ class LocalWhisperSource(TranscriptionSource):
                 assign_speakers_to_transcript,
             )
 
-            console.print(
-                "[dim]Diarizing with ECAPA-TDNN (offline, auto-detect 2-4 speakers)…[/dim]"
-            )
-            # num_speakers=None → silhouette-based auto-detect across 2..max.
-            identifier = SpeakerIdentifier(
-                num_speakers=None, min_speakers=2, max_speakers=4
-            )
+            if self.num_speakers_hint is not None:
+                console.print(
+                    f"[dim]Diarizing with ECAPA-TDNN (forced k={self.num_speakers_hint})…[/dim]"
+                )
+                identifier = SpeakerIdentifier(num_speakers=self.num_speakers_hint)
+            else:
+                console.print(
+                    "[dim]Diarizing with ECAPA-TDNN (offline, auto-detect 2-4 speakers)…[/dim]"
+                )
+                # num_speakers=None → silhouette-based auto-detect across 2..max.
+                identifier = SpeakerIdentifier(
+                    num_speakers=None, min_speakers=2, max_speakers=4
+                )
             # ECAPA's run() also extracts per-speaker audio samples to disk —
             # we only need the segment list here, so call diarize() directly
             # via the same audio extraction path used by run().
