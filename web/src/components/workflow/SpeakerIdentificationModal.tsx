@@ -1,5 +1,14 @@
 import React, { useEffect, useState } from "react";
-import { X, Loader2, Mic, User, SkipForward } from "lucide-react";
+import {
+  X,
+  Loader2,
+  Mic,
+  User,
+  SkipForward,
+  Minus,
+  Plus,
+  Users,
+} from "lucide-react";
 import { ClipsApi } from "../../lib/api";
 import toast from "react-hot-toast";
 
@@ -19,42 +28,45 @@ interface SpeakerLabel {
 export const SpeakerIdentificationModal: React.FC<
   SpeakerIdentificationModalProps
 > = ({ episodeNum, onConfirm, onClose }) => {
-  const [loading, setLoading] = useState(true);
+  // Two-step flow:
+  //   "count" — ask the user how many speakers their podcast has
+  //             (single biggest accuracy lever; bypasses ECAPA auto-detect)
+  //   "match" — preflight runs, then user matches faces↔voices
+  const [step, setStep] = useState<"count" | "match">("count");
+  const [numSpeakers, setNumSpeakers] = useState<number>(2);
+  const [loading, setLoading] = useState(false);
   const [faces, setFaces] = useState<string[]>([]);
   const [speakers, setSpeakers] = useState<string[]>([]);
   const [labels, setLabels] = useState<Record<string, SpeakerLabel>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const data = await ClipsApi.identifyPrepare(episodeNum);
-        if (cancelled) return;
-        setFaces(data.faces);
-        setSpeakers(data.speakers);
-        // Seed from existing labels if any. Tolerate both new schema
-        // (face_ids array) and legacy schema (single face_id).
-        const seed: Record<string, SpeakerLabel> = {};
-        for (const spk of data.speakers) {
-          const prior = data.existing_labels?.[spk];
-          let face_ids: string[] = [];
-          if (prior?.face_ids?.length) face_ids = prior.face_ids;
-          else if (prior?.face_id) face_ids = [prior.face_id];
-          seed[spk] = { name: prior?.name || "", face_ids };
-        }
-        setLabels(seed);
-      } catch (e: any) {
-        if (!cancelled) setError(e?.message || "Preflight failed");
-      } finally {
-        if (!cancelled) setLoading(false);
+  // Fire the preflight only after the user confirms the speaker count.
+  const startPreflight = async () => {
+    setStep("match");
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await ClipsApi.identifyPrepare(episodeNum, numSpeakers);
+      setFaces(data.faces);
+      setSpeakers(data.speakers);
+      // Seed from existing labels if any. Tolerate both new schema
+      // (face_ids array) and legacy schema (single face_id).
+      const seed: Record<string, SpeakerLabel> = {};
+      for (const spk of data.speakers) {
+        const prior = data.existing_labels?.[spk];
+        let face_ids: string[] = [];
+        if (prior?.face_ids?.length) face_ids = prior.face_ids;
+        else if (prior?.face_id) face_ids = [prior.face_id];
+        seed[spk] = { name: prior?.name || "", face_ids };
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [episodeNum]);
+      setLabels(seed);
+    } catch (e: any) {
+      setError(e?.message || "Preflight failed");
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const updateLabel = (speakerId: string, patch: Partial<SpeakerLabel>) => {
     setLabels((prev) => ({
@@ -124,13 +136,14 @@ export const SpeakerIdentificationModal: React.FC<
         <div className="flex justify-between items-start p-6 border-b border-zinc-800">
           <div>
             <h2 className="text-xl font-semibold text-white">
-              Identify speakers — EP{String(episodeNum).padStart(3, "0")}
+              {step === "count"
+                ? `How many speakers? — EP${String(episodeNum).padStart(3, "0")}`
+                : `Identify speakers — EP${String(episodeNum).padStart(3, "0")}`}
             </h2>
             <p className="text-zinc-400 text-sm mt-1">
-              Listen to each voice, look at the detected faces, and match
-              them. The result is saved and used across the whole episode.
-              Skip to fall back to automatic detection — works most of the
-              time but occasionally swaps the close-up to the wrong person.
+              {step === "count"
+                ? "Telling us the exact count up front makes the diarization way more accurate — we skip auto-detection entirely and pin the model to your number."
+                : "Listen to each voice, look at the detected faces, and match them. The result is saved and used across the whole episode. Skip to fall back to automatic detection."}
             </p>
           </div>
           <button
@@ -142,7 +155,52 @@ export const SpeakerIdentificationModal: React.FC<
         </div>
 
         <div className="flex-1 overflow-y-auto p-6">
-          {loading ? (
+          {step === "count" ? (
+            <div className="flex flex-col items-center py-8 gap-6">
+              <Users className="w-10 h-10 text-brand-400" />
+              <p className="text-zinc-300 text-sm text-center max-w-md">
+                How many distinct speakers does this episode have? Include
+                the host. Most interview podcasts are 2; panels can be 3–5.
+              </p>
+              <div className="flex items-center gap-4 bg-zinc-950/60 border border-zinc-800 rounded-2xl px-3 py-2">
+                <button
+                  onClick={() =>
+                    setNumSpeakers((n) => Math.max(1, n - 1))
+                  }
+                  disabled={numSpeakers <= 1}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                    numSpeakers <= 1
+                      ? "text-zinc-700 cursor-not-allowed"
+                      : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                  }`}
+                  aria-label="Decrement"
+                >
+                  <Minus className="w-5 h-5" />
+                </button>
+                <span className="text-4xl font-mono font-semibold text-white tabular-nums w-16 text-center">
+                  {numSpeakers}
+                </span>
+                <button
+                  onClick={() =>
+                    setNumSpeakers((n) => Math.min(8, n + 1))
+                  }
+                  disabled={numSpeakers >= 8}
+                  className={`p-2 rounded-lg transition-colors cursor-pointer ${
+                    numSpeakers >= 8
+                      ? "text-zinc-700 cursor-not-allowed"
+                      : "text-zinc-300 hover:bg-zinc-800 hover:text-white"
+                  }`}
+                  aria-label="Increment"
+                >
+                  <Plus className="w-5 h-5" />
+                </button>
+              </div>
+              <p className="text-xs text-zinc-600">
+                Capped at 8 — beyond that the per-clip matching gets noisy
+                anyway.
+              </p>
+            </div>
+          ) : loading ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <Loader2 className="w-8 h-8 text-brand-400 animate-spin" />
               <p className="text-zinc-400">
@@ -246,18 +304,29 @@ export const SpeakerIdentificationModal: React.FC<
             <SkipForward className="w-4 h-4" />
             Skip — use auto detection
           </button>
-          <button
-            onClick={handleConfirm}
-            disabled={!canSubmit || saving}
-            className={`px-5 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${
-              canSubmit && !saving
-                ? "bg-brand-600 hover:bg-brand-500 text-white"
-                : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-            }`}
-          >
-            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            Save & process
-          </button>
+          {step === "count" ? (
+            <button
+              onClick={startPreflight}
+              disabled={saving}
+              className="px-5 py-2 rounded-xl text-sm font-medium bg-brand-600 hover:bg-brand-500 text-white transition-colors cursor-pointer flex items-center gap-2"
+            >
+              Continue — detect {numSpeakers} speaker
+              {numSpeakers === 1 ? "" : "s"}
+            </button>
+          ) : (
+            <button
+              onClick={handleConfirm}
+              disabled={!canSubmit || saving}
+              className={`px-5 py-2 rounded-xl text-sm font-medium transition-colors cursor-pointer flex items-center gap-2 ${
+                canSubmit && !saving
+                  ? "bg-brand-600 hover:bg-brand-500 text-white"
+                  : "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+              }`}
+            >
+              {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+              Save & process
+            </button>
+          )}
         </div>
       </div>
     </div>

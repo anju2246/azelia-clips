@@ -568,10 +568,20 @@ async def identify_status(episode_number: int, user: User = Depends(require_auth
 
 
 @router.post("/episodes/{episode_number}/identify/prepare")
-async def identify_prepare(episode_number: int, user: User = Depends(require_auth)):
+async def identify_prepare(
+    episode_number: int,
+    payload: dict | None = None,
+    user: User = Depends(require_auth),
+):
     """Run the preflight: detect face thumbnails + extract per-speaker
     audio samples. Returns a manifest with face/speaker IDs the UI
     needs to populate the modal.
+
+    Optional body: {"num_speakers": 2}. When provided, ECAPA is pinned
+    to that exact k (no silhouette auto-detect) AND the face cluster
+    top-N is capped so the modal doesn't show background extras. The
+    L3 modal asks for this count up front because it's the single
+    biggest accuracy lever.
 
     Synchronous on purpose — the modal blocks waiting for this. Costs
     ~20-40 s on a 30 min episode (30 sampled frames + MTCNN + N short
@@ -583,6 +593,12 @@ async def identify_prepare(episode_number: int, user: User = Depends(require_aut
     folder = _episode_folder_for(episode_number)
     if folder is None:
         raise HTTPException(status_code=404, detail="Episode not found")
+
+    num_speakers: int | None = None
+    if payload and isinstance(payload, dict):
+        n = payload.get("num_speakers")
+        if isinstance(n, int) and n > 0:
+            num_speakers = n
 
     # Pull speaker segments from whichever transcript exists. Supabase
     # transcripts already store speaker labels (A→SPEAKER_00 etc.);
@@ -603,7 +619,7 @@ async def identify_prepare(episode_number: int, user: User = Depends(require_aut
             print(f"[identify] could not parse transcript: {e}")
 
     try:
-        manifest = prepare_identification(folder, segments)
+        manifest = prepare_identification(folder, segments, num_speakers=num_speakers)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except Exception as e:
