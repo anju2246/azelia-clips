@@ -10,20 +10,39 @@ import {
   Loader2,
   Pause,
   XCircle,
+  RotateCcw,
+  X,
 } from "lucide-react";
 import { ClipsApi, type EpisodeResponse } from "../../lib/api";
 import toast from "react-hot-toast";
 
 interface LibraryViewProps {
   onProcessEpisode: (episodeNum: number) => void;
+  onResumeEpisode?: (episodeNum: number) => void;
+  onResetEpisode?: (episodeNum: number) => void;
 }
 
 // 60s cache so navigating Dashboard ↔ Review doesn't re-scan the disk every time
 const EPISODES_CACHE_KEY = "az_episodes_cache_v1";
 const EPISODES_CACHE_TTL_MS = 60_000;
 
+// Three-state button: extract (new), resume (paused/cancelled/failed),
+// process_again (completed — needs confirm). Mirrors the WIP backup so
+// users can recover interrupted jobs from the library without going
+// through the cancel/restart loop.
+type EpisodeAction = "extract" | "resume" | "process_again";
+
+function getEpisodeAction(ep: EpisodeResponse): EpisodeAction {
+  const s = ep.job_status;
+  if (s === "paused" || s === "cancelled" || s === "failed") return "resume";
+  if (ep.is_processed && (!s || s === "completed")) return "process_again";
+  return "extract";
+}
+
 export const LibraryView: React.FC<LibraryViewProps> = ({
   onProcessEpisode,
+  onResumeEpisode,
+  onResetEpisode,
 }) => {
   // Seed from sessionStorage if cache is fresh — avoids a fresh disk scan
   // on every dashboard return (disk wake-up on USB drives is the slow path).
@@ -40,6 +59,9 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
   });
   const [isLoading, setIsLoading] = useState(episodes.length === 0);
   const [searchQuery, setSearchQuery] = useState("");
+  const [confirmReset, setConfirmReset] = useState<EpisodeResponse | null>(
+    null,
+  );
 
   useEffect(() => {
     loadEpisodes();
@@ -259,36 +281,114 @@ export const LibraryView: React.FC<LibraryViewProps> = ({
               <div className="mt-auto">
                 {(() => {
                   const s = ep.job_status;
-                  const isActive =
+                  const isLive =
                     s === "processing" ||
                     s === "pending" ||
-                    s === "resuming" ||
-                    s === "paused";
+                    s === "resuming";
+                  if (isLive) {
+                    return (
+                      <button
+                        disabled
+                        className="w-full py-2.5 rounded-xl text-sm font-medium bg-zinc-800 text-zinc-500 cursor-not-allowed flex items-center justify-center gap-2"
+                      >
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Processing…
+                      </button>
+                    );
+                  }
+                  const action = getEpisodeAction(ep);
+                  if (action === "extract") {
+                    return (
+                      <button
+                        onClick={() => onProcessEpisode(ep.number)}
+                        disabled={!ep.has_video}
+                        className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
+                          !ep.has_video
+                            ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
+                            : "bg-brand-600 hover:bg-brand-500 text-white"
+                        }`}
+                      >
+                        Extract Clips
+                      </button>
+                    );
+                  }
+                  if (action === "resume") {
+                    return (
+                      <button
+                        onClick={() =>
+                          onResumeEpisode
+                            ? onResumeEpisode(ep.number)
+                            : onProcessEpisode(ep.number)
+                        }
+                        disabled={!ep.has_video}
+                        className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer bg-amber-600/20 hover:bg-amber-600/30 text-amber-300 border border-amber-500/30 flex items-center justify-center gap-2"
+                      >
+                        <Play className="w-3.5 h-3.5" />
+                        Resume
+                      </button>
+                    );
+                  }
+                  // process_again — confirm before wiping existing clips
                   return (
                     <button
-                      onClick={() => onProcessEpisode(ep.number)}
-                      disabled={!ep.has_video || isActive}
-                      className={`w-full py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer ${
-                        !ep.has_video || isActive
-                          ? "bg-zinc-800 text-zinc-500 cursor-not-allowed"
-                          : ep.is_processed
-                            ? "bg-white/5 hover:bg-white/10 text-white border border-white/10"
-                            : "bg-brand-600 hover:bg-brand-500 text-white"
-                      }`}
+                      onClick={() =>
+                        onResetEpisode ? setConfirmReset(ep) : onProcessEpisode(ep.number)
+                      }
+                      disabled={!ep.has_video}
+                      className="w-full py-2.5 rounded-xl text-sm font-medium transition-colors cursor-pointer bg-white/5 hover:bg-white/10 text-white border border-white/10 flex items-center justify-center gap-2"
                     >
-                      {isActive
-                        ? s === "paused"
-                          ? "Paused — resume from widget"
-                          : "Processing…"
-                        : ep.is_processed
-                          ? "Process Again"
-                          : "Extract Clips"}
+                      <RotateCcw className="w-3.5 h-3.5" />
+                      Process Again
                     </button>
                   );
                 })()}
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Confirm dialog for Process Again — wipes existing curation + clips */}
+      {confirmReset && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 max-w-md w-full">
+            <div className="flex justify-between items-start mb-4">
+              <div>
+                <h3 className="text-lg font-semibold text-white">
+                  Re-process {confirmReset.id}?
+                </h3>
+                <p className="text-zinc-400 text-sm mt-1">
+                  This will discard the existing curation and re-render
+                  every clip from scratch. Approved clips already on disk
+                  stay where they are.
+                </p>
+              </div>
+              <button
+                onClick={() => setConfirmReset(null)}
+                className="text-zinc-500 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setConfirmReset(null)}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-zinc-800 hover:bg-zinc-700 text-zinc-300 transition-colors cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  if (onResetEpisode) onResetEpisode(confirmReset.number);
+                  setConfirmReset(null);
+                }}
+                className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-red-600 hover:bg-red-500 text-white transition-colors cursor-pointer flex items-center justify-center gap-2"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                Re-process
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
