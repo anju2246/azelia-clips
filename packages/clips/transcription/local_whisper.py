@@ -86,23 +86,22 @@ class LocalWhisperSource(TranscriptionSource):
         )
 
     def _try_diarize(self, video_path: Path, transcript: Transcript) -> Transcript:
-        """Attempt speaker diarization with automatic backend selection.
+        """Run speaker diarization. Raises if both backends fail.
 
         Order of preference:
         1. **pyannote** — if HF_TOKEN is set AND pyannote.audio is importable.
-           Best quality (detects overlap, fine-grained turns) but requires
-           the user to accept the model terms on HuggingFace.
-        2. **ECAPA-TDNN** (SpeechBrain) — fallback. 100% offline, no token,
-           Apache 2.0. Slightly lower quality but auto-detects 2-4 speakers
-           via silhouette score. This is the default for Azelia's MIT
-           local-first install.
-        3. **Skip** — if neither backend is available, the transcript keeps
-           its empty speaker fields and the face tracker falls back to the
-           largest-face heuristic.
+           Best quality (detects overlap, fine-grained turns).
+        2. **ECAPA-TDNN** (SpeechBrain) — default. 100 % offline, no token,
+           Apache 2.0. Auto-detects 2-4 speakers via silhouette score.
 
-        Any exception during diarization is swallowed so transcription
-        always succeeds end-to-end.
+        There is NO third option: by design, the pipeline never runs the
+        face tracker with empty speaker_segments (which would force it to
+        fall back to largest-face and produce visibly worse results). If
+        neither backend can run, transcription fails fast with a clear
+        install message so the user knows what to fix.
         """
+        last_error: Exception | None = None
+
         # ── 1. Try pyannote first if the user opted in via HF_TOKEN ──
         try:
             from packages.clips.transcription.diarizer import (
@@ -117,6 +116,7 @@ class LocalWhisperSource(TranscriptionSource):
                 assign_speakers_to_transcript(transcript.segments, diarization_segments)
                 return transcript
         except Exception as e:
+            last_error = e
             console.print(
                 f"[yellow]⚠ pyannote failed ({type(e).__name__}: {str(e)[:80]}). "
                 "Falling back to ECAPA-TDNN.[/yellow]"
@@ -164,14 +164,19 @@ class LocalWhisperSource(TranscriptionSource):
             return transcript
 
         except ImportError as e:
-            console.print(
-                "[dim]Speaker diarization skipped — neither pyannote (HF_TOKEN) "
-                f"nor ECAPA (SpeechBrain) is available: {e}[/dim]"
-            )
+            # Fresh-install bug — speechbrain/sklearn missing. Surface it
+            # so the user runs `pip install -r requirements.txt` instead
+            # of silently shipping bad face tracking.
+            raise RuntimeError(
+                "Speaker diarization is unavailable: ECAPA-TDNN dependencies "
+                "are not installed. Run `pip install -r requirements.txt` to "
+                f"install speechbrain + scikit-learn. (Original error: {e})"
+            ) from e
         except Exception as e:
-            console.print(
-                f"[yellow]⚠ ECAPA diarization failed: {e}. "
-                "Continuing without speaker labels.[/yellow]"
-            )
-
-        return transcript
+            # Both backends failed at runtime — bubble up so face tracking
+            # never silently degrades to the largest-face heuristic.
+            raise RuntimeError(
+                f"Speaker diarization failed with both pyannote and ECAPA. "
+                f"pyannote error: {last_error}. "
+                f"ECAPA error: {type(e).__name__}: {e}"
+            ) from e
