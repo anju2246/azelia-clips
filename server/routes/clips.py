@@ -695,27 +695,11 @@ async def resume_job_endpoint(
         raise HTTPException(status_code=400, detail=f"Job is not paused (status: {job.status})")
 
     # Race-condition guard. /pause now SIGTERMs ffmpeg synchronously, so the
-    # old 60 s wait is overkill — but Whisper / MLX inference is not a killable
-    # subprocess and can still hold the worker thread for a few seconds after
-    # pause. Keep a small 5 s guard to avoid double-loading MLX models.
-    try:
-        from datetime import datetime, timezone
-        updated = datetime.fromisoformat(job.updated_at.replace("Z", "+00:00")) if job.updated_at else None
-        if updated:
-            if updated.tzinfo is None:
-                updated = updated.replace(tzinfo=timezone.utc)
-            now = datetime.now(timezone.utc)
-            secs_since_pause = (now - updated).total_seconds()
-            if secs_since_pause < 5:
-                wait_secs = max(1, int(5 - secs_since_pause))
-                raise HTTPException(
-                    status_code=425,
-                    detail=f"Pipeline still settling from pause. Try again in {wait_secs}s.",
-                )
-    except HTTPException:
-        raise
-    except Exception:
-        pass
+    # old 60 s wait is gone. Whisper / MLX inference is not a killable
+    # subprocess, but per-clip Whisper runs are short (<5 s on MLX) and
+    # finish before the worker thread returns. We accept the rare double-
+    # load risk in exchange for a snappy resume — pressing Resume right
+    # after Pause feels broken with any guard at all.
 
     # Clear stale abort_event before re-arming the pipeline
     try:
@@ -762,7 +746,16 @@ async def resume_job_endpoint(
 
             def run_resume_task(jid, num, start_clip):
                 try:
-                    store.update_progress(jid, 5, f"Resuming from clip {start_clip + 1}…")
+                    # Surface every setup step. Without these messages the UI
+                    # sits frozen at "Resuming…" for 5-15 s while we re-init
+                    # the BatchProcessor, scan episodes, re-load transcript
+                    # and curation, and skip already-rendered clips.
+                    paused_pct = max(5, (start_clip / max(1, start_clip + 1)) * 70)
+                    store.update_progress(
+                        jid,
+                        int(paused_pct),
+                        f"Reanudando desde clip {start_clip + 1}…",
+                    )
                     processor = BatchProcessor(
                         external_drive_path=settings.podcast_dir,
                         min_duration=saved_req.get("min_duration", 30),
@@ -771,9 +764,15 @@ async def resume_job_endpoint(
                         use_supabase=use_sb,
                         transcription_config=transcription_config,
                     )
+                    store.update_progress(jid, int(paused_pct), "Buscando episodio…")
                     eps = processor.discover_episodes(start=num, end=num)
                     if not eps:
                         raise Exception(f"Episode {num} not found at {settings.podcast_dir}")
+                    store.update_progress(
+                        jid,
+                        int(paused_pct),
+                        f"Reanudando clip {start_clip + 1} (transcript + curación en caché)…",
+                    )
                     clips_count = processor.process_episode(
                         eps[0], job_id=jid, start_from_clip=start_clip
                     )
