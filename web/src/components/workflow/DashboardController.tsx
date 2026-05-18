@@ -159,7 +159,8 @@ export const DashboardController: React.FC = () => {
     };
 
     check();
-    const interval = setInterval(check, 5000);
+    // Poll every 15s (was 5s) — orphan jobs are rare and 109 episodes is heavy disk I/O.
+    const interval = setInterval(check, 15000);
     return () => {
       cancelled = true;
       clearInterval(interval);
@@ -270,20 +271,47 @@ export const DashboardController: React.FC = () => {
             clearActiveJob();
           }}
           onCancel={async () => {
+            if (
+              !window.confirm(
+                "Cancel this job? In-flight clips will be killed and the workspace wiped. This cannot be undone.",
+              )
+            ) {
+              return;
+            }
+            const t = toast.loading("Cancelling job…");
             try {
               await ClipsApi.cancelJob(activeJobId);
-            } catch (_) {}
-            clearActiveJob();
+              toast.success("Job cancelled and workspace cleaned", { id: t });
+              clearActiveJob();
+            } catch (e: any) {
+              toast.error(e?.message || "Cancel failed", { id: t });
+            }
           }}
           onPause={async () => {
+            const t = toast.loading("Pausing pipeline…");
             try {
-              await ClipsApi.pauseJob(activeJobId);
-            } catch (_) {}
+              const r = await ClipsApi.pauseJob(activeJobId);
+              const killed = r?.killed_subprocesses ?? 0;
+              toast.success(
+                killed > 0
+                  ? `Paused — killed ${killed} in-flight render${killed === 1 ? "" : "s"}`
+                  : "Paused at next clip boundary",
+                { id: t },
+              );
+            } catch (e: any) {
+              toast.error(e?.message || "Pause failed", { id: t });
+            }
           }}
           onResume={async () => {
+            const t = toast.loading("Resuming…");
             try {
               await ClipsApi.resumeJob(activeJobId);
-            } catch (_) {}
+              toast.success("Resumed — picking up from the last checkpoint", {
+                id: t,
+              });
+            } catch (e: any) {
+              toast.error(e?.message || "Resume failed", { id: t });
+            }
           }}
         />
       )}

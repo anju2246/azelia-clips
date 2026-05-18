@@ -168,6 +168,26 @@ export const ClipsApi = {
   // Jobs
   getJob: (jobId: string) => fetchApi<JobResponse>(`/jobs/${jobId}`),
 
+  pauseJob: (jobId: string) =>
+    fetchApi<{ status: string; job_id: string; killed_subprocesses?: number }>(
+      `/jobs/${jobId}/pause`,
+      { method: "POST" },
+    ),
+
+  resumeJob: (jobId: string) =>
+    fetchApi<{ status: string; job_id: string; resuming_from_clip?: number }>(
+      `/jobs/${jobId}/resume`,
+      { method: "POST" },
+    ),
+
+  cancelJob: (jobId: string) =>
+    fetchApi<{
+      status: string;
+      job_id: string;
+      killed_subprocesses?: number;
+      workspace_removed?: boolean;
+    }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
+
   // File Upload Process (Fallback if no episodes folder)
   processVideo: (file: File, req: ProcessRequest) => {
     const formData = new FormData();
