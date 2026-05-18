@@ -77,10 +77,10 @@ export const SpeakerIdentificationModal: React.FC<
         };
       }
       await ClipsApi.identifySaveLabels(episodeNum, { labels: payload });
-      toast.success("Hablantes identificados — comenzando procesamiento");
+      toast.success("Speakers identified — starting processing");
       onConfirm();
     } catch (e: any) {
-      toast.error(e?.message || "No se pudo guardar");
+      toast.error(e?.message || "Could not save labels");
     } finally {
       setSaving(false);
     }
@@ -90,10 +90,10 @@ export const SpeakerIdentificationModal: React.FC<
     setSaving(true);
     try {
       await ClipsApi.identifySaveLabels(episodeNum, { skipped: true });
-      toast("Saltado — usaré detección automática (L2)", { icon: "⏭" });
+      toast("Skipped — using auto detection", { icon: "⏭" });
       onConfirm();
     } catch (e: any) {
-      toast.error(e?.message || "No se pudo saltar");
+      toast.error(e?.message || "Could not skip");
     } finally {
       setSaving(false);
     }
@@ -105,13 +105,13 @@ export const SpeakerIdentificationModal: React.FC<
         <div className="flex justify-between items-start p-6 border-b border-zinc-800">
           <div>
             <h2 className="text-xl font-semibold text-white">
-              Identificá los hablantes — EP{String(episodeNum).padStart(3, "0")}
+              Identify speakers — EP{String(episodeNum).padStart(3, "0")}
             </h2>
             <p className="text-zinc-400 text-sm mt-1">
-              Escuchá cada voz, mirá las caras detectadas, y emparejá. El
-              resultado se guarda y se usa en todo el episodio. (Si saltás,
-              uso detección automática — funciona la mayoría del tiempo
-              pero a veces invierte caras.)
+              Listen to each voice, look at the detected faces, and match
+              them. The result is saved and used across the whole episode.
+              Skip to fall back to automatic detection — works most of the
+              time but occasionally swaps the close-up to the wrong person.
             </p>
           </div>
           <button
@@ -127,10 +127,10 @@ export const SpeakerIdentificationModal: React.FC<
             <div className="flex flex-col items-center justify-center py-12 gap-3">
               <Loader2 className="w-8 h-8 text-brand-400 animate-spin" />
               <p className="text-zinc-400">
-                Detectando caras y extrayendo samples de voz…
+                Detecting faces and extracting voice samples…
               </p>
               <p className="text-zinc-600 text-xs">
-                ~30-45 s. Es un trabajo único por episodio.
+                ~30-45 s. One-time setup per episode.
               </p>
             </div>
           ) : error ? (
@@ -139,8 +139,8 @@ export const SpeakerIdentificationModal: React.FC<
             </div>
           ) : speakers.length === 0 || faces.length === 0 ? (
             <div className="text-center py-8 text-zinc-400">
-              No se detectaron hablantes o caras suficientes. Podés saltar
-              este paso y procesar con detección automática.
+              Not enough speakers or faces were detected. You can skip
+              this step and process with automatic detection.
             </div>
           ) : (
             <div className="space-y-5">
@@ -167,7 +167,7 @@ export const SpeakerIdentificationModal: React.FC<
                     <User className="w-4 h-4 text-zinc-500" />
                     <input
                       type="text"
-                      placeholder="Nombre del hablante (ej: Juan Pablo)"
+                      placeholder="Speaker name (e.g. Juan Pablo)"
                       value={labels[spk]?.name || ""}
                       onChange={(e) =>
                         updateLabel(spk, { name: e.target.value })
@@ -177,7 +177,7 @@ export const SpeakerIdentificationModal: React.FC<
                   </div>
 
                   <p className="text-xs text-zinc-500 mb-2">
-                    Elegí la cara que corresponde a esta voz:
+                    Pick the face that matches this voice:
                   </p>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                     {faces.map((fid) => {
@@ -220,7 +220,7 @@ export const SpeakerIdentificationModal: React.FC<
             className="flex items-center gap-2 px-4 py-2 text-sm text-zinc-400 hover:text-zinc-200 rounded-lg transition-colors cursor-pointer"
           >
             <SkipForward className="w-4 h-4" />
-            Saltar — usar detección automática
+            Skip — use auto detection
           </button>
           <button
             onClick={handleConfirm}
@@ -232,7 +232,7 @@ export const SpeakerIdentificationModal: React.FC<
             }`}
           >
             {saving && <Loader2 className="w-4 h-4 animate-spin" />}
-            Guardar y procesar
+            Save & process
           </button>
         </div>
       </div>

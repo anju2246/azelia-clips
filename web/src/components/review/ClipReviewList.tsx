@@ -184,7 +184,7 @@ export const ClipReviewList: React.FC = () => {
               <button
                 onClick={() => setCriticOpen(true)}
                 className="flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
-                title="Ver qué clips rechazó el Critic y dar feedback"
+                title="See which clips the Critic rejected and leave feedback"
               >
                 <MessageSquareWarning className="w-4 h-4" />
                 Critic insights
