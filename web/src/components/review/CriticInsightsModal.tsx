@@ -1,5 +1,13 @@
-import React, { useEffect, useState } from "react";
-import { X, ThumbsUp, ThumbsDown, Loader2, BookOpen } from "lucide-react";
+import React, { useEffect, useRef, useState } from "react";
+import {
+  X,
+  ThumbsUp,
+  ThumbsDown,
+  Loader2,
+  BookOpen,
+  Check,
+  CircleAlert,
+} from "lucide-react";
 import {
   ClipsApi,
   type CriticDecision,
@@ -11,12 +19,20 @@ interface CriticInsightsModalProps {
   onClose: () => void;
 }
 
+// Per-rejection draft state. `noteState` drives the inline auto-save
+// indicator next to the textarea so the user can see their typing is
+// being persisted — there's no separate Save button, the verdict
+// buttons + auto-save on note edits is the entire save model.
+type NoteSaveState = "idle" | "pending" | "saving" | "saved" | "error";
+
 type DraftMap = Record<
   string,
   {
     verdict: "agree" | "disagree" | "neutral" | null;
     note: string;
-    saving: boolean;
+    saving: boolean; // verdict button submitting
+    noteState: NoteSaveState;
+    lastSavedNote: string;
   }
 >;
 
@@ -64,10 +80,13 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
         // Seed drafts from any previously-saved feedback.
         const initial: DraftMap = {};
         for (const d of [...(data.approved || []), ...(data.rejected || [])]) {
+          const note = d.user_note || "";
           initial[keyOf(d)] = {
             verdict: d.user_verdict,
-            note: d.user_note || "",
+            note,
             saving: false,
+            noteState: "idle",
+            lastSavedNote: note,
           };
         }
         setDrafts(initial);
@@ -86,9 +105,92 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
   const updateDraft = (key: string, patch: Partial<DraftMap[string]>) => {
     setDrafts((prev) => ({
       ...prev,
-      [key]: { verdict: null, note: "", saving: false, ...prev[key], ...patch },
+      [key]: {
+        verdict: null,
+        note: "",
+        saving: false,
+        noteState: "idle",
+        lastSavedNote: "",
+        ...prev[key],
+        ...patch,
+      },
     }));
   };
+
+  // Debounce timers per rejection so the auto-save fires once after the
+  // user stops typing, not on every keystroke. Stored in a ref so React
+  // re-renders don't clobber the timer ids.
+  const saveTimers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+  // Auto-save a note. `note` and `verdict` are captured from the keystroke
+  // that scheduled this save, NOT read from React state — that would
+  // read stale values when timer fires across renders.
+  // Resolution logic:
+  //   - empty note → mark idle, do not POST (we don't want neutral rows
+  //     with no signal cluttering the table)
+  //   - has verdict → POST with that verdict
+  //   - no verdict yet → POST as 'neutral' so the note is preserved; the
+  //     synthesizer ignores neutral rows, so it's lossless until the user
+  //     clicks Agree/Disagree to upgrade it
+  const flushSave = async (
+    d: CriticDecision,
+    note: string,
+    verdict: "agree" | "disagree" | "neutral" | null,
+  ) => {
+    const k = keyOf(d);
+    if (!note.trim()) {
+      updateDraft(k, { noteState: "idle", lastSavedNote: "" });
+      return;
+    }
+    updateDraft(k, { noteState: "saving" });
+    try {
+      await ClipsApi.saveCriticFeedback({
+        episode_id: episodeId,
+        start_time: d.start_time,
+        end_time: d.end_time,
+        title: d.title,
+        summary: d.summary,
+        critic_reasoning: d.reasoning,
+        user_verdict: (verdict as "agree" | "disagree") || "neutral",
+        user_note: note,
+      });
+      updateDraft(k, { noteState: "saved", lastSavedNote: note });
+      // Drop the "Saved ✓" indicator back to idle after a couple of
+      // seconds so it doesn't linger as visual noise.
+      setTimeout(() => {
+        setDrafts((prev) => {
+          const cur2 = prev[k];
+          if (cur2 && cur2.noteState === "saved") {
+            return { ...prev, [k]: { ...cur2, noteState: "idle" } };
+          }
+          return prev;
+        });
+      }, 2000);
+    } catch {
+      updateDraft(k, { noteState: "error" });
+    }
+  };
+
+  const onNoteChange = (d: CriticDecision, value: string) => {
+    const k = keyOf(d);
+    const curVerdict = drafts[k]?.verdict ?? null;
+    updateDraft(k, { note: value, noteState: "pending" });
+    const t = saveTimers.current[k];
+    if (t) clearTimeout(t);
+    saveTimers.current[k] = setTimeout(
+      () => flushSave(d, value, curVerdict),
+      1200,
+    );
+  };
+
+  // Clean up any pending timers on unmount so we don't fire saves after
+  // the modal closes.
+  useEffect(() => {
+    return () => {
+      Object.values(saveTimers.current).forEach((t) => clearTimeout(t));
+      saveTimers.current = {};
+    };
+  }, []);
 
   const submit = async (d: CriticDecision, verdict: "agree" | "disagree") => {
     const k = keyOf(d);
@@ -227,13 +329,44 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                   <div className="mt-3">
                     <textarea
                       value={draft.note}
-                      onChange={(e) =>
-                        updateDraft(k, { note: e.target.value })
-                      }
-                      placeholder="Explain why you agree or disagree. This note is saved and used to improve future curations."
+                      onChange={(e) => onNoteChange(d, e.target.value)}
+                      onBlur={() => {
+                        // Snap to save immediately on blur so the user
+                        // doesn't lose a note by closing the modal in
+                        // the 1.2 s debounce window.
+                        if (draft.note !== draft.lastSavedNote) {
+                          const t = saveTimers.current[k];
+                          if (t) clearTimeout(t);
+                          flushSave(d, draft.note, draft.verdict);
+                        }
+                      }}
+                      placeholder="Explain why you agree or disagree. Auto-saved as you type — used to improve future curations."
                       rows={2}
                       className="w-full px-3 py-2 bg-black/40 border border-zinc-800 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none resize-none"
                     />
+                    <div className="mt-1 flex items-center justify-end h-4 text-xs">
+                      {draft.noteState === "pending" && draft.note && (
+                        <span className="text-zinc-500">Editing…</span>
+                      )}
+                      {draft.noteState === "saving" && (
+                        <span className="text-zinc-400 flex items-center gap-1">
+                          <Loader2 className="w-3 h-3 animate-spin" />
+                          Auto-saving…
+                        </span>
+                      )}
+                      {draft.noteState === "saved" && (
+                        <span className="text-green-400 flex items-center gap-1">
+                          <Check className="w-3 h-3" />
+                          Saved
+                        </span>
+                      )}
+                      {draft.noteState === "error" && (
+                        <span className="text-red-400 flex items-center gap-1">
+                          <CircleAlert className="w-3 h-3" />
+                          Could not save — retry by typing again
+                        </span>
+                      )}
+                    </div>
                   </div>
 
                   <div className="mt-3 flex gap-2">
