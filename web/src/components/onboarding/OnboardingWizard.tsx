@@ -116,7 +116,9 @@ export const OnboardingWizard: React.FC = () => {
         google:    { name: 'Google (Gemini)',      desc: 'Gemini 2.5 Pro — API key simple',        field: 'google_api_key',    modelField: 'google_model',    ph: 'AIza...',    keyUrl: 'https://aistudio.google.com/apikey' },
     };
 
-    const providerOrder = ['anthropic', 'openai', 'groq', 'google'];
+    // v0.1.0: only Anthropic is exposed. Claude Code is offered separately
+    // via the auto-detect card above. Other providers come back in v0.2.
+    const providerOrder = ['anthropic'];
 
     // Step 4 state: primary provider + optional extras
     const [primaryProvider, setPrimaryProvider] = useState('');
@@ -124,6 +126,17 @@ export const OnboardingWizard: React.FC = () => {
     const [detectedModels, setDetectedModels] = useState<Record<string, string>>({});
     const [detectingProvider, setDetectingProvider] = useState<string | null>(null);
     const detectTimers = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({});
+
+    // Claude Code detection — checked once on mount.
+    // If active, the user gets a 'Use Claude Code (no key needed)' shortcut and
+    // can skip configuring an API key entirely.
+    const [claudeCode, setClaudeCode] = useState<{ active: boolean; method?: string } | null>(null);
+    useEffect(() => {
+        fetchWithAuth('/providers')
+            .then(r => r.ok ? r.json() : null)
+            .then(d => { if (d?.claude_code) setClaudeCode({ active: !!d.claude_code.active, method: d.claude_code.auth_method }); })
+            .catch(() => setClaudeCode({ active: false }));
+    }, []);
 
     const [detectionErrors, setDetectionErrors] = useState<Record<string, string>>({});
 
@@ -468,7 +481,9 @@ export const OnboardingWizard: React.FC = () => {
         toast('Coming soon — TikTok integration', { icon: '🔜' });
     };
 
-    const hasAnyKey = [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.google_api_key].some(
+    // v0.1.0: Claude Code OR Anthropic API key is sufficient.
+    // (Other provider fields stay only as safety net in case formData was hydrated from legacy localStorage.)
+    const hasAnyKey = !!claudeCode?.active || [formData.groq_api_key, formData.openai_api_key, formData.anthropic_api_key, formData.google_api_key].some(
         key => typeof key === 'string' && key.trim().length >= 20 && !key.includes('...')
     );
 
@@ -757,15 +772,44 @@ export const OnboardingWizard: React.FC = () => {
             {step === 4 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
-                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Conecta tu Inteligencia</h1>
-                        <p className="text-zinc-400 mt-2">To keep your data private, Azelia filters videos by orchestrating AIs through your own local API keys.</p>
+                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Connect an LLM</h1>
+                        <p className="text-zinc-400 mt-2">Azelia uses your own LLM. Either Claude Code (your local subscription) or an Anthropic API key.</p>
                     </div>
 
-                    <div className="bg-amber-950/30 border border-amber-500/20 rounded-xl p-4 flex gap-3 items-start">
-                        <Shield className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
-                        <div className="text-sm text-amber-200/80 leading-relaxed">
-                            <strong className="text-amber-400 block mb-1">Free tiers will collapse.</strong>
-                            Extracting clips from a 1-hour podcast pushes over 500,000 context tokens at high throughput. Groq and Anthropic free tiers throttle mid-run. Use paid API keys to avoid failures.
+                    {/* Claude Code auto-detection — preferred path when installed */}
+                    {claudeCode?.active ? (
+                        <div className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-5">
+                            <div className="flex items-start gap-4">
+                                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                                    <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                                </div>
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                        <h3 className="text-white font-semibold">Claude Code detected</h3>
+                                        <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded-md">Recommended · $0</span>
+                                    </div>
+                                    <p className="text-sm text-emerald-200/80 mt-1.5 leading-relaxed">
+                                        We'll route Azelia's LLM calls through your local Claude Code
+                                        ({claudeCode.method || 'subscription'}). No API key needed, no extra cost beyond your
+                                        existing Claude plan. You can still add an Anthropic API key below as a backup.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="bg-zinc-900/50 border border-white/10 rounded-2xl p-5">
+                            <p className="text-sm text-zinc-400 leading-relaxed">
+                                <strong className="text-zinc-200">Claude Code not detected</strong> on this machine.
+                                Install it from <a href="https://claude.com/download" target="_blank" rel="noreferrer" className="text-brand-400 underline">claude.com/download</a> (uses your Claude.ai plan, $0 per clip)
+                                — or paste an Anthropic API key below.
+                            </p>
+                        </div>
+                    )}
+
+                    <div className="bg-amber-950/20 border border-amber-500/15 rounded-xl p-3 flex gap-3 items-start">
+                        <Shield className="w-4 h-4 text-amber-500 shrink-0 mt-0.5" />
+                        <div className="text-xs text-amber-200/70 leading-relaxed">
+                            Each 1-hour episode pushes ~500K context tokens. Anthropic free tier can throttle mid-run — Claude Code or a paid Anthropic key are safer.
                         </div>
                     </div>
 
