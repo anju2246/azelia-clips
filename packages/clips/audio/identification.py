@@ -367,26 +367,29 @@ def extract_speaker_samples(
     return results
 
 
-def _diarize_full_episode(video_path: Path) -> list[dict]:
-    """Run ECAPA diarization on the full episode to produce speaker
-    segments — used as fallback when the user's transcript lacks labels.
+def _diarize_full_episode(video_path: Path) -> tuple[list[dict], dict]:
+    """Run ECAPA diarization on the full episode.
 
-    Returns a list of {start, end, speaker} dicts. Empty on failure.
+    Returns (segments, voice_centroids). The centroids are 192-D L2-
+    normalized vectors that the per-clip renderer uses to relabel its
+    own local SPEAKER_NN back into the stable episode-level IDs.
     """
     try:
         from packages.clips.audio.speaker_id import SpeakerIdentifier
     except ImportError:
-        return []
+        return [], {}
     try:
-        # Episode level → keep auto-detect across 2..4 speakers.
         identifier = SpeakerIdentifier(num_speakers=None, min_speakers=2, max_speakers=4)
         with tempfile.TemporaryDirectory(prefix="azelia_preflight_diariz_") as tmp:
             wav = Path(tmp) / "audio.wav"
             SpeakerIdentifier._extract_audio(video_path, wav)
-            return identifier.diarize(wav) or []
+            segs = identifier.diarize(wav) or []
+        # last_centroids is populated by diarize() — capture it now before
+        # the SpeakerIdentifier instance falls out of scope.
+        return segs, dict(identifier.last_centroids)
     except Exception as e:
         logger.warning("Preflight ECAPA fallback failed: %s", e)
-        return []
+        return [], {}
 
 
 def prepare_identification(
@@ -415,17 +418,29 @@ def prepare_identification(
     # 1. Faces.
     thumbnails = detect_face_identities(video_path, out_dir)
 
-    # 2. Voice samples. If the transcript brought no speaker info, run
-    # ECAPA on the full episode to generate it. Episode-level diarization
-    # uses auto-detect (2-4 speakers) because here we have plenty of data
-    # — unlike the per-clip path which is pinned to k=2.
+    # 2. Voice samples + voice fingerprints. If the transcript brought no
+    # speaker info, run ECAPA on the full episode now. We ALSO capture
+    # the per-speaker centroid embeddings (192-D voice fingerprints) and
+    # persist them so the per-clip renderer can relabel its own local
+    # ECAPA output back into the stable episode-level IDs the labels
+    # file references — without that step the labels never line up with
+    # the per-clip speaker IDs and the camera follows the wrong person.
+    voice_centroids: dict = {}
     if not speaker_segments:
         logger.info(
             "Transcript has no speaker labels — running ECAPA on full episode"
         )
-        speaker_segments = _diarize_full_episode(video_path)
+        speaker_segments, voice_centroids = _diarize_full_episode(video_path)
 
     samples = extract_speaker_samples(video_path, speaker_segments, out_dir)
+
+    if voice_centroids:
+        (out_dir / "voice_embeddings.json").write_text(
+            json.dumps(
+                {k: v.tolist() if hasattr(v, "tolist") else list(v) for k, v in voice_centroids.items()},
+                indent=2,
+            )
+        )
 
     manifest = {
         "video": video_path.name,

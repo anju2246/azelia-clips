@@ -46,6 +46,45 @@ class EpisodeConfig:
         return self.episode_folder / "clips"
 
 
+def _episode_segments_for_clip(
+    episode_folder: Path, start_time: float, end_time: float
+) -> list[dict]:
+    """Return episode-level speaker segments overlapping the clip window,
+    shifted to clip-local timestamps (so the face tracker sees t=0 at
+    the start of the clip, matching the pre-cut raw_clip file).
+
+    Returns [] if there are no saved labels (preflight wasn't run, or
+    user explicitly skipped). The pipeline then falls back to per-clip
+    diarization as before.
+    """
+    labels_path = episode_folder / "speaker_face_labels.json"
+    segs_path = episode_folder / ".identification" / "episode_speaker_segments.json"
+    if not labels_path.exists() or not segs_path.exists():
+        return []
+    try:
+        labels = json.loads(labels_path.read_text())
+        if labels.get("_skipped"):
+            return []
+        segs = json.loads(segs_path.read_text())
+    except Exception:
+        return []
+    out: list[dict] = []
+    for s in segs:
+        seg_start = float(s.get("start", 0))
+        seg_end = float(s.get("end", 0))
+        # Clamp to the clip window and shift to clip-local timestamps.
+        a = max(seg_start, start_time)
+        b = min(seg_end, end_time)
+        if b <= a:
+            continue
+        out.append({
+            "start": a - start_time,
+            "end": b - start_time,
+            "speaker": s.get("speaker", ""),
+        })
+    return out
+
+
 class BatchProcessor:
     """
     Process episodes in batch, saving clips directly to external drive.
@@ -519,11 +558,22 @@ class BatchProcessor:
                     
                     # 3b. High-precision transcription and diarization strictly for this clip
                     # (As per user request, we process each clip independently to guarantee high quality word-level timestamps and diarization)
-                    clip_transcript = self._transcribe_clip(raw_clip)
+                    # Load episode voice fingerprints once (cached implicitly
+                    # because _transcribe_clip caches the source).
+                    voice_centroids = self._episode_voice_centroids(
+                        episode.episode_folder
+                    )
+                    clip_transcript = self._transcribe_clip(
+                        raw_clip, voice_centroids=voice_centroids
+                    )
                     
                     # 3c. Create split-screen with tracking
                     # Passes the clip-specific diarization into the FaceTracker
                     split_clip = tmp_path / "split.mp4"
+                    # clip_transcript.segments now carries episode-level
+                    # SPEAKER_NN labels when voice_embeddings.json exists
+                    # (LocalWhisperSource handles the relabel internally).
+                    # Otherwise it falls back to fresh per-clip ECAPA IDs.
                     reframe_video(
                         video_path=str(raw_clip),
                         output_path=str(split_clip),
@@ -680,7 +730,27 @@ class BatchProcessor:
             console.print(f"[red]Transcription failed: {e}[/red]")
             raise e
 
-    def _transcribe_clip(self, clip_path: Path, job_id: str = None) -> "Transcript":
+    def _episode_voice_centroids(self, episode_folder: Path) -> dict | None:
+        """Load `voice_embeddings.json` for the episode if it exists.
+
+        Returns the {SPEAKER_NN: [192-D list]} dict (raw JSON shape) so
+        the LocalWhisperSource can use it to relabel per-clip ECAPA. We
+        only load if the user has actually labeled this episode (i.e.,
+        speaker_face_labels.json present and not _skipped).
+        """
+        labels_path = episode_folder / "speaker_face_labels.json"
+        emb_path = episode_folder / ".identification" / "voice_embeddings.json"
+        if not labels_path.exists() or not emb_path.exists():
+            return None
+        try:
+            labels = json.loads(labels_path.read_text())
+            if labels.get("_skipped"):
+                return None
+            return json.loads(emb_path.read_text())
+        except Exception:
+            return None
+
+    def _transcribe_clip(self, clip_path: Path, job_id: str = None, voice_centroids: dict | None = None) -> "Transcript":
         """Transcribe a short extracted clip for word-level subtitles.
 
         ALWAYS uses local Whisper. Never the user-Supabase source — that one
@@ -688,21 +758,27 @@ class BatchProcessor:
         have an episode_id. The episode-level transcription_driver is only
         for the full episode (where the user keeps their canonical transcripts).
 
-        We pin the diarizer to num_speakers=2 for per-clip slices. On 30-90s
-        of audio, ECAPA's silhouette-based auto-detect often picks k=3 from
-        acoustic drift in a single speaker (different breathing pace, mic
-        proximity changes, etc.), creating a phantom SPEAKER_NN whose
-        segments are actually one of the real speakers. That phantom maps
-        to a face via the bijective matcher's surplus-fallback, and when
-        the phantom's segments fire the camera shows the WRONG person.
-        Forcing k=2 is the right product call: podcast clips are almost
-        always 2-person dialogue. Multi-person panels would still suffer
-        but the episode-level transcript path keeps auto-detect for those.
+        When voice_centroids are provided (the episode has L3 labels),
+        the diarizer relabels per-clip windows directly against the
+        saved fingerprints, producing STABLE episode-level SPEAKER_NN
+        labels that match the labels file. Without them, we pin to
+        k=2 — podcast clips are almost always 2-person dialogue, and
+        ECAPA silhouette auto-detect over-clusters on short audio.
         """
         from packages.clips.transcription.local_whisper import LocalWhisperSource
 
-        if not hasattr(self, "_local_whisper_clip_source"):
-            self._local_whisper_clip_source = LocalWhisperSource(num_speakers_hint=2)
+        # Re-create the source if the centroid context changed — this
+        # only happens when transitioning between labeled / unlabeled
+        # episodes within a single batch run.
+        cache_key = id(voice_centroids) if voice_centroids else "default"
+        if getattr(self, "_local_whisper_clip_key", None) != cache_key:
+            if voice_centroids:
+                self._local_whisper_clip_source = LocalWhisperSource(
+                    voice_centroids=voice_centroids,
+                )
+            else:
+                self._local_whisper_clip_source = LocalWhisperSource(num_speakers_hint=2)
+            self._local_whisper_clip_key = cache_key
         try:
             return self._local_whisper_clip_source.get_transcript(str(clip_path))
         except Exception as e:
