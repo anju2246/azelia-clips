@@ -55,6 +55,9 @@ class ProcessRequest(BaseModel):
     supabase_url: Optional[str] = None
     supabase_key: Optional[str] = None
     assemblyai_key: Optional[str] = None
+    # Re-process from scratch: wipe curation.json + existing clips/{approved,review}
+    # so the pipeline doesn't short-circuit on cached files.
+    force_reset: bool = False
 
 
 class ProcessLocalRequest(ProcessRequest):
