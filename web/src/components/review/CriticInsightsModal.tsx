@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { X, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react";
+import { X, ThumbsUp, ThumbsDown, Loader2, BookOpen } from "lucide-react";
 import {
   ClipsApi,
   type CriticDecision,
@@ -41,18 +41,25 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
   const [available, setAvailable] = useState(true);
   const [emptyMessage, setEmptyMessage] = useState<string>("");
   const [drafts, setDrafts] = useState<DraftMap>({});
+  const [learnings, setLearnings] = useState<
+    Array<{ text: string; category: string | null; evidence_count: number }>
+  >([]);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const data = await ClipsApi.getCriticDecisions(jobId);
+        const [data, learn] = await Promise.all([
+          ClipsApi.getCriticDecisions(jobId),
+          ClipsApi.getCriticLearnings().catch(() => ({ learnings: [], count: 0 })),
+        ]);
         if (cancelled) return;
         setEpisodeId(data.episode_id);
         setAvailable(data.available);
         setApproved(data.approved || []);
         setRejected(data.rejected || []);
         setEmptyMessage(data.message || "");
+        setLearnings(learn.learnings || []);
 
         // Seed drafts from any previously-saved feedback.
         const initial: DraftMap = {};
@@ -140,11 +147,43 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
               <Loader2 className="w-5 h-5 animate-spin mr-2" />
               Cargando decisiones…
             </div>
-          ) : rejected.length === 0 && available ? (
+          ) : (
+            <>
+              {learnings.length > 0 && (
+                <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/20 p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <BookOpen className="w-4 h-4 text-indigo-300" />
+                    <h3 className="text-indigo-200 text-sm font-semibold">
+                      Lo que el Critic ha aprendido ({learnings.length})
+                    </h3>
+                  </div>
+                  <p className="text-xs text-indigo-200/70 mb-3">
+                    Reglas destiladas de tus notas pasadas. Se aplican en
+                    cada run.
+                  </p>
+                  <ul className="space-y-2">
+                    {learnings.map((L, i) => (
+                      <li
+                        key={i}
+                        className="text-sm text-indigo-100/90 flex gap-2"
+                      >
+                        <span className="text-indigo-400/60 font-mono text-xs whitespace-nowrap mt-0.5">
+                          [{L.category || "general"}·{L.evidence_count}]
+                        </span>
+                        <span>{L.text}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+          {!loading && rejected.length === 0 && available && (
             <div className="text-center py-8 text-zinc-400">
               El Critic no rechazó ningún candidato en este run.
             </div>
-          ) : (
+          )}
+          {!loading && rejected.length > 0 &&
             rejected.map((d) => {
               const k = keyOf(d);
               const draft = drafts[k] || {
@@ -225,8 +264,7 @@ export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
                   </div>
                 </div>
               );
-            })
-          )}
+            })}
         </div>
       </div>
     </div>

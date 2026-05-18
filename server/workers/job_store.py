@@ -137,6 +137,23 @@ class JobStore:
                 CREATE INDEX IF NOT EXISTS idx_critic_feedback_unconsumed
                 ON critic_feedback(consumed_at)
             """)
+
+            # Distilled learnings — the Critic's long-term memory. Raw
+            # feedback notes get consumed once into the prompt, then a
+            # synthesizer pass folds them into a small set of durable rules
+            # stored here. This table is capped (we delete-then-insert on
+            # each synthesis so it can NEVER grow into a monolithic file)
+            # and gets injected on every Critic run as persistent guidance.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS critic_learnings (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    text TEXT NOT NULL,
+                    category TEXT,
+                    evidence_count INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            """)
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_status 
                 ON jobs(status)
@@ -388,6 +405,56 @@ class JobStore:
                 (limit,),
             ).fetchall()
             return [dict(r) for r in rows]
+
+    def get_critic_learnings(self) -> list[dict]:
+        """The Critic's long-term memory — durable rules distilled from
+        consumed feedback. Always shown to the Critic on every run.
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM critic_learnings ORDER BY evidence_count DESC, updated_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def replace_critic_learnings(self, learnings: list[dict]) -> int:
+        """Atomically replace the entire learnings set.
+
+        `learnings` items must have `text`. Optional: `category`,
+        `evidence_count`. Called by the synthesizer with the LLM's updated
+        compact rule list — we delete-then-insert in a single transaction
+        so the table is always either the old state or the new one, never
+        a mix. This is what guarantees the learnings file stays bounded:
+        the synthesizer is responsible for keeping the list small.
+        """
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("BEGIN")
+            try:
+                conn.execute("DELETE FROM critic_learnings")
+                for L in learnings:
+                    text = (L.get("text") or "").strip()
+                    if not text:
+                        continue
+                    conn.execute(
+                        """
+                        INSERT INTO critic_learnings
+                          (text, category, evidence_count, created_at, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (
+                            text,
+                            (L.get("category") or "").strip() or None,
+                            int(L.get("evidence_count") or 1),
+                            now,
+                            now,
+                        ),
+                    )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+        return len(learnings)
 
     def mark_critic_feedback_consumed(self, row_ids: list[int]) -> int:
         """Mark the given feedback rows as 'the Critic has seen this'.
