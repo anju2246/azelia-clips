@@ -30,12 +30,19 @@ class VideoReframer:
     @staticmethod
     def _simplify_trajectory(
         trajectory: list[tuple[float, int, int]],
-        min_move_px: int = 40,
+        min_move_px: int = 90,
     ) -> list[tuple[float, int, int]]:
         """Reduce trajectory to key transition points.
-        
+
         Collapses consecutive keyframes with similar positions into single
         points, keeping only moments where the crop actually needs to move.
+
+        The threshold was 40 px before, which let every natural body wobble
+        slip through and produced a robotic-looking crop. Combined with the
+        deadzone + EMA in `face_tracker.get_speaker_trajectory`, a 90 px
+        threshold cleanly absorbs in-segment movement while still firing on
+        real speaker pivots (which snap to the new face — typically >200 px
+        away when two people are seated side-by-side).
         """
         if not trajectory:
             return []
