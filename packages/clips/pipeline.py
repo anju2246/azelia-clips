@@ -529,6 +529,9 @@ class BatchProcessor:
                         output_path=str(split_clip),
                         pre_cut=True,  # Clip already extracted, don't seek again
                         speaker_segments=clip_transcript.segments,
+                        # The face tracker uses this to find any saved
+                        # speaker↔face labels (L3) for the episode.
+                        episode_folder=episode.episode_folder,
                     )
                     
                     # 3d. Generate subtitles

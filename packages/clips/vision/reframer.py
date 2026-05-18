@@ -224,6 +224,7 @@ def reframe_video(
     duration: float | None = None,
     pre_cut: bool = False,  # If True, video is already a cut clip - skip -ss/-t
     speaker_segments: list[dict] | None = None,
+    episode_folder: Path | str | None = None,
 ) -> Path:
     """
     Create split screen with:
@@ -294,6 +295,8 @@ def reframe_video(
         detections = tracker.detect_faces(video_path, scan_start, scan_end)
         
         # Fully automated active speaker trajectory via mouth motion mapping
+        # (or the user's locked labels, when episode_folder points to an
+        # episode with a saved speaker_face_labels.json).
         trajectory = tracker.get_speaker_trajectory(
             video_path=video_path,
             detections=detections,
@@ -302,6 +305,7 @@ def reframe_video(
             video_width=src_width,
             video_height=src_height,
             speaker_segments=speaker_segments,
+            episode_folder=episode_folder,
         )
         console.print(f"[dim]   {len(trajectory)} keyframes (speaker tracking)[/dim]")
         
