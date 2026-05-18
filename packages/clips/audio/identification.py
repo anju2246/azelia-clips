@@ -106,6 +106,7 @@ def detect_face_identities(
     video_path: Path,
     out_dir: Path,
     frame_count: int = _PREFLIGHT_FRAME_COUNT,
+    max_identities: int = 4,
 ) -> dict[str, Path]:
     """Sample frames, run MTCNN+FaceNet, cluster, save thumbnails.
 
@@ -252,12 +253,14 @@ def detect_face_identities(
     # outright — in a podcast that mostly shows one person on screen,
     # the second face can legitimately appear only once or twice in a
     # 30-frame sample, and dropping it would leave us with one identity.
-    # Cap at 4 to filter out background extras (audience, sponsors, etc.).
+    # `max_identities` is the user's declared speaker count (capped via
+    # the L3 modal step) so we don't surface background extras as
+    # selectable thumbnails. Default 4 stays as the open-ended cap.
     counts: dict[int, int] = {}
     for cid in cluster_ids:
         counts[cid] = counts.get(cid, 0) + 1
     sorted_clusters = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
-    valid_clusters = {cid for cid, _ in sorted_clusters[:4]}
+    valid_clusters = {cid for cid, _ in sorted_clusters[:max(1, max_identities)]}
 
     # 4. For each valid cluster, save the highest-confidence frame's face
     # crop AND the centroid embedding. The embedding is what lets the
@@ -367,8 +370,17 @@ def extract_speaker_samples(
     return results
 
 
-def _diarize_full_episode(video_path: Path) -> tuple[list[dict], dict]:
+def _diarize_full_episode(
+    video_path: Path,
+    num_speakers: int | None = None,
+) -> tuple[list[dict], dict]:
     """Run ECAPA diarization on the full episode.
+
+    Args:
+        num_speakers: When set, force this exact k instead of silhouette-
+            based auto-detect. The L3 modal asks the user up front how
+            many speakers their podcast has so we can skip auto-detect
+            entirely — it's the single most reliable accuracy lever.
 
     Returns (segments, voice_centroids). The centroids are 192-D L2-
     normalized vectors that the per-clip renderer uses to relabel its
@@ -379,7 +391,12 @@ def _diarize_full_episode(video_path: Path) -> tuple[list[dict], dict]:
     except ImportError:
         return [], {}
     try:
-        identifier = SpeakerIdentifier(num_speakers=None, min_speakers=2, max_speakers=4)
+        if num_speakers is not None and num_speakers > 0:
+            identifier = SpeakerIdentifier(num_speakers=num_speakers)
+        else:
+            identifier = SpeakerIdentifier(
+                num_speakers=None, min_speakers=2, max_speakers=4
+            )
         with tempfile.TemporaryDirectory(prefix="azelia_preflight_diariz_") as tmp:
             wav = Path(tmp) / "audio.wav"
             SpeakerIdentifier._extract_audio(video_path, wav)
@@ -395,6 +412,7 @@ def _diarize_full_episode(video_path: Path) -> tuple[list[dict], dict]:
 def prepare_identification(
     episode_folder: Path,
     speaker_segments: list[dict],
+    num_speakers: int | None = None,
 ) -> dict:
     """Run the full preflight: face thumbnails + voice samples + manifest.
 
@@ -403,6 +421,10 @@ def prepare_identification(
     speaker labels for this episode), we run an episode-level ECAPA
     pass to generate them — costs ~30-60 s but unblocks the L3 flow
     on transcripts that are otherwise unusable.
+
+    `num_speakers` is the count the user declared in the L3 modal's
+    first step. When set, both ECAPA and the face-cluster top-N are
+    pinned to it for maximum accuracy.
     """
     out_dir = episode_folder / ".identification"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -415,8 +437,10 @@ def prepare_identification(
     if not video_path.exists():
         raise FileNotFoundError(f"No video found in {episode_folder}")
 
-    # 1. Faces.
-    thumbnails = detect_face_identities(video_path, out_dir)
+    # 1. Faces. Cap surface-area to the declared speaker count so we
+    # don't show background extras as selectable thumbnails.
+    face_cap = num_speakers if (num_speakers and num_speakers > 0) else 4
+    thumbnails = detect_face_identities(video_path, out_dir, max_identities=face_cap)
 
     # 2. Voice samples + voice fingerprints. If the transcript brought no
     # speaker info, run ECAPA on the full episode now. We ALSO capture
@@ -426,11 +450,18 @@ def prepare_identification(
     # file references — without that step the labels never line up with
     # the per-clip speaker IDs and the camera follows the wrong person.
     voice_centroids: dict = {}
-    if not speaker_segments:
+    # Always re-derive episode-level voice centroids when num_speakers is
+    # declared — even if the transcript already has labels, those came
+    # from a different source (Supabase A/B) and may not match the user's
+    # actual speaker count, leading to bad clustering.
+    needs_diarize = not speaker_segments or (num_speakers and num_speakers > 0)
+    if needs_diarize:
         logger.info(
-            "Transcript has no speaker labels — running ECAPA on full episode"
+            "Running episode-level ECAPA (num_speakers=%s)", num_speakers,
         )
-        speaker_segments, voice_centroids = _diarize_full_episode(video_path)
+        speaker_segments, voice_centroids = _diarize_full_episode(
+            video_path, num_speakers=num_speakers,
+        )
 
     samples = extract_speaker_samples(video_path, speaker_segments, out_dir)
 

@@ -222,7 +222,7 @@ export const ClipsApi = {
       > | null;
     }>(`/episodes/${episodeNum}/identify/status`),
 
-  identifyPrepare: (episodeNum: number) =>
+  identifyPrepare: (episodeNum: number, numSpeakers?: number) =>
     fetchApi<{
       episode_id: string;
       faces: string[];
@@ -231,7 +231,13 @@ export const ClipsApi = {
         string,
         { name: string; face_ids?: string[]; face_id?: string }
       > | null;
-    }>(`/episodes/${episodeNum}/identify/prepare`, { method: "POST" }),
+    }>(`/episodes/${episodeNum}/identify/prepare`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(
+        numSpeakers ? { num_speakers: numSpeakers } : {},
+      ),
+    }),
 
   identifyFaceUrl: (episodeNum: number, faceId: string) =>
     `/api/episodes/${episodeNum}/identify/face/${faceId}.jpg`,
