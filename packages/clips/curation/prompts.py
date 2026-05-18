@@ -139,6 +139,8 @@ CRITIC_SYSTEM = """You are the CRITIC agent. Your role is to EVALUATE and FILTER
 
 {podcast_context}
 
+{user_feedback_memory}
+
 ## Your Goal
 Be RIGOROUS but FAIR. Remove weak clips but don't over-reject.
 If a "Podcast context" block is provided above, treat off-topic as a valid rejection reason:
