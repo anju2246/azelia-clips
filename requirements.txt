@@ -36,9 +36,17 @@ facenet-pytorch>=2.6.0
 torchvision>=0.17.0
 
 # ============================================
-# Diarization (MIT license - requires user HF token)
+# Diarization
 # ============================================
+# pyannote — best-in-class (detects overlap, fine turns). Requires the
+# user to accept the model terms on HuggingFace and set HF_TOKEN. Used
+# as opt-in for power users.
 pyannote.audio>=3.1.0
+# ECAPA-TDNN fallback — runs offline with no token, auto-detects 2-4
+# speakers via silhouette score. Default backend for Azelia: every install
+# can diarize out of the box without HuggingFace signup.
+speechbrain>=1.0.0
+scikit-learn>=1.3.0
 
 # ============================================
 # LLM Providers
