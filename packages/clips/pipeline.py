@@ -375,6 +375,31 @@ class BatchProcessor:
                 console.print(f"[dim]   Curation saved to {curation_path.name}[/dim]")
             else:
                 console.print(f"[yellow]   No clips found, skipping cache save.[/yellow]")
+
+            # Persist the Critic's full decision (approved + rejected) so the
+            # Review UI can show the user WHY clips were cut and collect
+            # feedback ("agree" / "disagree") that can later be fed back into
+            # the Critic prompt.
+            try:
+                last = getattr(curator.critic, "last_response", None)
+                if last is not None and last.approved_clips:
+                    decisions_path = episode.episode_folder / "critic_decisions.json"
+                    decisions_path.write_text(
+                        json.dumps(
+                            [c.model_dump() for c in last.approved_clips],
+                            indent=2,
+                            ensure_ascii=False,
+                        )
+                    )
+                    rejected_n = sum(1 for c in last.approved_clips if not c.approved)
+                    console.print(
+                        f"[dim]   Critic decisions saved ({rejected_n} rejected) → "
+                        f"{decisions_path.name}[/dim]"
+                    )
+            except Exception as e:
+                console.print(
+                    f"[yellow]   Could not save critic_decisions.json: {e}[/yellow]"
+                )
         
         if not curated_clips:
             console.print(f"[yellow]   No clips found for EP{episode.episode_number}[/yellow]")

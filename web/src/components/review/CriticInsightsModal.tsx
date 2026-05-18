@@ -1,0 +1,234 @@
+import React, { useEffect, useState } from "react";
+import { X, ThumbsUp, ThumbsDown, Loader2 } from "lucide-react";
+import {
+  ClipsApi,
+  type CriticDecision,
+} from "../../lib/api";
+import toast from "react-hot-toast";
+
+interface CriticInsightsModalProps {
+  jobId: string;
+  onClose: () => void;
+}
+
+type DraftMap = Record<
+  string,
+  {
+    verdict: "agree" | "disagree" | "neutral" | null;
+    note: string;
+    saving: boolean;
+  }
+>;
+
+function keyOf(d: CriticDecision): string {
+  return `${d.start_time.toFixed(2)}-${d.end_time.toFixed(2)}`;
+}
+
+function formatTimestamp(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = Math.floor(seconds % 60);
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+export const CriticInsightsModal: React.FC<CriticInsightsModalProps> = ({
+  jobId,
+  onClose,
+}) => {
+  const [loading, setLoading] = useState(true);
+  const [episodeId, setEpisodeId] = useState<string>("");
+  const [rejected, setRejected] = useState<CriticDecision[]>([]);
+  const [approved, setApproved] = useState<CriticDecision[]>([]);
+  const [available, setAvailable] = useState(true);
+  const [emptyMessage, setEmptyMessage] = useState<string>("");
+  const [drafts, setDrafts] = useState<DraftMap>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const data = await ClipsApi.getCriticDecisions(jobId);
+        if (cancelled) return;
+        setEpisodeId(data.episode_id);
+        setAvailable(data.available);
+        setApproved(data.approved || []);
+        setRejected(data.rejected || []);
+        setEmptyMessage(data.message || "");
+
+        // Seed drafts from any previously-saved feedback.
+        const initial: DraftMap = {};
+        for (const d of [...(data.approved || []), ...(data.rejected || [])]) {
+          initial[keyOf(d)] = {
+            verdict: d.user_verdict,
+            note: d.user_note || "",
+            saving: false,
+          };
+        }
+        setDrafts(initial);
+      } catch (e: any) {
+        toast.error(e?.message || "Could not load Critic decisions");
+        onClose();
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [jobId]);
+
+  const updateDraft = (key: string, patch: Partial<DraftMap[string]>) => {
+    setDrafts((prev) => ({
+      ...prev,
+      [key]: { verdict: null, note: "", saving: false, ...prev[key], ...patch },
+    }));
+  };
+
+  const submit = async (d: CriticDecision, verdict: "agree" | "disagree") => {
+    const k = keyOf(d);
+    const note = drafts[k]?.note || "";
+    updateDraft(k, { saving: true });
+    try {
+      await ClipsApi.saveCriticFeedback({
+        episode_id: episodeId,
+        start_time: d.start_time,
+        end_time: d.end_time,
+        title: d.title,
+        summary: d.summary,
+        critic_reasoning: d.reasoning,
+        user_verdict: verdict,
+        user_note: note,
+      });
+      updateDraft(k, { verdict, saving: false });
+      toast.success(
+        verdict === "agree"
+          ? "Feedback guardado — de acuerdo"
+          : "Feedback guardado — en desacuerdo",
+      );
+    } catch (e: any) {
+      updateDraft(k, { saving: false });
+      toast.error(e?.message || "No se pudo guardar el feedback");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full max-h-[85vh] flex flex-col">
+        {/* Header */}
+        <div className="flex justify-between items-start p-6 border-b border-zinc-800">
+          <div>
+            <h2 className="text-xl font-semibold text-white">
+              Critic decisions {episodeId && `— ${episodeId}`}
+            </h2>
+            <p className="text-zinc-400 text-sm mt-1">
+              {available
+                ? `${approved.length} aprobados · ${rejected.length} rechazados. Dejá feedback en cada uno — tu nota se guarda y mejora futuras curaciones.`
+                : emptyMessage || "No hay decisiones guardadas para este job."}
+            </p>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-500 hover:text-white transition-colors cursor-pointer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto p-6 space-y-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-12 text-zinc-500">
+              <Loader2 className="w-5 h-5 animate-spin mr-2" />
+              Cargando decisiones…
+            </div>
+          ) : rejected.length === 0 && available ? (
+            <div className="text-center py-8 text-zinc-400">
+              El Critic no rechazó ningún candidato en este run.
+            </div>
+          ) : (
+            rejected.map((d) => {
+              const k = keyOf(d);
+              const draft = drafts[k] || {
+                verdict: null,
+                note: "",
+                saving: false,
+              };
+              const isAgree = draft.verdict === "agree";
+              const isDisagree = draft.verdict === "disagree";
+              return (
+                <div
+                  key={k}
+                  className="border border-zinc-800 rounded-xl p-4 bg-zinc-950/40"
+                >
+                  <div className="flex justify-between items-start gap-3 mb-2">
+                    <div className="flex-1 min-w-0">
+                      <h3 className="text-white font-medium leading-snug">
+                        {d.title || "(sin título)"}
+                      </h3>
+                      {d.summary && (
+                        <p className="text-zinc-400 text-sm mt-1">
+                          {d.summary}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs font-mono text-zinc-500 whitespace-nowrap">
+                      {formatTimestamp(d.start_time)}–
+                      {formatTimestamp(d.end_time)} · {d.duration.toFixed(0)}s
+                    </span>
+                  </div>
+
+                  <div className="mt-3 p-3 bg-red-950/20 border border-red-900/40 rounded-lg">
+                    <p className="text-red-300 text-xs font-semibold mb-1">
+                      Razón del Critic:
+                    </p>
+                    <p className="text-red-200/90 text-sm">
+                      {d.reasoning || "(sin razón provista)"}
+                    </p>
+                  </div>
+
+                  <div className="mt-3">
+                    <textarea
+                      value={draft.note}
+                      onChange={(e) =>
+                        updateDraft(k, { note: e.target.value })
+                      }
+                      placeholder="Explicá por qué estás de acuerdo o en desacuerdo. Esta nota se guarda y se usa para mejorar futuras curaciones."
+                      rows={2}
+                      className="w-full px-3 py-2 bg-black/40 border border-zinc-800 rounded-lg text-sm text-zinc-200 placeholder-zinc-600 focus:border-zinc-600 focus:outline-none resize-none"
+                    />
+                  </div>
+
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      disabled={draft.saving}
+                      onClick={() => submit(d, "agree")}
+                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+                        isAgree
+                          ? "bg-green-600/30 border border-green-500/40 text-green-200"
+                          : "bg-zinc-800 hover:bg-green-600/20 hover:text-green-200 text-zinc-300 border border-transparent"
+                      }`}
+                    >
+                      <ThumbsUp className="w-3.5 h-3.5" />
+                      {isAgree ? "De acuerdo ✓" : "De acuerdo"}
+                    </button>
+                    <button
+                      disabled={draft.saving}
+                      onClick={() => submit(d, "disagree")}
+                      className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors cursor-pointer flex items-center justify-center gap-2 ${
+                        isDisagree
+                          ? "bg-amber-600/30 border border-amber-500/40 text-amber-200"
+                          : "bg-zinc-800 hover:bg-amber-600/20 hover:text-amber-200 text-zinc-300 border border-transparent"
+                      }`}
+                    >
+                      <ThumbsDown className="w-3.5 h-3.5" />
+                      {isDisagree ? "En desacuerdo ✓" : "En desacuerdo"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};

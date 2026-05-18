@@ -87,6 +87,18 @@ export interface UpdateSettingsRequest {
   transcript_supabase_key?: string;
 }
 
+export interface CriticDecision {
+  start_time: number;
+  end_time: number;
+  duration: number;
+  title: string | null;
+  summary: string | null;
+  reasoning: string | null;
+  approved: boolean;
+  user_verdict: "agree" | "disagree" | "neutral" | null;
+  user_note: string | null;
+}
+
 export interface EpisodeResponse {
   id: string;
   number: number;
@@ -197,6 +209,32 @@ export const ClipsApi = {
       killed_subprocesses?: number;
       workspace_removed?: boolean;
     }>(`/jobs/${jobId}/cancel`, { method: "POST" }),
+
+  getCriticDecisions: (jobId: string) =>
+    fetchApi<{
+      episode_id: string;
+      available: boolean;
+      approved: CriticDecision[];
+      rejected: CriticDecision[];
+      counts?: { approved: number; rejected: number };
+      message?: string;
+    }>(`/jobs/${jobId}/critic-decisions`),
+
+  saveCriticFeedback: (payload: {
+    episode_id: string;
+    start_time: number;
+    end_time: number;
+    title?: string | null;
+    summary?: string | null;
+    critic_reasoning?: string | null;
+    user_verdict: "agree" | "disagree" | "neutral";
+    user_note?: string | null;
+  }) =>
+    fetchApi<{ status: string; id: number }>("/critic-feedback", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    }),
 
   // File Upload Process (Fallback if no episodes folder)
   processVideo: (file: File, req: ProcessRequest) => {

@@ -94,8 +94,34 @@ class JobStore:
                 )
             """)
             conn.execute("""
-                CREATE INDEX IF NOT EXISTS idx_jobs_episode 
+                CREATE INDEX IF NOT EXISTS idx_jobs_episode
                 ON jobs(episode_id)
+            """)
+
+            # Feedback the user gives on rejected Critic decisions. Each row
+            # is "for episode E, the Critic killed clip at [start,end] with
+            # reason R, and the user thinks the rejection was right / wrong /
+            # added a free-form note". Phase B will surface these examples
+            # in the Critic system prompt so the agent stops repeating
+            # rejections the user disagrees with.
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS critic_feedback (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    episode_id TEXT NOT NULL,
+                    start_time REAL NOT NULL,
+                    end_time REAL NOT NULL,
+                    title TEXT,
+                    summary TEXT,
+                    critic_reasoning TEXT,
+                    user_verdict TEXT,
+                    user_note TEXT,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(episode_id, start_time, end_time)
+                )
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_critic_feedback_episode
+                ON critic_feedback(episode_id)
             """)
             conn.execute("""
                 CREATE INDEX IF NOT EXISTS idx_jobs_status 
@@ -252,6 +278,76 @@ class JobStore:
             )
             conn.commit()
             return result.rowcount > 0
+
+    # ── Critic feedback ──────────────────────────────────────────────────
+
+    def save_critic_feedback(
+        self,
+        episode_id: str,
+        start_time: float,
+        end_time: float,
+        title: str | None,
+        summary: str | None,
+        critic_reasoning: str | None,
+        user_verdict: str,
+        user_note: str | None = None,
+    ) -> int:
+        """Upsert a user's feedback on one Critic rejection.
+
+        verdict is 'agree' | 'disagree' | 'neutral'. Re-submitting for the
+        same (episode_id, start, end) overwrites the previous row.
+        Returns the row id.
+        """
+        now = datetime.utcnow().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                """
+                INSERT INTO critic_feedback
+                  (episode_id, start_time, end_time, title, summary,
+                   critic_reasoning, user_verdict, user_note, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(episode_id, start_time, end_time) DO UPDATE SET
+                  user_verdict = excluded.user_verdict,
+                  user_note    = excluded.user_note,
+                  created_at   = excluded.created_at
+                """,
+                (
+                    episode_id,
+                    start_time,
+                    end_time,
+                    title,
+                    summary,
+                    critic_reasoning,
+                    user_verdict,
+                    user_note,
+                    now,
+                ),
+            )
+            row = conn.execute(
+                "SELECT id FROM critic_feedback WHERE episode_id=? AND start_time=? AND end_time=?",
+                (episode_id, start_time, end_time),
+            ).fetchone()
+            conn.commit()
+            return int(row[0]) if row else 0
+
+    def get_critic_feedback_for_episode(self, episode_id: str) -> list[dict]:
+        """Return all feedback rows the user has given on this episode."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM critic_feedback WHERE episode_id=? ORDER BY start_time",
+                (episode_id,),
+            ).fetchall()
+            return [dict(r) for r in rows]
+
+    def get_all_critic_feedback(self) -> list[dict]:
+        """All feedback across episodes — for Phase B prompt injection."""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                "SELECT * FROM critic_feedback ORDER BY created_at DESC"
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def delete_job(self, job_id: str) -> bool:
         """Hard-delete a job row. Used by /cancel to leave no trace.

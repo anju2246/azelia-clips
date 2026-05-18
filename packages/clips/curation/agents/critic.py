@@ -8,6 +8,9 @@ from packages.clips.curation.prompts import CRITIC_SYSTEM
 from packages.clips.curation.prompt_manager import PromptManager
 from packages.clips.curation.models import FinderCandidate, CriticResponse, CriticClip, CurationConfig
 
+# Optional import only used as a default value in the constructor type hint.
+# Keeping it here keeps the existing top-level imports intact.
+
 console = Console()
 
 class CriticAgent:
@@ -19,6 +22,10 @@ class CriticAgent:
         self.temperature = temperature
         self._llm = get_llm()
         self.prompt_manager = PromptManager()
+        # Last full CriticResponse, so the pipeline can persist the rejected
+        # candidates alongside the approved ones (the user reviews both in
+        # the UI and can give feedback on each rejection).
+        self.last_response: Optional[CriticResponse] = None
 
     def _format_transcript(self, transcript: Transcript) -> str:
         lines = []
@@ -78,6 +85,10 @@ class CriticAgent:
                 response_obj = CriticResponse(**parsed_dict)
             else:
                 response_obj = response_raw if isinstance(response_raw, CriticResponse) else CriticResponse(**json.loads(response_raw.model_dump_json()))
+
+            # Persist the full response so callers can save approved+rejected
+            # to disk for UI review and user feedback.
+            self.last_response = response_obj
 
             # Surface rejected clips with reasoning. Otherwise a Critic that
             # eats 16/18 candidates looks like a silent bug — the user has

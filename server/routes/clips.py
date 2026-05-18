@@ -478,6 +478,122 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
         error=job.error
     )
 
+@router.get("/jobs/{job_id}/critic-decisions")
+async def get_critic_decisions(job_id: str, user: User = Depends(require_auth)):
+    """Return the Critic's full decision (approved + rejected) for a job.
+
+    Reads critic_decisions.json from the episode folder and joins it with
+    any feedback the user has previously given on the same clip timestamps.
+    Front-end shows the rejected entries with the Critic's reasoning and
+    the user's prior verdict + note (so they can revise).
+    """
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    clips_dir = _resolve_clips_dir(job_id, job.episode_id)
+    decisions_path = clips_dir.parent / "critic_decisions.json"
+
+    if not decisions_path.exists():
+        return {
+            "episode_id": job.episode_id,
+            "available": False,
+            "approved": [],
+            "rejected": [],
+            "message": (
+                "No Critic decisions saved for this job. Re-process the "
+                "episode (Process Again) to capture them."
+            ),
+        }
+
+    try:
+        decisions = json.loads(decisions_path.read_text())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not parse decisions: {e}")
+
+    # Pull existing feedback so the UI can pre-fill the user's verdict.
+    feedback_rows = store.get_critic_feedback_for_episode(job.episode_id)
+    feedback_by_range: dict[tuple, dict] = {
+        (round(f["start_time"], 2), round(f["end_time"], 2)): f
+        for f in feedback_rows
+    }
+
+    approved: list[dict] = []
+    rejected: list[dict] = []
+    for d in decisions:
+        key = (round(float(d.get("start_time", 0)), 2), round(float(d.get("end_time", 0)), 2))
+        fb = feedback_by_range.get(key)
+        entry = {
+            "start_time": d.get("start_time"),
+            "end_time": d.get("end_time"),
+            "duration": round(
+                float(d.get("end_time", 0)) - float(d.get("start_time", 0)), 1
+            ),
+            "title": d.get("title"),
+            "summary": d.get("summary"),
+            "reasoning": d.get("reasoning"),
+            "approved": bool(d.get("approved", False)),
+            "user_verdict": fb["user_verdict"] if fb else None,
+            "user_note": fb["user_note"] if fb else None,
+        }
+        (approved if entry["approved"] else rejected).append(entry)
+
+    return {
+        "episode_id": job.episode_id,
+        "available": True,
+        "approved": approved,
+        "rejected": rejected,
+        "counts": {"approved": len(approved), "rejected": len(rejected)},
+    }
+
+
+@router.post("/critic-feedback")
+async def save_critic_feedback(payload: dict, user: User = Depends(require_auth)):
+    """Save the user's verdict on a Critic rejection (or approval).
+
+    Payload:
+        {
+          "episode_id":  "EP021",
+          "start_time":   45.0,
+          "end_time":     72.0,
+          "title":        "...",      # optional, for display
+          "summary":      "...",      # optional, for display
+          "critic_reasoning": "...",  # what the Critic said
+          "user_verdict": "agree" | "disagree" | "neutral",
+          "user_note":    "explica por qué"  # central signal, captured for
+                                              # both agree and disagree
+        }
+    Re-submitting for the same (episode, start, end) overwrites the
+    previous row. Phase B will read this table to inject examples into
+    the Critic system prompt on the next run.
+    """
+    required = ("episode_id", "start_time", "end_time", "user_verdict")
+    missing = [k for k in required if k not in payload]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing required fields: {', '.join(missing)}",
+        )
+    verdict = payload["user_verdict"]
+    if verdict not in ("agree", "disagree", "neutral"):
+        raise HTTPException(
+            status_code=400,
+            detail="user_verdict must be one of: agree, disagree, neutral",
+        )
+
+    row_id = store.save_critic_feedback(
+        episode_id=payload["episode_id"],
+        start_time=float(payload["start_time"]),
+        end_time=float(payload["end_time"]),
+        title=payload.get("title"),
+        summary=payload.get("summary"),
+        critic_reasoning=payload.get("critic_reasoning"),
+        user_verdict=verdict,
+        user_note=payload.get("user_note"),
+    )
+    return {"status": "saved", "id": row_id}
+
+
 @router.get("/clips/{job_id}/rejected")
 async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
     """List all rejected clips for a job, with age info."""
