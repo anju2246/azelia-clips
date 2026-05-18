@@ -96,11 +96,14 @@ class LocalWhisperSource(TranscriptionSource):
         """
         try:
             from packages.clips.transcription.diarizer import (
-                SpeakerDiarizer,
+                get_diarizer,
                 assign_speakers_to_transcript,
             )
-            
-            diarizer = SpeakerDiarizer()
+
+            # Singleton — pyannote's Pipeline is ~500 MB and ~10-20 s to
+            # deserialize. Per-clip re-load was the perceived "slow face
+            # tracking" symptom.
+            diarizer = get_diarizer()
             if not diarizer.is_available:
                 console.print(
                     "[dim]Speaker diarization skipped (no HF_TOKEN set). "
