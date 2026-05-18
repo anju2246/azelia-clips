@@ -11,46 +11,46 @@
  */
 
 const LOCAL_USER = {
-    id: 'local',
-    email: 'local@azelia',
-    user_metadata: { name: 'Local User' },
-    app_metadata: {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+  id: "local",
+  email: "local@azelia",
+  user_metadata: { name: "Local User" },
+  app_metadata: {},
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
 };
 
 const LOCAL_SESSION = {
-    user: LOCAL_USER,
-    access_token: 'local',
-    refresh_token: 'local',
-    expires_in: 3600,
-    expires_at: Date.now() / 1000 + 3600,
-    token_type: 'bearer',
+  user: LOCAL_USER,
+  access_token: "local",
+  refresh_token: "local",
+  expires_in: 3600,
+  expires_at: Date.now() / 1000 + 3600,
+  token_type: "bearer",
 };
 
 export const supabase = {
-    auth: {
-        getSession: async () => ({ data: { session: LOCAL_SESSION }, error: null }),
-        getUser: async () => ({ data: { user: LOCAL_USER }, error: null }),
-        onAuthStateChange: (_cb: unknown) => ({
-            data: { subscription: { unsubscribe: () => {} } },
-        }),
-        signInWithPassword: async () => ({
-            data: { user: LOCAL_USER, session: LOCAL_SESSION },
-            error: null,
-        }),
-        signUp: async () => ({
-            data: { user: LOCAL_USER, session: LOCAL_SESSION },
-            error: null,
-        }),
-        signOut: async () => ({ error: null }),
-        signInWithOAuth: async () => ({ data: { url: '/' }, error: null }),
-        resetPasswordForEmail: async () => ({ data: {}, error: null }),
-        updateUser: async () => ({ data: { user: LOCAL_USER }, error: null }),
-    },
+  auth: {
+    getSession: async () => ({ data: { session: LOCAL_SESSION }, error: null }),
+    getUser: async () => ({ data: { user: LOCAL_USER }, error: null }),
+    onAuthStateChange: (_cb: unknown) => ({
+      data: { subscription: { unsubscribe: () => {} } },
+    }),
+    signInWithPassword: async () => ({
+      data: { user: LOCAL_USER, session: LOCAL_SESSION },
+      error: null,
+    }),
+    signUp: async () => ({
+      data: { user: LOCAL_USER, session: LOCAL_SESSION },
+      error: null,
+    }),
+    signOut: async () => ({ error: null }),
+    signInWithOAuth: async () => ({ data: { url: "/" }, error: null }),
+    resetPasswordForEmail: async () => ({ data: {}, error: null }),
+    updateUser: async () => ({ data: { user: LOCAL_USER }, error: null }),
+  },
 };
 
 export const signOut = async () => {
-    await supabase.auth.signOut();
-    // In local mode there is nothing to redirect from — let the caller handle UX.
+  await supabase.auth.signOut();
+  // In local mode there is nothing to redirect from — let the caller handle UX.
 };

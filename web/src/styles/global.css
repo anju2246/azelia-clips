@@ -15,8 +15,8 @@
   --color-brand-900: #1a4737;
   --color-brand-950: #0e2820;
 
-  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-  --font-mono: 'JetBrains Mono', monospace;
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-mono: "JetBrains Mono", monospace;
 }
 
 /* ===== LANDING PAGE BACKGROUNDS ===== */
