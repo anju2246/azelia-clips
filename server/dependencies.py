@@ -46,6 +46,7 @@ async def processing_worker(job_id: str, payload: Dict[str, Any]):
         video_path_str = payload.get("video_path")
         settings_dict = payload.get("settings", {})
         transcription_config = payload.get("transcription_config", {})
+        start_from_clip = int(payload.get("start_from_clip", 0) or 0)
 
         file_path = Path(video_path_str)
 
@@ -58,7 +59,9 @@ async def processing_worker(job_id: str, payload: Dict[str, Any]):
         )
 
         def run_processing():
-            return processor.process_single(file_path, job_id=job_id)
+            return processor.process_single(
+                file_path, job_id=job_id, start_from_clip=start_from_clip
+            )
 
         clips_count = await asyncio.to_thread(run_processing)
 
