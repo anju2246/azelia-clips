@@ -290,15 +290,15 @@ export const OnboardingWizard: React.FC = () => {
         setFormData(prev => ({ ...prev, ...updates }));
     };
 
-    // v0.1.0: only steps 1 (Workspace) and 4 (AI providers) are shown.
-    // Steps 2 (strategic profile) and 3 (YouTube + telemetry) are skipped —
-    // they were tied to the central backend that v0.1.0 doesn't have.
+    // v0.1.0: 3 visible steps — Workspace (1) → YouTube optional (3) → AI (4).
+    // Step 2 (strategic profile) is skipped — it was tied to the central backend.
     const handleNext = () => setStep(prev => {
-        if (prev === 1) return 4;
+        if (prev === 1) return 3;
         return (prev + 1) as 1 | 2 | 3 | 4;
     });
     const handlePrev = () => setStep(prev => {
-        if (prev === 4) return 1;
+        if (prev === 4) return 3;
+        if (prev === 3) return 1;
         return (prev - 1) as 1 | 2 | 3 | 4;
     });
 
@@ -485,9 +485,9 @@ export const OnboardingWizard: React.FC = () => {
 
     return (
         <div ref={boxRef} className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl relative transition-all duration-500 h-[75vh] overflow-y-auto">
-            {/* Progress indicator — v0.1.0 collapses to 2 visible steps (Workspace + AI) */}
+            {/* Progress indicator — v0.1.0 has 3 visible steps: Workspace, YouTube (optional), AI */}
             <div className="flex items-center gap-2 mb-8">
-                {[1, 4].map((i) => (
+                {[1, 3, 4].map((i) => (
                     <div key={i} className={`flex-1 h-1.5 rounded-full transition-colors duration-300 ${step >= i ? 'bg-brand-500 shadow-[0_0_10px_rgba(168,85,247,0.5)]' : 'bg-zinc-800'}`} />
                 ))}
             </div>
@@ -669,33 +669,15 @@ export const OnboardingWizard: React.FC = () => {
             {step === 3 && (
                 <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-500">
                     <div>
-                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Expande el Cerebro</h1>
-                        <p className="text-zinc-400 mt-2 text-lg">Connect your channels and join the collective engine that makes clips more viral every day.</p>
+                        <h1 className="text-3xl font-bold bg-gradient-to-r from-white to-zinc-400 bg-clip-text text-transparent">Connect YouTube <span className="text-zinc-500 text-base font-normal">— optional</span></h1>
+                        <p className="text-zinc-400 mt-2 text-lg">
+                            Azelia analyzes your past Shorts (entirely local — uses your Claude Code or
+                            Anthropic key) and biases the curation agents toward what already works for
+                            <em> your</em> audience. You can do this later from Settings → Integrations.
+                        </p>
                     </div>
 
                     <div className="space-y-6 mt-6">
-                        {/* Telemetry Card */}
-                        <div className={`p-5 rounded-2xl border transition-all ${telemetry ? 'bg-brand-500/10 border-brand-500/30' : 'bg-zinc-900/50 border-white/10'}`}>
-                            <div className="flex items-start justify-between">
-                                <div className="space-y-1 pr-6">
-                                    <h3 className="text-white font-medium flex items-center gap-2">
-                                        <BarChart className="w-4 h-4 text-brand-400" /> Collective Intelligence (Telemetry)
-                                    </h3>
-                                    <p className="text-sm text-zinc-400 leading-relaxed">
-                                        Want your clips to trend higher over time? Azelia learns from the community. By opting in, you contribute anonymous data on retention metrics and which hooks earn more views in your niche.
-                                        <br /><br />
-                                        <strong className="text-brand-300">Why enable it??</strong><br />
-                                        • Mejoras el algoritmo de tu propio nicho.<br />
-                                        • Obtienes prioridad en nuevas funciones "Beta".<br />
-                                        • We NEVER send your videos, audio, or scripts — only numbers and classifications.
-                                    </p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer flex-shrink-0 mt-1">
-                                    <input type="checkbox" className="sr-only peer" checked={telemetry} onChange={(e) => setTelemetry(e.target.checked)} />
-                                    <div className="w-11 h-6 bg-zinc-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500"></div>
-                                </label>
-                            </div>
-                        </div>
 
                         {/* Social Connections */}
                         <div className="pt-4">
@@ -751,14 +733,6 @@ export const OnboardingWizard: React.FC = () => {
                                     </button>
                                 )}
 
-                                {/* TikTok Button (future) */}
-                                <button onClick={() => handleSocialConnect('tiktok')} className="w-full flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-[#00f2fe]/30 transition-all text-left cursor-pointer">
-                                    <svg className="w-5 h-5 ml-0.5 text-zinc-200" fill="currentColor" viewBox="0 0 24 24"><path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z" /></svg>
-                                    <div>
-                                        <div className="text-zinc-200 font-medium text-sm">TikTok Account</div>
-                                        <div className="text-zinc-500 text-xs mt-0.5">Coming soon</div>
-                                    </div>
-                                </button>
                             </div>
                         </div>
                     </div>
@@ -767,9 +741,14 @@ export const OnboardingWizard: React.FC = () => {
                         <button onClick={handlePrev} className="text-zinc-400 hover:text-white transition-colors text-sm font-medium flex items-center gap-2">
                             <ArrowLeft className="w-4 h-4" /> Back
                         </button>
-                        <button onClick={handleNext} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all">
-                             Next <ArrowRight className="w-4 h-4" />
-                        </button>
+                        <div className="flex items-center gap-3">
+                            <button onClick={handleNext} className="text-zinc-400 hover:text-zinc-200 transition-colors text-sm font-medium px-4 py-2 rounded-lg hover:bg-white/5">
+                                Skip for now
+                            </button>
+                            <button onClick={handleNext} className="flex items-center gap-2 px-6 py-3 bg-white text-black font-semibold rounded-xl hover:bg-zinc-200 focus:ring-4 focus:ring-white/20 transition-all">
+                                {ytConnected ? 'Continue' : 'Next'} <ArrowRight className="w-4 h-4" />
+                            </button>
+                        </div>
                     </div>
                 </div>
             )}
