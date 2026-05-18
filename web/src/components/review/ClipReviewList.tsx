@@ -8,13 +8,15 @@ import {
   type Clip,
   type EpisodeResponse,
 } from "../../lib/api";
-import { ArrowLeft, Loader2, VideoOff, Trash2 } from "lucide-react";
+import { ArrowLeft, Loader2, VideoOff, Trash2, MessageSquareWarning } from "lucide-react";
 import toast from "react-hot-toast";
+import { CriticInsightsModal } from "./CriticInsightsModal";
 
 export const ClipReviewList: React.FC = () => {
   const [job, setJob] = useState<JobResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
+  const [criticOpen, setCriticOpen] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(
@@ -178,21 +180,31 @@ export const ClipReviewList: React.FC = () => {
               </p>
             </div>
 
-            <button
-              onClick={() => setShowTrash(!showTrash)}
-              className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium ${
-                showTrash
-                  ? "bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 hover:text-white"
-                  : "bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10"
-              }`}
-            >
-              {showTrash ? (
-                <ArrowLeft className="w-4 h-4" />
-              ) : (
-                <Trash2 className="w-4 h-4" />
-              )}
-              {showTrash ? "Back to clips" : "View trash"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCriticOpen(true)}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
+                title="Ver qué clips rechazó el Critic y dar feedback"
+              >
+                <MessageSquareWarning className="w-4 h-4" />
+                Critic insights
+              </button>
+              <button
+                onClick={() => setShowTrash(!showTrash)}
+                className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium ${
+                  showTrash
+                    ? "bg-zinc-800 text-zinc-200 border-zinc-700 hover:bg-zinc-700 hover:text-white"
+                    : "bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-red-400 hover:border-red-500/30 hover:bg-red-500/10"
+                }`}
+              >
+                {showTrash ? (
+                  <ArrowLeft className="w-4 h-4" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
+                {showTrash ? "Back to clips" : "View trash"}
+              </button>
+            </div>
           </div>
 
           {showTrash ? (
@@ -343,6 +355,10 @@ export const ClipReviewList: React.FC = () => {
             onReject={handleReject}
           />
         )}
+
+      {criticOpen && jobId && (
+        <CriticInsightsModal jobId={jobId} onClose={() => setCriticOpen(false)} />
+      )}
     </div>
   );
 };
