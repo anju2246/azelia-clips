@@ -224,6 +224,29 @@ def _get_yt_db():
             value TEXT
         )
     """)
+
+    # Local-first MVP: creator signals live in the user's own SQLite, not in a
+    # central IC Cascade. The Ranker reads these when curating clips so the
+    # agents bias toward what's working for THIS creator's audience.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS creator_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL,
+            signal_type TEXT,
+            hook_type TEXT,
+            emotional_charge TEXT,
+            duration_bucket TEXT,
+            topic_tag TEXT,
+            pattern_json TEXT,
+            performance_premium REAL DEFAULT 1.0,
+            confidence REAL DEFAULT 0.5,
+            sample_size INTEGER DEFAULT 0,
+            period TEXT,
+            created_at TEXT DEFAULT (datetime('now'))
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_creator_signals_user ON creator_signals(user_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_creator_signals_premium ON creator_signals(user_id, performance_premium DESC)")
     conn.commit()
     return conn
 
@@ -564,14 +587,21 @@ async def extract_creator_signals(
     if not body.get("confirmed"):
         raise HTTPException(status_code=400, detail="confirmed=true is required to run")
 
+    # MultiProviderLLM auto-detects Claude Code (local subscription, $0) and
+    # falls back to Anthropic API if the user set ANTHROPIC_API_KEY=sk-ant-...
+    # Either path works — no hard requirement for a real Anthropic API key.
+    from packages.core.llm_provider import claude_code_available
     from packages.core.config import settings as app_settings
 
-    api_key = (
-        user_settings_store.effective_setting(user.id, "ANTHROPIC_API_KEY")
-        or app_settings.anthropic_api_key
+    direct_key_ok = (
+        (app_settings.anthropic_api_key or "").startswith("sk-ant-")
     )
-    if not api_key or not api_key.startswith("sk-"):
-        raise HTTPException(status_code=400, detail="Anthropic API key not configured")
+    if not (direct_key_ok or claude_code_available()):
+        raise HTTPException(
+            status_code=400,
+            detail="No LLM provider available. Either set ANTHROPIC_API_KEY (sk-ant-...) "
+                   "in Settings, or install Claude Code (https://claude.com/download).",
+        )
 
     batch_size = max(5, min(int(body.get("batch_size") or 30), 50))
 
@@ -610,27 +640,30 @@ async def extract_creator_signals(
     #    User can override via body.model; validation is lax — Anthropic will
     #    reject an unknown model ID and we'll surface that 502.
     chosen_model = _resolve_anthropic_model(body.get("model"))
+    user_content = (
+        _CREATOR_SIGNALS_PROMPT
+        + "\n\nSHORTS BATCH:\n"
+        + "\n".join(
+            f'{i + 1}. "{s["title"]}" · dur={s["duration_seconds"]}s · views={s["view_count"]} · likes={s["like_count"]}'
+            for i, s in enumerate(shorts_payload)
+        )
+    )
     try:
-        from anthropic import Anthropic
-
-        client = Anthropic(api_key=api_key)
-        user_content = (
-            _CREATOR_SIGNALS_PROMPT
-            + "\n\nSHORTS BATCH:\n"
-            + "\n".join(
-                f'{i + 1}. "{s["title"]}" · dur={s["duration_seconds"]}s · views={s["view_count"]} · likes={s["like_count"]}'
-                for i, s in enumerate(shorts_payload)
-            )
+        # MultiProviderLLM picks Claude Code first (local subscription, $0)
+        # and falls back to Anthropic API if available. Both go to the same
+        # Claude models, so the prompt + JSON parse work the same way.
+        from packages.core.llm_provider import get_llm
+        raw = get_llm().chat(
+            system_prompt="",  # prompt is fully self-contained in user_content
+            user_message=user_content,
+            temperature=0.3,
         )
-        resp = client.messages.create(
-            model=chosen_model,
-            max_tokens=3000,
-            messages=[{"role": "user", "content": user_content}],
-        )
-        raw = resp.content[0].text if resp.content else ""
+        # MultiProviderLLM doesn't expose usage tokens uniformly across providers;
+        # cost_actual will be None when Claude Code is used. Estimate already shown.
+        resp = type("ResponseShim", (), {"content": [], "usage": None})()
     except Exception as exc:
-        logger.exception("Anthropic call failed in pattern extraction")
-        raise HTTPException(status_code=502, detail="Anthropic call failed") from exc
+        logger.exception("LLM call failed in creator-signal extraction")
+        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
 
     # 3. Parse the JSON reply
     import json as _json
@@ -684,43 +717,41 @@ async def extract_creator_signals(
     except Exception:
         pass
 
-    # 4. POST patterns to the creator-signals Edge Function.
-    #    The function computes cohort_hash server-side, inserts into ic_signals,
-    #    and invalidates the user's LocalIntelligence cache — no service role needed here.
-    if not user_jwt:
-        raise HTTPException(status_code=401, detail="Missing user token for creator signals")
-    if not app_settings.supabase_url:
-        raise HTTPException(status_code=500, detail="SUPABASE_URL not configured")
+    # 4. Persist patterns LOCALLY (no central IC in v0.1.0).
+    #    creator_signals lives in the user's own youtube_shorts.db; the Ranker
+    #    reads from it during every curation run.
+    import json as _json2
 
+    signals_created = 0
+    insert_conn = _get_yt_db()
     try:
-        import httpx as _httpx2
-
-        fn_resp = _httpx2.post(
-            _creator_signals_url(),
-            json={
-                "patterns": patterns,
-                "region": profile_region,
-                "language": profile_language,
-                "category": profile_category,
-                "period": period,
-            },
-            headers={
-                "Authorization": f"Bearer {user_jwt}",
-                "apikey": app_settings.supabase_key,
-                "Content-Type": "application/json",
-            },
-            timeout=15,
-        )
-        if fn_resp.status_code >= 400:
-            raise HTTPException(
-                status_code=502,
-                detail=f"creator-signals insert failed: {fn_resp.status_code} {fn_resp.text[:200]}",
+        for pat in patterns:
+            pat_obj = pat.get("pattern") if isinstance(pat.get("pattern"), dict) else {}
+            insert_conn.execute(
+                """
+                INSERT INTO creator_signals
+                  (user_id, signal_type, hook_type, emotional_charge, duration_bucket,
+                   topic_tag, pattern_json, performance_premium, confidence, sample_size, period)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user.id,
+                    (pat.get("signal_type") or "clip_hook")[:32],
+                    (pat_obj.get("hook_type") or "")[:32] or None,
+                    (pat_obj.get("emotional_charge") or "")[:32] or None,
+                    (pat_obj.get("duration_bucket") or "")[:16] or None,
+                    (pat_obj.get("topic_tag") or "")[:64] or None,
+                    _json2.dumps(pat_obj, ensure_ascii=False)[:2048],
+                    float(pat.get("performance_premium") or 1.0),
+                    float(pat.get("confidence") or 0.5),
+                    int(pat.get("sample_size") or len(rows)),
+                    period,
+                ),
             )
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("creator-signals Edge Function call failed")
-        raise HTTPException(status_code=502, detail="Insert error") from exc
+            signals_created += 1
+        insert_conn.commit()
+    finally:
+        insert_conn.close()
 
     # 5. Estimated vs actual usage — rate tied to the model actually used.
     usage = getattr(resp, "usage", None)
@@ -736,11 +767,6 @@ async def extract_creator_signals(
         else:
             in_rate, out_rate = 1.0, 5.0
         actual_cost = round((in_t / 1_000_000) * in_rate + (out_t / 1_000_000) * out_rate, 4)
-
-    try:
-        signals_created = fn_resp.json().get("signals_created", len(patterns))
-    except Exception:
-        signals_created = len(patterns)
 
     return {
         "status": "complete",
@@ -786,40 +812,46 @@ async def get_my_content_intelligence(
       - avoid_patterns:    low-confidence / underperforming patterns (performance_premium < 1)
       - empty state flag   so the UI can prompt a first extraction
     """
-    from packages.core.config import settings as app_settings
+    # Local-first MVP: read creator_signals from the user's own SQLite.
+    # No central IC, no Edge Function — everything stays on the machine.
+    conn = _get_yt_db()
+    cur = conn.execute(
+        """
+        SELECT signal_type, hook_type, emotional_charge, duration_bucket,
+               topic_tag, pattern_json, performance_premium, confidence, sample_size
+        FROM creator_signals
+        WHERE user_id = ?
+        ORDER BY performance_premium * confidence DESC
+        """,
+        (user.id,),
+    )
+    raw_rows = cur.fetchall()
+    conn.close()
 
-    user_jwt = getattr(request.state, "user_jwt", None) or ""
-    if not user_jwt or not app_settings.supabase_url:
-        return {"empty": True, "reason": "unauthenticated"}
-
-    # Fetch via the creator-signals Edge Function — cohort_hash is computed
-    # server-side with COHORT_SALT. No service role needed on this server.
-    import httpx as _httpx
-
-    try:
-        r = _httpx.get(
-            _creator_signals_url(),
-            headers={
-                "Authorization": f"Bearer {user_jwt}",
-                "apikey": app_settings.supabase_key,
-            },
-            timeout=10,
-        )
-        # 404 means the Edge Function isn't deployed yet — treat as no signals.
-        if r.status_code == 404:
-            return {"empty": True, "reason": "no_signals_yet"}
-        if r.status_code >= 400:
-            raise HTTPException(status_code=502, detail=f"creator-signals fetch failed: {r.status_code}")
-        data = r.json()
-    except HTTPException:
-        raise
-    except Exception as exc:
-        logger.exception("creator-signals fetch failed")
-        raise HTTPException(status_code=502, detail="ic_signals fetch error") from exc
-
-    rows = data.get("signals") or []
-    if not rows:
+    if not raw_rows:
         return {"empty": True, "reason": "no_signals_yet"}
+
+    import json as _json3
+
+    rows = []
+    for r in raw_rows:
+        try:
+            pat = _json3.loads(r[5]) if r[5] else {}
+        except Exception:
+            pat = {}
+        rows.append({
+            "signal_type": r[0],
+            "pattern": {
+                "hook_type": r[1] or pat.get("hook_type"),
+                "emotional_charge": r[2] or pat.get("emotional_charge"),
+                "topic_tag": r[4] or pat.get("topic_tag"),
+                **{k: v for k, v in pat.items() if k not in ("hook_type", "emotional_charge", "topic_tag")},
+            },
+            "duration_bucket": r[3],
+            "performance_premium": float(r[6] or 1.0),
+            "confidence": float(r[7] or 0.5),
+            "sample_size": int(r[8] or 0),
+        })
 
     def _score(row: dict) -> float:
         pp = float(row.get("performance_premium") or 1.0)

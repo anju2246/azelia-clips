@@ -4,6 +4,7 @@ import { SettingsApi, type SettingsResponse, type UpdateSettingsRequest } from '
 import { DirectoryPicker } from './DirectoryPicker';
 import { useAIModels } from '../../hooks/useAIModels';
 import { SystemUpdateCard } from '../system/SystemUpdateCard';
+import { YouTubeConnect } from '../analytics/YouTubeConnect';
 import toast, { Toaster } from 'react-hot-toast';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
@@ -466,6 +467,24 @@ export const SettingsForm: React.FC = () => {
 
                 {/* Integrations tab */}
                 {activeTab === 'integrations' && (<>
+
+                {/* YouTube — feeds the Ranker with the creator's own performance data */}
+                <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden mb-6">
+                    <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center gap-2">
+                        <svg className="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="currentColor"><path d="M23.498 6.186a3.016 3.016 0 0 0-2.122-2.136C19.505 3.545 12 3.545 12 3.545s-7.505 0-9.377.505A3.017 3.017 0 0 0 .502 6.186C0 8.07 0 12 0 12s0 3.93.502 5.814a3.016 3.016 0 0 0 2.122 2.136c1.871.505 9.376.505 9.376.505s7.505 0 9.377-.505a3.015 3.015 0 0 0 2.122-2.136C24 15.93 24 12 24 12s0-3.93-.502-5.814zM9.545 15.568V8.432L15.818 12l-6.273 3.568z"/></svg>
+                        <h3 className="font-semibold text-white">YouTube</h3>
+                        <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-widest border border-zinc-700 ml-auto">Optional</span>
+                    </div>
+                    <div className="p-6">
+                        <p className="text-sm text-zinc-400 leading-relaxed mb-4">
+                            Connect your channel so Azelia can analyze your own past Shorts and feed
+                            those patterns to the curation agents — they'll bias clips toward what's
+                            working for <em>your</em> audience. All processing stays local.
+                        </p>
+                        <YouTubeConnect />
+                    </div>
+                </section>
+
                 <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
                     <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center gap-2">
                         <Database className="w-5 h-5 text-emerald-400" />

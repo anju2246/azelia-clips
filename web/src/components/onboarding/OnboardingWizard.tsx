@@ -8,7 +8,6 @@ import { RetroactiveSyncModal } from '../analytics/RetroactiveSyncModal';
 import { SearchableCombobox, type ComboboxItem } from '../ui/SearchableCombobox';
 import { fetchTaxonomy } from '../../lib/taxonomy';
 
-import { ProUpgradeCard } from '../upgrade/ProUpgradeCard';
 
 const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || '/api';
 
@@ -401,7 +400,7 @@ export const OnboardingWizard: React.FC = () => {
                 if (!hasSyncedHistorical && hasAnyKey) {
                     setTimeout(() => setShowRetroactiveModal(true), 800);
                 }
-                // If coming back from YouTube OAuth during the ProUpgradeCard step, go to dashboard
+                // If coming back from YouTube OAuth during the optional Pro step (removed v0.1.0), go to dashboard
                 if (showProCard) {
                     setTimeout(() => window.location.replace('/dashboard'), 1500);
                 }
@@ -477,20 +476,12 @@ export const OnboardingWizard: React.FC = () => {
         <div className="flex justify-center items-center py-20"><Loader2 className="w-8 h-8 text-brand-500 animate-spin" /></div>
     );
 
-    if (showProCard) return (
-        <div className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl space-y-4">
-            <div>
-                <h2 className="text-2xl font-bold text-white">You're all set!</h2>
-                <p className="text-zinc-400 mt-1">One last thing before you enter the dashboard.</p>
-            </div>
-            <ProUpgradeCard
-                onActivated={() => window.location.replace('/dashboard')}
-                youtubeConnected={ytConnected}
-                redirectUri={window.location.origin.replace('127.0.0.1', 'localhost').replace('0.0.0.0', 'localhost') + '/onboarding'}
-                onYouTubeConnected={() => window.location.replace('/dashboard')}
-            />
-        </div>
-    );
+    // showProCard was a SaaS-era Pro tier upsell — removed in v0.1.0.
+    // If anything sets showProCard=true, redirect straight to dashboard.
+    if (showProCard) {
+        if (typeof window !== 'undefined') window.location.replace('/dashboard');
+        return null;
+    }
 
     return (
         <div ref={boxRef} className="bg-zinc-900/60 border border-white/10 rounded-3xl p-8 backdrop-blur-xl shadow-2xl relative transition-all duration-500 h-[75vh] overflow-y-auto">
