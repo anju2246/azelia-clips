@@ -66,6 +66,15 @@ export const YouTubeConnect: React.FC = () => {
     }
     return false;
   });
+  // ToS + Privacy acceptance gate — required by Google's verification
+  // policy at the point of OAuth handoff. Persisted in localStorage so
+  // users who already accepted during onboarding don't see it again.
+  const [tosAccepted, setTosAccepted] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("az_tos_accepted") === "true";
+    }
+    return false;
+  });
 
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
@@ -116,6 +125,10 @@ export const YouTubeConnect: React.FC = () => {
   };
 
   const handleConnect = async () => {
+    if (!tosAccepted) {
+      toast.error("Please accept the Terms and Privacy Policy first.");
+      return;
+    }
     try {
       // Google OAuth requires exact string matching for redirect URIs, and generally prefers localhost over IPs.
       const baseOrigin = window.location.origin
@@ -442,15 +455,64 @@ export const YouTubeConnect: React.FC = () => {
               </button>
             </div>
           ) : (
-            <button
-              onClick={() => {
-                console.log("YT CLICK");
-                handleConnect();
-              }}
-              className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-red-500/20 cursor-pointer"
-            >
-              <Youtube className="w-4 h-4" /> Connect YouTube
-            </button>
+            <div className="flex flex-col gap-2 w-full md:w-auto md:items-end">
+              {!tosAccepted && (
+                <label
+                  htmlFor="yt-tos-accept"
+                  className="flex items-start gap-2 text-xs text-zinc-300 max-w-xs cursor-pointer"
+                >
+                  <input
+                    id="yt-tos-accept"
+                    type="checkbox"
+                    checked={tosAccepted}
+                    onChange={(e) => {
+                      const v = e.target.checked;
+                      setTosAccepted(v);
+                      try {
+                        if (v) localStorage.setItem("az_tos_accepted", "true");
+                        else localStorage.removeItem("az_tos_accepted");
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    className="mt-0.5 w-4 h-4 shrink-0 rounded border-zinc-600 bg-black/40 text-red-500 focus:ring-red-500/40 focus:ring-offset-0 cursor-pointer"
+                  />
+                  <span className="leading-snug">
+                    I accept the{" "}
+                    <a
+                      href="https://azelia.ai/terms"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-red-400 hover:text-red-300 underline underline-offset-2"
+                    >
+                      Terms
+                    </a>{" "}
+                    and{" "}
+                    <a
+                      href="https://azelia.ai/privacy"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-red-400 hover:text-red-300 underline underline-offset-2"
+                    >
+                      Privacy Policy
+                    </a>
+                    .
+                  </span>
+                </label>
+              )}
+              <button
+                onClick={handleConnect}
+                disabled={!tosAccepted}
+                title={
+                  !tosAccepted
+                    ? "Accept the Terms and Privacy Policy first."
+                    : undefined
+                }
+                className="flex-1 md:flex-none flex items-center justify-center gap-2 px-6 py-2.5 bg-red-600 hover:bg-red-500 text-white rounded-xl font-medium transition-colors shadow-lg shadow-red-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed disabled:shadow-none"
+              >
+                <Youtube className="w-4 h-4" /> Connect YouTube
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -125,6 +125,18 @@ export const OnboardingWizard: React.FC = () => {
   const [ytConnected, setYtConnected] = useState(false);
   const [ytChannelName, setYtChannelName] = useState("");
   const [ytConnecting, setYtConnecting] = useState(false);
+  // Required acceptance of Terms + Privacy before any YouTube OAuth
+  // handoff. Google's verification policy expects us to surface these
+  // links explicitly at the point of consent, not buried in a footer.
+  // Persisted in localStorage so re-running onboarding doesn't ask
+  // every time after the first acceptance.
+  const [tosAccepted, setTosAccepted] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("az_tos_accepted") === "true";
+    } catch {
+      return false;
+    }
+  });
   const [ytChannels, setYtChannels] = useState<any[]>([]);
   const [ytAccessToken, setYtAccessToken] = useState<string | null>(null);
   const [ytShowPicker, setYtShowPicker] = useState(false);
@@ -206,6 +218,9 @@ export const OnboardingWizard: React.FC = () => {
     active: boolean;
     method?: string;
   } | null>(null);
+  // Collapsible fallback provider section. Closed by default when Claude Code
+  // is active (no key needed); opens automatically when CC is missing.
+  const [showFallbackProvider, setShowFallbackProvider] = useState(false);
   useEffect(() => {
     fetchWithAuth("/providers")
       .then((r) => (r.ok ? r.json() : null))
@@ -460,66 +475,47 @@ export const OnboardingWizard: React.FC = () => {
   const handleFinish = async () => {
     setSaving(true);
     try {
-      // 1. Sync Profile to Supabase. Use upsert so the wizard works even
-      // when the profile row doesn't exist yet (deleted during testing,
-      // or auth.users insert trigger never created one). `id` matches
-      // auth.uid() so RLS still scopes the write to this user.
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (user) {
-        await supabase.from("profiles").upsert(
-          {
-            id: user.id,
-            email: user.email,
-            content_niche: profile.content_niche,
-            user_role: profile.user_role,
-            primary_goal: profile.primary_goal,
-            preferences: {
-              region: profile.region,
-              episode_format: profile.episode_format,
-              language: profile.language,
-            },
-          },
-          { onConflict: "id" },
-        );
-      }
+      // Local-first MVP: only save the settings the backend actually accepts
+      // (no central 'profiles' table, no telemetry endpoint, no onboarding-status API).
+      const payload: Partial<UpdateSettingsRequest> = {
+        podcast_name: formData.podcast_name,
+        podcast_dir: formData.podcast_dir,
+      };
+      // Anthropic key is OPTIONAL — only include if the user actually typed something.
+      const ak = (formData.anthropic_api_key || "").trim();
+      if (ak && !ak.includes("...")) payload.anthropic_api_key = ak;
 
-      // 2. Sync Local Settings (Env)
-      await SettingsApi.updateSettings({ ...formData });
+      await SettingsApi.updateSettings(payload);
 
-      // 3. Save Telemetry Consent via API
-      try {
-        await fetchWithAuth("/telemetry/consent", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ enabled: telemetry }),
-        });
-      } catch {
-        /* non-critical — telemetry preference saved on next settings visit */
-      }
-      // 4. Clear local storage checkpoints & mark as complete (DB + localStorage)
-      localStorage.removeItem("az_onboard_step");
-      localStorage.removeItem("az_onboard_profile");
-      localStorage.removeItem("az_onboard_telemetry");
-      localStorage.removeItem("az_onboard_form");
+      // Clear wizard checkpoints + mark complete (single-user: just localStorage)
+      [
+        "az_onboard_step",
+        "az_onboard_profile",
+        "az_onboard_telemetry",
+        "az_onboard_form",
+        "az_historical_synced",
+      ].forEach((k) => localStorage.removeItem(k));
       localStorage.setItem("az_onboarding_complete", "true");
-      try {
-        await fetchWithAuth("/auth/onboarding-complete", { method: "POST" });
-      } catch {
-        /* non-critical — gate will re-check on next login */
-      }
 
       toast.success("Welcome to Azelia Clips!");
-      setShowProCard(true);
+      // Go straight to the dashboard
+      window.location.replace("/dashboard");
     } catch (e) {
       console.error("Failed to save onboarding data", e);
-      toast.error("Hubo un error guardando tu perfil.");
+      toast.error("Could not save settings — check that the backend is running.");
       setSaving(false);
     }
   };
 
   const handleYouTubeConnect = async () => {
+    // Gate: ToS + Privacy must be accepted before we hand the user off
+    // to Google's OAuth screen. Without this the consent flow violates
+    // Google's verification policy (we need to surface our terms at
+    // the point of authorization).
+    if (!tosAccepted) {
+      toast.error("Please accept the Terms and Privacy Policy first.");
+      return;
+    }
     try {
       // Google OAuth requires exact string matching for redirect URIs, and generally prefers localhost over IPs.
       const baseOrigin = window.location.origin
@@ -957,16 +953,58 @@ export const OnboardingWizard: React.FC = () => {
             </p>
           </div>
 
-          <div className="bg-amber-950/30 border border-amber-500/30 rounded-xl p-3 flex gap-2.5 items-start">
-            <Shield className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <p className="text-xs text-amber-200/90 leading-relaxed">
-              Azelia is in alpha and the Google OAuth app isn't verified yet.
-              When you connect, Google will warn you to{" "}
-              <em>"go back to safety"</em> — click{" "}
-              <strong>Advanced → Continue</strong> to proceed. Your tokens stay
-              on your machine.
-            </p>
-          </div>
+          {/* Terms + Privacy acceptance gate. Required before any
+              YouTube OAuth handoff per Google's verification policy.
+              Hidden once already accepted (persisted via localStorage)
+              so returning users don't see it every onboarding pass. */}
+          {!tosAccepted && (
+            <label
+              htmlFor="tos-accept"
+              className={`flex items-start gap-3 p-3 rounded-xl border transition-colors cursor-pointer ${
+                tosAccepted
+                  ? "bg-green-950/20 border-green-500/30"
+                  : "bg-zinc-900/40 border-white/10 hover:border-white/20"
+              }`}
+            >
+              <input
+                id="tos-accept"
+                type="checkbox"
+                checked={tosAccepted}
+                onChange={(e) => {
+                  const v = e.target.checked;
+                  setTosAccepted(v);
+                  try {
+                    if (v) localStorage.setItem("az_tos_accepted", "true");
+                    else localStorage.removeItem("az_tos_accepted");
+                  } catch {
+                    /* ignore */
+                  }
+                }}
+                className="mt-0.5 w-4 h-4 rounded border-zinc-600 bg-black/40 text-brand-500 focus:ring-brand-500/40 focus:ring-offset-0 cursor-pointer"
+              />
+              <span className="text-xs text-zinc-300 leading-relaxed">
+                I accept the{" "}
+                <a
+                  href="https://azelia.ai/terms"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+                >
+                  Terms of Service
+                </a>{" "}
+                and{" "}
+                <a
+                  href="https://azelia.ai/privacy"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-brand-400 hover:text-brand-300 underline underline-offset-2"
+                >
+                  Privacy Policy
+                </a>
+                . Required before connecting YouTube.
+              </span>
+            </label>
+          )}
 
           <div className="space-y-6 mt-6">
             {/* Social Connections */}
@@ -1047,8 +1085,13 @@ export const OnboardingWizard: React.FC = () => {
                 ) : (
                   <button
                     onClick={handleYouTubeConnect}
-                    disabled={ytConnecting}
-                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-red-500/30 transition-all text-left cursor-pointer disabled:opacity-50"
+                    disabled={ytConnecting || !tosAccepted}
+                    title={
+                      !tosAccepted
+                        ? "Accept the Terms and Privacy Policy above to connect"
+                        : undefined
+                    }
+                    className="w-full flex items-center gap-3 p-4 rounded-xl bg-black/20 border border-white/5 hover:bg-black/40 hover:border-red-500/30 transition-all text-left cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     {ytConnecting ? (
                       <Loader2 className="w-6 h-6 text-red-500 animate-spin" />
@@ -1157,9 +1200,28 @@ export const OnboardingWizard: React.FC = () => {
             </div>
           )}
 
-          {/* Provider Cascade — primary + optional extras */}
+          {/* Provider Cascade — required when Claude Code is NOT active;
+              fully optional (collapsed by default) when it IS active. */}
+          {claudeCode?.active && !showFallbackProvider && (
+            <button
+              type="button"
+              onClick={() => setShowFallbackProvider(true)}
+              className="w-full py-3 px-4 mt-6 border border-dashed border-white/15 rounded-xl text-sm text-zinc-400 hover:text-zinc-200 hover:border-white/30 transition-all flex items-center justify-center gap-2"
+            >
+              <Key className="w-4 h-4" />
+              Add a fallback Anthropic API key
+              <span className="text-xs text-zinc-600">— optional</span>
+            </button>
+          )}
+
+          {(showFallbackProvider || !claudeCode?.active) && (
           <div className="space-y-4 mt-6">
-            {[primaryProvider, ...extraProviders].map((selectedId, slotIdx) => {
+            {claudeCode?.active && (
+              <p className="text-xs text-zinc-500 -mb-2">
+                Fallback runs only when Claude Code is unreachable — you can leave this empty.
+              </p>
+            )}
+            {[primaryProvider || "anthropic", ...extraProviders].map((selectedId, slotIdx) => {
               const isExtra = slotIdx > 0;
               const usedIds = [primaryProvider, ...extraProviders];
               const availableForSlot = providerOrder.filter(
@@ -1338,6 +1400,7 @@ export const OnboardingWizard: React.FC = () => {
               Change it in <span className="text-zinc-500">Settings → AI</span>.
             </p>
           </div>
+          )}
 
           <div className="flex flex-col gap-4 pt-6 border-t border-white/10 mt-6">
             <div className="flex items-center justify-between">
