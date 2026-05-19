@@ -87,15 +87,16 @@ def _episode_segments_for_clip(
 
 class BatchProcessor:
     """
-    Process episodes in batch, saving clips directly to external drive.
-    
-    Structure:
-    external_drive/Backup Inminente/EP###/clips/
-        ├── clip_01.mp4
-        ├── clip_01_caption.txt
-        ├── clip_02.mp4
-        ├── clip_02_caption.txt
-        └── ...
+    Process episodes in batch, saving clips directly to the podcast folder.
+
+    Structure (under settings.podcast_dir):
+        EP###/
+            clips/
+                ├── clip_01.mp4
+                ├── clip_01_caption.txt
+                ├── clip_02.mp4
+                ├── clip_02_caption.txt
+                └── ...
     """
     
     def __init__(
@@ -137,9 +138,9 @@ class BatchProcessor:
         
         if not self.base_path.exists():
             raise FileNotFoundError(
-                f"⚠️ External drive not accessible: {self.base_path}\n"
-                f"   Please connect the external hard drive and ensure the symlink exists:\n"
-                r"   ln -s /Volumes/[DiskName]/Backup\ Inminente external_drive/Backup\ Inminente"
+                f"⚠️ Podcast folder not accessible: {self.base_path}\n"
+                f"   Set PODCAST_DIR in Settings to your episode library "
+                f"(or AZELIA_DATA_DIR if using a custom data root)."
             )
     
     def discover_episodes(self, start: int = 1, end: int = 999) -> list[EpisodeConfig]:
@@ -879,8 +880,12 @@ def run_batch(
     Returns:
         Processing results summary
     """
+    # Pass external_drive_path=None so BatchProcessor falls back to
+    # settings.podcast_dir — the user-configurable library root that the
+    # onboarding wizard writes to secrets.env. Avoids the old hardcoded
+    # path that only worked on a specific machine.
     processor = BatchProcessor(
-        external_drive_path="external_drive/Backup Inminente",
+        external_drive_path=None,
         clip_id=clip_id,
         min_score=min_score,
         use_supabase=use_supabase,

@@ -4,6 +4,7 @@ Local-first MVP — no central backend, single user.
 LLM providers restricted to Claude Code (local subscription) and Anthropic API.
 """
 
+import os
 from pathlib import Path
 from typing import Literal
 
@@ -14,16 +15,31 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 def _default_data_dir() -> Path:
     """User data lives in ~/.azelia/data by default, never inside the checkout.
 
-    Override with AZELIA_DATA_DIR for dev mode (e.g. ./data inside the repo).
+    Honors AZELIA_DATA_DIR so isolated installs (smoke tests, multi-user
+    boxes) get a completely separate data tree — settings, jobs DB,
+    secrets, everything.
     """
+    override = os.environ.get("AZELIA_DATA_DIR")
+    if override:
+        return Path(override).expanduser()
     return Path.home() / ".azelia" / "data"
 
 
+def _secrets_env_path() -> str:
+    """secrets.env always lives next to the rest of the user data so an
+    AZELIA_DATA_DIR override moves it too. Hardcoding Path.home() here
+    (the old behavior) leaked across isolated installs: every new
+    install on the same machine would still read the developer's
+    ~/.azelia/data/secrets.env even when AZELIA_DATA_DIR was set.
+    """
+    return str(_default_data_dir() / "secrets.env")
+
+
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables and ~/.azelia/data/secrets.env."""
+    """Application settings loaded from env vars + secrets.env under the data dir."""
 
     model_config = SettingsConfigDict(
-        env_file=(".env", str(Path.home() / ".azelia" / "data" / "secrets.env")),
+        env_file=(".env", _secrets_env_path()),
         env_file_encoding="utf-8",
         extra="ignore",
     )
