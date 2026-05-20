@@ -202,6 +202,63 @@ async def refresh_models(user: User = Depends(require_auth)):
     return {"data": [m.dict() for m in models]}
 
 
+@router.get("/integrations/transcript-supabase/test")
+async def test_transcript_supabase(user: User = Depends(require_auth)):
+    """Verify the user's transcript-Supabase credentials actually work.
+
+    Returns:
+        {ok: True, episodes: N}              when URL+key reach a Supabase that
+                                              has an `episodes` table.
+        {ok: False, reason: "not_configured"} when URL or key is missing.
+        {ok: False, reason: "<short tag>", detail: "..."} on DNS / auth / schema
+                                              errors so the UI can be specific.
+    """
+    url = (settings.transcript_supabase_url or "").strip()
+    key = (settings.transcript_supabase_key or "").strip()
+    if not url or not key:
+        return {"ok": False, "reason": "not_configured"}
+
+    try:
+        import httpx
+
+        # Probe via PostgREST count header — cheapest possible call.
+        r = httpx.get(
+            f"{url.rstrip('/')}/rest/v1/episodes",
+            params={"select": "id", "limit": "1"},
+            headers={
+                "apikey": key,
+                "Authorization": f"Bearer {key}",
+                "Prefer": "count=exact",
+                "Range-Unit": "items",
+                "Range": "0-0",
+            },
+            timeout=8,
+        )
+        if r.status_code == 401:
+            return {"ok": False, "reason": "invalid_key"}
+        if r.status_code == 404:
+            return {"ok": False, "reason": "no_episodes_table"}
+        if r.status_code >= 400:
+            return {
+                "ok": False,
+                "reason": f"http_{r.status_code}",
+                "detail": (r.text or "")[:200],
+            }
+        # Content-Range header carries the total count when Prefer: count=exact
+        total = None
+        cr = r.headers.get("content-range", "")
+        if "/" in cr:
+            try:
+                total = int(cr.split("/")[-1])
+            except ValueError:
+                total = None
+        return {"ok": True, "episodes": total}
+    except httpx.ConnectError as e:
+        return {"ok": False, "reason": "unreachable", "detail": str(e)[:200]}
+    except Exception as e:
+        return {"ok": False, "reason": type(e).__name__, "detail": str(e)[:200]}
+
+
 @router.get("/credits/status")
 async def get_credits_status(user: User = Depends(require_auth)):
     """Quick probe of the Anthropic API key billing state."""

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Search, Bell, User } from "lucide-react";
+import { Bell, User } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
 export const Header: React.FC = () => {
@@ -29,19 +29,9 @@ export const Header: React.FC = () => {
 
   return (
     <header className="h-16 border-b border-zinc-800/50 bg-black/40 backdrop-blur-xl sticky top-0 z-30 flex items-center justify-between px-6">
-      <div className="flex items-center gap-4 flex-1">
-        {/* Search Bar */}
-        <div className="relative w-full max-w-md hidden sm:block">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-zinc-500" />
-          </div>
-          <input
-            type="text"
-            className="block w-full pl-10 pr-3 py-2 border border-zinc-800 rounded-xl leading-5 bg-zinc-900/50 text-zinc-300 placeholder-zinc-500 focus:outline-none focus:ring-1 focus:ring-brand-500 focus:border-brand-500 sm:text-sm transition-all duration-200"
-            placeholder="Search episodes (Local Intelligence)..."
-          />
-        </div>
-      </div>
+      {/* Header search removed in v0.1.0 — LibraryView has its own contextual
+          search and a global search across the dashboard isn't useful yet. */}
+      <div className="flex items-center gap-4 flex-1" />
 
       <div className="flex items-center gap-4">
         {/* Notifications */}

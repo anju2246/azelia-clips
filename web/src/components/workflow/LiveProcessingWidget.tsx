@@ -14,12 +14,16 @@ interface LiveProcessingWidgetProps {
   jobId: string;
   onJobComplete: () => void;
   onCancel: () => void;
+  onPause?: () => void;
+  onResume?: () => void;
 }
 
 export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
   jobId,
   onJobComplete,
   onCancel,
+  onPause,
+  onResume,
 }) => {
   const [job, setJob] = useState<JobResponse | null>(null);
   const [wsStatus, setWsStatus] = useState<
@@ -229,12 +233,33 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
               Back to Upload
             </button>
           ) : (
-            <button
-              onClick={onCancel}
-              className="px-4 py-2 hover:bg-zinc-800 rounded-lg text-sm text-zinc-400 transition-colors"
-            >
-              Cancel Process
-            </button>
+            <>
+              {/* Pause / Resume — only when processing/paused, not pending */}
+              {job.status === "processing" && onPause && (
+                <button
+                  onClick={onPause}
+                  className="px-4 py-2 hover:bg-zinc-800 rounded-lg text-sm text-zinc-300 border border-white/10 transition-colors"
+                  title="Pause at next clip boundary (resume keeps your progress)"
+                >
+                  ⏸ Pause
+                </button>
+              )}
+              {job.status === "paused" && onResume && (
+                <button
+                  onClick={onResume}
+                  className="px-4 py-2 bg-brand-600/20 hover:bg-brand-600/30 border border-brand-500/30 rounded-lg text-sm text-brand-200 transition-colors"
+                  title="Resume from the last completed clip"
+                >
+                  ▶ Resume
+                </button>
+              )}
+              <button
+                onClick={onCancel}
+                className="px-4 py-2 hover:bg-red-950/40 hover:text-red-300 rounded-lg text-sm text-zinc-400 transition-colors"
+              >
+                ✕ Cancel
+              </button>
+            </>
           )}
         </div>
       </div>

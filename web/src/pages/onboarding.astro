@@ -17,43 +17,15 @@ import { OnboardingWizard } from "../components/onboarding/OnboardingWizard";
             rel="stylesheet"
         />
         <script>
-            import { supabase } from "../lib/supabase";
-
-            // Enforce Auth OR Prevent looped routing
-            window.addEventListener("DOMContentLoaded", async () => {
-                try {
-                    // 1. Auth Guard
-                    const { data: authData } = await supabase.auth.getSession();
-                    if (!authData?.session) {
-                        window.location.replace("/login");
-                        return;
+            // Local-first MVP: if onboarding is already done, jump to dashboard.
+            // Don't bounce if the URL carries an OAuth callback (?code=...) —
+            // the wizard's init handler needs the code to finish YouTube connect.
+            window.addEventListener("DOMContentLoaded", () => {
+                if (localStorage.getItem("az_onboarding_complete") === "true") {
+                    const params = new URLSearchParams(window.location.search);
+                    if (!params.has("code")) {
+                        window.location.replace("/dashboard");
                     }
-
-                    // 2. Prevent looping if they already completed onboarding
-                    const res = await fetch("/api/auth/onboarding-status", {
-                        headers: {
-                            Authorization: `Bearer ${authData.session.access_token}`,
-                        },
-                    });
-                    if (res.ok) {
-                        const data = await res.json();
-                        if (data.onboarding_complete) {
-                            // Don't bounce to /dashboard if the URL carries an
-                            // OAuth callback (Google YouTube). The wizard's
-                            // init handler needs a chance to POST the code to
-                            // /sync-with-code so the YT connection persists.
-                            // Without this guard, post-OAuth landings on a
-                            // post-onboarding account silently lose the code
-                            // and the user thinks YouTube didn't connect.
-                            const params = new URLSearchParams(window.location.search);
-                            if (!params.has("code")) {
-                                window.location.replace("/dashboard");
-                                return;
-                            }
-                        }
-                    }
-                } catch (e) {
-                    console.error("Failed to fetch settings or auth", e);
                 }
             });
         </script>
