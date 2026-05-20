@@ -54,6 +54,77 @@ export const SettingsForm: React.FC = () => {
 
   // (Telemetry consent state removed in v0.1.0 — no central telemetry.)
 
+  // Transcript-Supabase verification — actually probes the DB after auto-save
+  // so the "Connected" badge isn't a lie. States:
+  //   idle | testing | ok | not_configured | invalid_key | unreachable | error
+  const [supabaseProbe, setSupabaseProbe] = useState<{
+    state:
+      | "idle"
+      | "testing"
+      | "ok"
+      | "not_configured"
+      | "invalid_key"
+      | "no_episodes_table"
+      | "unreachable"
+      | "error";
+    detail?: string;
+    episodes?: number;
+  }>({ state: "idle" });
+
+  const probeSupabase = useCallback(async () => {
+    setSupabaseProbe({ state: "testing" });
+    try {
+      const r = await fetch("/api/integrations/transcript-supabase/test");
+      const data = await r.json();
+      if (data.ok) {
+        setSupabaseProbe({ state: "ok", episodes: data.episodes });
+      } else {
+        const valid = [
+          "not_configured",
+          "invalid_key",
+          "no_episodes_table",
+          "unreachable",
+        ];
+        const state = valid.includes(data.reason) ? data.reason : "error";
+        setSupabaseProbe({ state, detail: data.detail || data.reason });
+      }
+    } catch (e: any) {
+      setSupabaseProbe({ state: "error", detail: e?.message });
+    }
+  }, []);
+
+  // Re-probe whenever the persisted Supabase config changes.
+  useEffect(() => {
+    if (settings?.transcript_supabase_url && settings?.transcript_supabase_key) {
+      probeSupabase();
+    } else {
+      setSupabaseProbe({ state: "not_configured" });
+    }
+  }, [
+    settings?.transcript_supabase_url,
+    settings?.transcript_supabase_key,
+    probeSupabase,
+  ]);
+
+  // Claude Code detection — checked once on mount so Pipeline tab can show
+  // whether the local subscription is the active LLM (primary, $0 cost).
+  const [claudeCode, setClaudeCode] = useState<{
+    active: boolean;
+    method?: string;
+  } | null>(null);
+  useEffect(() => {
+    fetch("/api/providers")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (d?.claude_code)
+          setClaudeCode({
+            active: !!d.claude_code.active,
+            method: d.claude_code.auth_method,
+          });
+      })
+      .catch(() => setClaudeCode({ active: false }));
+  }, []);
+
   // Live model registry from provider APIs
   const {
     groupedModels,
@@ -493,12 +564,44 @@ export const SettingsForm: React.FC = () => {
         {/* Pipeline tab */}
         {activeTab === "pipeline" && (
           <>
+            {/* Claude Code status — surfaced first since it's free and primary when active */}
+            {claudeCode?.active && (
+              <section className="bg-emerald-950/30 border border-emerald-500/30 rounded-2xl p-5 mb-6">
+                <div className="flex items-start gap-4">
+                  <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center shrink-0">
+                    <CheckCircle2 className="w-6 h-6 text-emerald-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-white font-semibold">
+                        Claude Code — active
+                      </h3>
+                      <span className="text-[10px] uppercase tracking-wider text-emerald-400 font-bold bg-emerald-500/10 px-2 py-1 rounded-md">
+                        Primary · $0
+                      </span>
+                    </div>
+                    <p className="text-sm text-emerald-200/80 mt-1.5 leading-relaxed">
+                      Pipeline runs through your local Claude Code
+                      {claudeCode.method
+                        ? ` (${claudeCode.method})`
+                        : ""}{" "}
+                      — no API key needed, no per-clip cost beyond your existing
+                      Claude plan. The Anthropic API key below is used only as
+                      a fallback if Claude Code is unreachable.
+                    </p>
+                  </div>
+                </div>
+              </section>
+            )}
+
             <section className="bg-zinc-900/40 border border-white/5 rounded-2xl overflow-hidden">
               <div className="px-6 py-4 border-b border-white/5 bg-black/20 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Key className="w-5 h-5 text-purple-400" />
                   <h3 className="font-semibold text-white">
-                    Intelligence Pipeline
+                    {claudeCode?.active
+                      ? "Fallback API providers"
+                      : "Intelligence Pipeline"}
                   </h3>
                 </div>
                 <span className="text-xs text-zinc-500 bg-white/5 px-2 py-1 rounded-md">
@@ -772,9 +875,62 @@ export const SettingsForm: React.FC = () => {
                 <h3 className="font-semibold text-white">
                   Transcript Source (Supabase)
                 </h3>
-                <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-widest border border-zinc-700 ml-auto">
-                  Optional
-                </span>
+                {/* "Connected" badge — reflects the REAL probe of the user's
+                    Supabase. Only shows green when /test endpoint confirms the
+                    URL+key reach a Supabase with an `episodes` table. */}
+                {(() => {
+                  const pill = "ml-auto flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-full";
+                  if (saveStatus === "saving" || supabaseProbe.state === "testing") {
+                    return (
+                      <span className={`${pill} text-zinc-400 bg-zinc-800/60 border border-zinc-700`}>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        {saveStatus === "saving" ? "Saving…" : "Verifying…"}
+                      </span>
+                    );
+                  }
+                  if (supabaseProbe.state === "ok") {
+                    return (
+                      <span
+                        className={`${pill} text-emerald-400 bg-emerald-500/10 border border-emerald-500/30`}
+                        title={
+                          typeof supabaseProbe.episodes === "number"
+                            ? `${supabaseProbe.episodes} episodes in table`
+                            : undefined
+                        }
+                      >
+                        <CheckCircle2 className="w-3 h-3" /> Connected
+                      </span>
+                    );
+                  }
+                  if (
+                    supabaseProbe.state === "invalid_key" ||
+                    supabaseProbe.state === "unreachable" ||
+                    supabaseProbe.state === "no_episodes_table" ||
+                    supabaseProbe.state === "error"
+                  ) {
+                    const label =
+                      supabaseProbe.state === "invalid_key"
+                        ? "Invalid key"
+                        : supabaseProbe.state === "unreachable"
+                          ? "Unreachable"
+                          : supabaseProbe.state === "no_episodes_table"
+                            ? "No 'episodes' table"
+                            : "Connection error";
+                    return (
+                      <span
+                        className={`${pill} text-red-400 bg-red-500/10 border border-red-500/30`}
+                        title={supabaseProbe.detail}
+                      >
+                        <Shield className="w-3 h-3" /> {label}
+                      </span>
+                    );
+                  }
+                  return (
+                    <span className="text-[10px] bg-zinc-800 text-zinc-500 px-2 py-0.5 rounded uppercase tracking-widest border border-zinc-700 ml-auto">
+                      Optional
+                    </span>
+                  );
+                })()}
               </div>
               <div className="p-6 space-y-6">
                 <p className="text-sm text-zinc-400 leading-relaxed -mt-2">

@@ -13,18 +13,41 @@ import DashboardLayout from '../../layouts/DashboardLayout.astro';
 
         <h1 class="text-3xl font-bold tracking-tight text-white mb-3">Intelligence — coming soon</h1>
 
-        <p class="text-zinc-400 leading-relaxed mb-3">
+        <p class="text-zinc-400 leading-relaxed mb-3" id="intel-connected" hidden>
             Your YouTube channel data is already feeding the curation agents under the hood.
             The visual dashboard for inspecting it lands in the next release.
         </p>
 
-        <p class="text-sm text-zinc-500 mb-6">
-            To connect your channel now, go to <a href="/dashboard/settings#integrations" class="text-brand-400 underline">Settings → Integrations</a>.
+        <p class="text-zinc-400 leading-relaxed mb-3" id="intel-not-connected">
+            The visual creator-intelligence dashboard is being polished. In the meantime,
+            you can connect YouTube and Azelia will analyze your past shorts locally —
+            those patterns feed the curation agents straight away.
         </p>
 
-        <div class="inline-flex items-center gap-2 text-xs text-zinc-500 px-3 py-1.5 rounded-full bg-white/[0.04] border border-white/[0.06]">
-            <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-            Visual dashboard planned for v0.1.1
-        </div>
+        <p class="text-sm text-zinc-500 mb-6">
+            <span id="intel-cta-connect">
+                Connect your channel in <a href="/dashboard/settings#integrations" class="text-brand-400 underline">Settings → Integrations</a>.
+            </span>
+            <span id="intel-cta-manage" hidden>
+                Manage your channel in <a href="/dashboard/settings#integrations" class="text-brand-400 underline">Settings → Integrations</a>.
+            </span>
+        </p>
+
+        <script>
+            // Toggle copy based on YouTube connection state.
+            (async () => {
+                try {
+                    const r = await fetch("/api/analytics/youtube/status");
+                    if (!r.ok) return;
+                    const data = await r.json();
+                    if (data?.connected) {
+                        document.getElementById("intel-connected")?.removeAttribute("hidden");
+                        document.getElementById("intel-not-connected")?.setAttribute("hidden", "");
+                        document.getElementById("intel-cta-connect")?.setAttribute("hidden", "");
+                        document.getElementById("intel-cta-manage")?.removeAttribute("hidden");
+                    }
+                } catch { /* keep the default not-connected copy */ }
+            })();
+        </script>
     </div>
 </DashboardLayout>

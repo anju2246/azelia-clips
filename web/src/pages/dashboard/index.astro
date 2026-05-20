@@ -3,7 +3,6 @@ import DashboardLayout from "../../layouts/DashboardLayout.astro";
 import { DashboardController } from "../../components/workflow/DashboardController";
 ---
 
-
 <DashboardLayout title="Home">
     <div class="mb-6">
         <h1 class="text-3xl font-bold tracking-tight text-white mb-1">
@@ -12,33 +11,6 @@ import { DashboardController } from "../../components/workflow/DashboardControll
         <p class="text-zinc-500 text-sm">
             Your Intellectual Video Engine is ready to process.
         </p>
-    </div>
-
-    <!-- Search Bar — full width, prominent -->
-    <div class="relative mb-8">
-        <div
-            class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none z-10"
-        >
-            <svg
-                class="h-6 w-6 text-zinc-300"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke-width="2.5"
-                stroke="currentColor"
-            >
-                <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"
-                ></path>
-            </svg>
-        </div>
-        <input
-            type="text"
-            class="block w-full pl-12 pr-4 py-3.5 border border-zinc-800/80 rounded-2xl bg-zinc-900/50 backdrop-blur-sm text-zinc-200 placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-brand-500/40 focus:border-brand-500/50 text-sm transition-all"
-            placeholder="Search episodes by name, topic, or guest..."
-        />
     </div>
 
     <DashboardController client:only="react" />

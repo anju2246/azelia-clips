@@ -48,43 +48,11 @@ const currentPath = Astro.url.pathname;
     </script>
     <!-- End Kill PWA -->
     <script>
-      import { supabase } from "../lib/supabase";
-
-      // Auth & Onboarding Gate
-      window.addEventListener("DOMContentLoaded", async () => {
-        try {
-          // 1. Auth Guard: Check if user is logged in
-          const { data: authData } = await supabase.auth.getSession();
-          if (!authData?.session) {
-            window.location.replace("/login");
-            return; // Stop execution
-          }
-
-          // 2. Onboarding Gate: Check per-user onboarding_complete flag
-          const res = await fetch("/api/auth/onboarding-status", {
-            headers: {
-              Authorization: `Bearer ${authData.session.access_token}`,
-            },
-          });
-          if (res.status === 401) {
-            // Token rejected by server (e.g. user deleted) — force logout
-            await supabase.auth.signOut();
-            window.location.replace("/login");
-            return;
-          }
-          if (res.ok) {
-            const data = await res.json();
-            if (!data.onboarding_complete) {
-              window.location.replace("/onboarding");
-              return;
-            }
-          } else {
-            // Non-401 error — fail safe: send to onboarding
-            window.location.replace("/onboarding");
-            return;
-          }
-        } catch (e) {
-          console.error("Failed to check auth/onboarding status", e);
+      // Local-first MVP: no auth, no central onboarding API.
+      // Onboarding is considered done if localStorage flag is set.
+      // The flag is written by OnboardingWizard.handleFinish.
+      window.addEventListener("DOMContentLoaded", () => {
+        if (localStorage.getItem("az_onboarding_complete") !== "true") {
           window.location.replace("/onboarding");
         }
       });
