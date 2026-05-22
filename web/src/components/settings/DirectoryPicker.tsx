@@ -7,6 +7,7 @@ import {
   Loader2,
   X,
   Check,
+  Info,
 } from "lucide-react";
 import { supabase } from "../../lib/supabase";
 
@@ -99,6 +100,29 @@ export const DirectoryPicker: React.FC<DirectoryPickerProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Expected structure hint — Azelia scans for EPNNN-prefixed subfolders
+            with a .mp4 inside. Surfaced here so users don't pick an empty
+            folder and wonder why nothing shows up in Library. */}
+        <div className="px-5 py-3 bg-brand-500/5 border-b border-white/5 flex items-start gap-3">
+          <Info className="w-4 h-4 text-brand-400 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-zinc-300 leading-relaxed">
+            <div className="font-semibold text-zinc-100 mb-1">
+              Expected structure inside the folder you pick:
+            </div>
+            <pre className="font-mono text-[11px] text-zinc-400 mb-1.5 leading-snug">{`📁 EP001 - First Episode Title/
+   └─ video.mp4
+📁 EP002 - Another Episode/
+   └─ video.mp4`}</pre>
+            <div className="text-zinc-500">
+              Each episode lives in its own subfolder prefixed with
+              {" "}<code className="text-brand-400">EPNNN -</code>{" "}
+              and contains a video file (any{" "}
+              <code className="text-brand-400">.mp4</code>; preferably named{" "}
+              <code className="text-brand-400">video.mp4</code>).
+            </div>
+          </div>
         </div>
 
         {/* Current Path Bar */}
