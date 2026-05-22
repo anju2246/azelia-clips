@@ -34,7 +34,7 @@ This release supersedes the previous SaaS-oriented codebase. The git history bef
 - Routes: `server/routes/{auth,upgrade,telemetry_routes}.py`.
 - Tests tied to removed features: `test_ic_cascade`, `test_telemetry_consent`, `test_security_hardening`, `test_local_intelligence`, `test_telemetry`.
 - Legal docs that only applied to a hosted service: `PRIVACY_POLICY.md`, `TERMS_OF_SERVICE.md`, `DATA_USAGE_TERMS.md`, `LAUNCH_CHECKLIST.md`.
-- YouTube integration endpoints return `501 coming_soon` in v0.1.0 — they'll return in v0.1.1 with local-only persistence (no central feed).
+- YouTube central-feed routes from the SaaS era. (The OAuth-based Shorts sync was rebuilt locally before launch — see "Kept" below.)
 
 ### Kept (worth highlighting)
 - The full multi-agent curation pipeline: Finder → Critic → Ranker → Captions.
@@ -44,14 +44,15 @@ This release supersedes the previous SaaS-oriented codebase. The git history bef
 - 30-day rejected-clip trash with restore.
 - BYO Supabase for transcript ingestion (the user's *own* Supabase project — Azelia has none of its own).
 - WhisperX / MLX-Whisper transcription, optional Pyannote diarization.
+- **YouTube Shorts sync (local-only).** OAuth connect from the dashboard, tokens stored encrypted in `~/.azelia/data/youtube_shorts.db`. Pulls your own published Shorts + analytics to give the Ranker prior context. Nothing about your account goes anywhere outside your machine.
 
 ### Verified
 - Full pipeline tested live on a real 60-min podcast episode with Claude Code as the LLM backend. 22 clips generated end-to-end (transcribe → curate → reframe → subtitle) with no central-DB dependencies.
 
 ### Known limitations
 - Single-user only. No auth. Don't expose the port without putting a reverse proxy in front.
-- YouTube analytics paused (back in v0.1.1).
 - The `OnboardingWizard` and `SettingsForm` components are still oversized internally (~1k lines each). They work, but a refactor is queued for v0.1.2.
+- Podcast library scanner requires `EPNNN -` prefixed subfolders today; flexible layout coming in v0.1.1.
 
 ---
 
