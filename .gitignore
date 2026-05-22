@@ -8,10 +8,14 @@ __pycache__/
 venv/
 ENV/
 
-# Environment files — root .env has private keys (never commit)
+# Environment files — never commit any .env. The frontend reads PUBLIC_*
+# vars at build time from the user's local web/.env; nothing belongs in git.
 .env
-# web/.env only has the public anon key — safe to commit
-!web/.env
+.env.*
+!.env.example
+web/.env
+web/.env.*
+!web/.env.example
 
 # IDE
 .idea/
