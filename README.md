@@ -38,6 +38,16 @@ The trade: you need a machine that can run Whisper (Apple Silicon or NVIDIA GPU 
 
 ---
 
+## Why the rewrite?
+
+If you scroll the commit history before May 2026 you'll see references to Supabase auth, telemetry, a Pro tier, and a Commons Clause license. That history is real — Azelia started as a hosted SaaS.
+
+After shipping the pipeline and using it on my own podcast, I realized the people who would benefit most from a tool like this — podcasters with guests under NDA, indie creators who own their stack, anyone serious about their content — don't want to upload their audio to anyone. Including me.
+
+So v0.1.0 is a deliberate rewrite: no central backend, no telemetry, no Pro tier, MIT license. Each install is an island. The git history is intentionally preserved as a record of that pivot. The `v0.0.x-legacy` tag marks the last commit before the rewrite.
+
+---
+
 ## Install
 
 ### One-line install (macOS / Linux)
