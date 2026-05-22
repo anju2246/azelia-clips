@@ -71,7 +71,33 @@ azelia start
 
 Opens `http://localhost:8000` in your browser. The first launch builds the dashboard (~1 min).
 
-**Onboarding**: paste your Anthropic API key (or have Claude Code installed locally). That's it.
+**Onboarding**: paste your Anthropic API key (or have Claude Code installed locally), then pick the folder where your podcast episodes live. That's it.
+
+---
+
+## Podcast folder layout
+
+During onboarding (or in Settings → Workspace) you pick a folder that contains your episodes. Azelia expects each episode in its own subfolder, prefixed with `EPNNN -`, with a video file inside:
+
+```
+~/Podcasts/                              ← whatever folder you pick
+├── EP001 - First Episode Title/
+│   └── video.mp4
+├── EP002 - Another Episode/
+│   └── video.mp4
+└── EP003 - …/
+    └── video.mp4
+```
+
+Rules the scanner uses:
+
+- **Subfolder name must start with `EPNNN -`** (e.g. `EP001 -`, `EP042 -`). The number is the episode ID Azelia uses across runs.
+- **The subfolder must contain a `.mp4`.** It prefers a file named exactly `video.mp4`; otherwise it picks the first `.mp4` it finds.
+- **Generated clips render next to the source**, in `EP001 - …/clips/approved/clip_NN.mp4` — never inside the install folder.
+
+If you just want to try Azelia on a one-off file without organising a library, use the **Upload** tab in the dashboard — it accepts any `.mp4`/`.mov`/`.mkv` and renders into `~/.azelia/data/jobs/`.
+
+> A more flexible layout (any folder, no `EPNNN -` prefix) is on the roadmap for v0.1.1.
 
 ---
 
@@ -103,21 +129,6 @@ When a new version ships, you'll see an **Update now** button in Settings → Wo
 4. The dashboard reconnects automatically
 
 Your clips, transcripts, settings and SQLite DBs live in `~/.azelia/data/` — **outside the install folder** — so updates never touch them.
-
----
-
-## Self-hosted vs alternatives
-
-|                        | Azelia Clips           | OpusClip / Vizard | Descript                |
-|------------------------|------------------------|-------------------|-------------------------|
-| License                | **MIT — open source**  | Proprietary       | Proprietary             |
-| Where it runs          | **Your machine**       | Cloud             | Cloud + desktop         |
-| Pricing                | **Free (BYOK ~$0.10/ep)** | $15–80 / month    | $12–40 / month          |
-| Your video stays local | **Yes**                | Uploaded          | Uploaded                |
-| Multi-agent curation   | **Yes (3 agents)**     | Single model      | Single model            |
-| Configurable prompts   | **Yes**                | No                | Limited                 |
-| Account required       | **No**                 | Yes               | Yes                     |
-| Telemetry              | **None**               | Yes (varies)      | Yes (varies)            |
 
 ---
 
