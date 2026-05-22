@@ -17,7 +17,7 @@ Your machine
 │   └── data/            ← YOUR data — never touched by updates
 │       ├── jobs/        (generated clips, curation.json, faces, speakers)
 │       ├── jobs.db      (SQLite: job statuses)
-│       ├── youtube_shorts.db   (local YouTube sync — v0.1.1+)
+│       ├── youtube_shorts.db   (local YouTube Shorts sync — encrypted OAuth tokens)
 │       ├── secrets.env  (your Anthropic API key, etc.)
 │       └── update.log   (last self-update output)
 
@@ -127,7 +127,7 @@ If a future version wants any of these, they'll be opt-in connections to a separ
 - Surfaced via `packages.clips.__version__` and `server/app.py` (FastAPI version field)
 - `/api/system/version` and `/api/system/info` expose it for diagnostics
 
-Semver: bumps follow Keep a Changelog conventions; see `CHANGELOG.md` (added in v0.1.1).
+Semver: bumps follow Keep a Changelog conventions; see `CHANGELOG.md`.
 
 ---
 
@@ -136,6 +136,6 @@ Semver: bumps follow Keep a Changelog conventions; see `CHANGELOG.md` (added in 
 - **Can I use Azelia to build a competing SaaS?** Yes, MIT allows it. Build your own brand.
 - **Can I run multiple users on a LAN?** Set `AZELIA_BIND_HOST=0.0.0.0`. But there's no auth — anyone on the LAN can use it. Add your own reverse proxy with auth if needed.
 - **Will there ever be a hosted version?** Maybe. If so, it'll be separately operated, and this MIT codebase will remain the source of truth.
-- **What about YouTube integration?** v0.1.0 disabled it (the old version was wired to a central DB). v0.1.1 brings it back as 100% local.
+- **What about YouTube integration?** v0.1.0 ships it as 100% local. OAuth connect from the dashboard, tokens encrypted at rest in `~/.azelia/data/youtube_shorts.db`. Pulls your own Shorts + analytics so the Ranker has prior context — nothing about your account ever leaves your machine.
 
 Contact for anything else: open an issue on GitHub.

@@ -27,14 +27,14 @@ Each clip is 30–90 s, vertical 9:16, with animated subtitles burned in.
 
 ## Why this exists
 
-Existing clippers (OpusClip, Vizard, etc.) are cloud-only, paid SaaS, and upload your content to their servers. Azelia Clips runs **entirely on your machine**:
+Azelia Clips runs **entirely on your machine**:
 
 - Your videos never leave your laptop
-- You bring your own LLM key (Anthropic) **or** use Claude Code locally — no Azelia account
+- You bring your own LLM access — either Claude Code (uses your existing Claude subscription, no key) or an Anthropic API key
 - MIT-licensed: fork it, rebrand it, ship your own product
 - Self-update from the dashboard with one click; your data is preserved
 
-The trade: you need a machine that can run Whisper (Apple Silicon or NVIDIA GPU recommended for speed) and you pay your LLM provider directly. In exchange you keep full control of your pipeline and your content.
+The trade: you need a machine that can run Whisper (Apple Silicon or NVIDIA GPU recommended for speed) and you cover your own LLM access. In exchange you keep full control of your pipeline and your content.
 
 ---
 
@@ -101,21 +101,14 @@ If you just want to try Azelia on a one-off file without organising a library, u
 
 ---
 
-## LLM cost per episode
+## What runs locally vs. through the LLM
 
-Azelia Clips is **BYOK** — you pay the LLM provider directly, nothing routes through us.
+- **Transcription:** local Whisper (MLX on Apple Silicon, faster-whisper on Linux/CUDA). Nothing leaves your machine.
+- **Diarization:** local ECAPA-TDNN by default; Pyannote 3.1 as opt-in if you set `HF_TOKEN`.
+- **Face tracking + reframe + subtitle burn:** local FFmpeg.
+- **Multi-agent curation (Finder → Critic → Ranker → Captions):** runs through the LLM you configured — Claude Code (uses your subscription, no key) or Anthropic API (your key). That's the only network hop, and you choose the provider.
 
-| Provider | Cost per 60-min episode |
-|---|---|
-| **Claude Code** (local subscription) | **$0** (uses your Claude.ai plan) |
-| Anthropic Claude Haiku 4.5 | ~$0.07–$0.15 |
-| Anthropic Claude Sonnet 4.6 | ~$0.40–$0.80 |
-| Anthropic Claude Opus 4.7 | ~$2.00–$4.00 |
-
-Transcription runs locally via Whisper (Apple Silicon optimized) — **zero API cost**.
-The multi-agent pipeline sends ~50k input + ~15k output tokens to the LLM you choose.
-
-In v0.1.0 the supported providers are **Claude Code + Anthropic API**. Other providers (Groq, OpenAI, Google) may return in v0.2 — for now we ship what we test against.
+v0.1.0 supports **Claude Code + Anthropic API**. Other providers (Ollama, Groq, OpenAI, Google) are on the v0.2 backlog.
 
 ---
 
@@ -134,7 +127,7 @@ Your clips, transcripts, settings and SQLite DBs live in `~/.azelia/data/` — *
 
 ## Status
 
-**v0.1.0-beta** (current): local-first foundation. Pipeline runs end-to-end. Self-update works. YouTube integration disabled while we rebuild it for local-only (back in v0.1.1).
+**v0.1.0-beta** (current): local-first foundation. Full pipeline runs end-to-end on your machine — transcription, multi-agent curation, face tracking, reframe, subtitle burn. Self-update from the dashboard works. Optional YouTube Shorts sync via OAuth pulls your existing analytics for context-aware ranking (tokens stored locally, encrypted).
 
 This is an early beta. Things will break. [Open issues](https://github.com/anju2246/azelia-clips/issues) freely.
 
