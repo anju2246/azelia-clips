@@ -89,3 +89,6 @@ _scratch/
 # Playwright test artifacts
 web/test-results/
 .env.*-backup
+
+# Playwright auth state — never commit; contains live session tokens
+web/e2e/.auth/
