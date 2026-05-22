@@ -778,10 +778,22 @@ export const OnboardingWizard: React.FC = () => {
                   <FolderOpen className="w-4 h-4" /> Buscar
                 </button>
               </div>
-              <p className="text-xs text-zinc-500 mt-2">
-                Use the native picker or type the path. Videos must live here or
-                in subfolders.
-              </p>
+              <div className="mt-2.5 rounded-lg border border-brand-500/15 bg-brand-500/5 p-3 text-xs text-zinc-300 leading-relaxed">
+                <div className="font-semibold text-zinc-100 mb-1.5">
+                  Expected layout inside this folder:
+                </div>
+                <pre className="font-mono text-[11px] text-zinc-400 mb-1.5 leading-snug overflow-x-auto">{`📁 EP001 - First Episode Title/
+   └─ video.mp4
+📁 EP002 - Another Episode/
+   └─ video.mp4`}</pre>
+                <div className="text-zinc-500">
+                  Each episode in its own subfolder prefixed with{" "}
+                  <code className="text-brand-400">EPNNN -</code>{" "}
+                  and containing a video file (any{" "}
+                  <code className="text-brand-400">.mp4</code>; prefer{" "}
+                  <code className="text-brand-400">video.mp4</code>).
+                </div>
+              </div>
 
               {/* Fallback: server-side picker */}
               <DirectoryPicker
