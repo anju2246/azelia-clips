@@ -159,7 +159,7 @@ sounddevice==0.5.3
 soundfile==0.13.1
 speechbrain==1.0.3
 SQLAlchemy==2.0.45
-starlette==0.50.0
+starlette==1.0.1
 storage3==2.27.2
 streamlit==1.53.0
 StrEnum==0.4.15
