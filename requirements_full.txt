@@ -114,7 +114,7 @@ pyannote-metrics==4.0.0
 pyannote-pipeline==4.0.0
 pyannote.audio==3.1.1
 pyannoteai-sdk==0.4.0
-pyarrow==22.0.0
+pyarrow==23.0.1
 pyasn1==0.6.2
 pyasn1_modules==0.4.2
 pycparser==2.23
