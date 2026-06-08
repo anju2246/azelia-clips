@@ -1,0 +1,18 @@
+[
+  {
+    "start_time": 200.0,
+    "end_time": 240.0,
+    "title": "Rejected Tangent",
+    "summary": "Off-topic discussion that doesn't fit.",
+    "reasoning": "This segment lacks focus and wanders off-topic. Not suitable for a standalone clip.",
+    "approved": false
+  },
+  {
+    "start_time": 400.0,
+    "end_time": 430.0,
+    "title": "Incomplete Thought",
+    "summary": "Speaker starts an idea but never finishes it.",
+    "reasoning": "The speaker begins an interesting point but never completes the thought. Lacks standalone clarity.",
+    "approved": false
+  }
+]

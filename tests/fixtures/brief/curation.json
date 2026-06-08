@@ -1,0 +1,74 @@
+[
+  {
+    "start_time": 120.0,
+    "end_time": 168.0,
+    "title": "Why AI Will Replace Most Jobs",
+    "summary": "A deep dive into the future of work and automation.",
+    "virality_score": {
+      "hook_strength": 9,
+      "quotability": 8,
+      "storytelling": 9,
+      "controversy": 8,
+      "energy_level": 9,
+      "pacing": 8,
+      "emotional_arc": 8,
+      "standalone_clarity": 9,
+      "segment_completeness": 9,
+      "optimal_duration": 8
+    },
+    "category": "insight",
+    "suggested_hashtags": ["#ai", "#future"],
+    "social_caption": "🤖 The future of work is here...",
+    "caption_hashtags": ["#ai", "#automation"],
+    "pending_review": false,
+    "review_reason": ""
+  },
+  {
+    "start_time": 300.0,
+    "end_time": 345.0,
+    "title": "My Biggest Failure",
+    "summary": "A personal story about losing everything.",
+    "virality_score": {
+      "hook_strength": 5,
+      "quotability": 6,
+      "storytelling": 6,
+      "controversy": 4,
+      "energy_level": 6,
+      "pacing": 5,
+      "emotional_arc": 7,
+      "standalone_clarity": 5,
+      "segment_completeness": 6,
+      "optimal_duration": 5
+    },
+    "category": "story",
+    "suggested_hashtags": ["#entrepreneur"],
+    "social_caption": "Sometimes failure teaches us the most...",
+    "caption_hashtags": ["#failure", "#lessons"],
+    "pending_review": false,
+    "review_reason": ""
+  },
+  {
+    "start_time": 500.0,
+    "end_time": 550.0,
+    "title": "The Secret to Success",
+    "summary": "Exactly what it takes to make it.",
+    "virality_score": {
+      "hook_strength": 7,
+      "quotability": 7,
+      "storytelling": 7,
+      "controversy": 7,
+      "energy_level": 7,
+      "pacing": 7,
+      "emotional_arc": 7,
+      "standalone_clarity": 7,
+      "segment_completeness": 7,
+      "optimal_duration": 7
+    },
+    "category": "insight",
+    "suggested_hashtags": ["#success"],
+    "social_caption": "The one thing nobody talks about...",
+    "caption_hashtags": ["#success", "#mindset"],
+    "pending_review": false,
+    "review_reason": ""
+  }
+]
