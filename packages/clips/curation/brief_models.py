@@ -1,6 +1,5 @@
 """
 Domain models for the conversational brief pre-processing feature.
-STUB - Implementation pending.
 """
 from typing import List, Optional
 from pydantic import BaseModel
@@ -38,11 +37,11 @@ class BriefSession(BaseModel):
     created_at: str
     updated_at: str
 
-    def to_dict(self):
-        """Convert to dict for persistence."""
-        raise NotImplementedError("to_dict not implemented")
+    def to_dict(self) -> dict:
+        """Convert to a JSON-serializable dict for persistence."""
+        return self.model_dump()
 
     @classmethod
-    def from_dict(cls, d: dict):
-        """Load from dict."""
-        raise NotImplementedError("from_dict not implemented")
+    def from_dict(cls, d: dict) -> "BriefSession":
+        """Rebuild a session from its persisted dict form."""
+        return cls.model_validate(d)

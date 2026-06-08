@@ -1,35 +1,130 @@
 """
-Brief builder - constructs and persists brief sessions from curation artifacts.
-STUB - Implementation pending.
+Brief builder — constructs and persists brief sessions from curation artifacts.
+
+Reads the JSON the curation pipeline already writes (`curation.json` and
+`critic_decisions.json`) and assembles a `BriefSession` for the human-in-the-loop
+review gate. No LLM, no network — pure filesystem + scoring.
 """
+import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
-from packages.clips.curation.brief_models import BriefSession
+
+from packages.clips.curation.brief_models import BriefCandidate, BriefSession
+from packages.clips.curation.models import ViralityScore
+
+SESSION_FILENAME = "brief_session.json"
 
 
-def build_session(job_dir: Path, episode_id: str, min_score: float = 70) -> BriefSession:
+def _score_of(clip: dict) -> float:
+    """Total virality score (sum of the 10 dimensions).
+
+    `ViralityScore.total` is a computed property, so it is NOT present in the
+    serialized `curation.json`; we reconstruct it from the stored dimensions.
     """
-    Build a brief session from curation artifacts.
+    vs = clip.get("virality_score") or {}
+    return float(ViralityScore(**vs).total)
 
-    Loads:
-    - curation.json (approved clips with virality scores)
-    - critic_decisions.json (rejected clips)
 
-    Returns a BriefSession with merged candidates.
+def _dedup_key(start: float, end: float) -> tuple:
+    return (round(float(start), 2), round(float(end), 2))
+
+
+def build_session(
+    job_dir: Path, episode_id: str, min_score: float = 70
+) -> BriefSession:
+    """Build a brief session from the curation artifacts in ``job_dir``.
+
+    - ``curation.json`` → critic-approved candidates (with virality scores).
+      ``above_threshold`` / ``selected`` follow ``score >= min_score``.
+    - ``critic_decisions.json`` → critic-REJECTED candidates (``approved == False``),
+      surfaced as rescuable (``selected=False``, ``origin="rescued"``), deduped
+      against the curation set by (start, end).
+
+    Candidates are sorted by score descending and assigned stable 1-based ids.
     """
-    raise NotImplementedError("build_session not implemented")
+    job_dir = Path(job_dir)
+    candidates: list[BriefCandidate] = []
+    seen: set[tuple] = set()
+
+    curation_path = job_dir / "curation.json"
+    if curation_path.exists():
+        clips = json.loads(curation_path.read_text())
+        for clip in clips:
+            score = _score_of(clip)
+            above = score >= min_score
+            key = _dedup_key(clip["start_time"], clip["end_time"])
+            seen.add(key)
+            candidates.append(
+                BriefCandidate(
+                    id=0,  # assigned after sort
+                    start_time=float(clip["start_time"]),
+                    end_time=float(clip["end_time"]),
+                    title=clip.get("title", ""),
+                    summary=clip.get("summary", ""),
+                    reasoning=clip.get("reasoning", "") or "",
+                    score=score,
+                    critic_approved=True,
+                    above_threshold=above,
+                    selected=above,
+                    origin="curation",
+                )
+            )
+
+    critic_path = job_dir / "critic_decisions.json"
+    if critic_path.exists():
+        decisions = json.loads(critic_path.read_text())
+        for d in decisions:
+            if d.get("approved", False):
+                continue  # already represented in curation.json
+            key = _dedup_key(d["start_time"], d["end_time"])
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                BriefCandidate(
+                    id=0,
+                    start_time=float(d["start_time"]),
+                    end_time=float(d["end_time"]),
+                    title=d.get("title", ""),
+                    summary=d.get("summary", ""),
+                    reasoning=d.get("reasoning", "") or "",
+                    score=0.0,
+                    critic_approved=False,
+                    above_threshold=False,
+                    selected=False,
+                    origin="rescued",
+                )
+            )
+
+    candidates.sort(key=lambda c: c.score, reverse=True)
+    for i, c in enumerate(candidates, start=1):
+        c.id = i
+
+    now = datetime.utcnow().isoformat()
+    return BriefSession(
+        job_id=job_dir.name,
+        episode_id=episode_id,
+        status="open",
+        candidates=candidates,
+        messages=[],
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def save_session(job_dir: Path, session: BriefSession) -> None:
-    """
-    Save a brief session to <job_dir>/brief_session.json.
-    """
-    raise NotImplementedError("save_session not implemented")
+    """Persist a brief session to ``<job_dir>/brief_session.json``."""
+    job_dir = Path(job_dir)
+    job_dir.mkdir(parents=True, exist_ok=True)
+    session.updated_at = datetime.utcnow().isoformat()
+    path = job_dir / SESSION_FILENAME
+    path.write_text(json.dumps(session.to_dict(), indent=2, ensure_ascii=False))
 
 
 def load_session(job_dir: Path) -> Optional[BriefSession]:
-    """
-    Load a brief session from <job_dir>/brief_session.json.
-    Returns None if file doesn't exist.
-    """
-    raise NotImplementedError("load_session not implemented")
+    """Load a brief session, or ``None`` if it does not exist."""
+    path = Path(job_dir) / SESSION_FILENAME
+    if not path.exists():
+        return None
+    return BriefSession.from_dict(json.loads(path.read_text()))
