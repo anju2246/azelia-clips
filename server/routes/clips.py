@@ -872,58 +872,9 @@ def _brief_context(brief_dir: Path) -> BriefContext:
         except Exception:
             return []
 
-    def ranker(candidates, focus):
-        return _focus_rerank_scores(brief_dir, candidates, focus)
-
-    return BriefContext(episode_duration=duration or 1e9, finder=finder, ranker=ranker)
-
-
-# Map a natural-language focus to one of the 10 virality dimensions already
-# scored in curation.json — so "recurate by focus" is deterministic and free.
-_FOCUS_DIMS = {
-    "controvers": "controversy", "polém": "controversy", "polem": "controversy",
-    "debate": "controversy",
-    "vulnerab": "emotional_arc", "emocion": "emotional_arc", "emotion": "emotional_arc",
-    "gancho": "hook_strength", "hook": "hook_strength",
-    "histor": "storytelling", "story": "storytelling", "narrativ": "storytelling",
-    "cita": "quotability", "quote": "quotability", "frase": "quotability",
-    "energ": "energy_level",
-    "ritmo": "pacing", "pacing": "pacing",
-}
-
-
-def _focus_dimension(focus: str) -> str | None:
-    f = (focus or "").lower()
-    for needle, dim in _FOCUS_DIMS.items():
-        if needle in f:
-            return dim
-    return None
-
-
-def _focus_rerank_scores(brief_dir: Path, candidates, focus) -> dict:
-    """Return {candidate_id: new_score} re-weighted toward the focus dimension.
-
-    Blends the virality total with the focus dimension (50/50) so clips strong
-    in that dimension rise; candidates without a curation entry keep their score.
-    No LLM — reads the per-dimension scores from curation.json.
-    """
-    dim = _focus_dimension(focus)
-    dims_by_key: dict = {}
-    for d in _load_curation(brief_dir):
-        key = (round(float(d.get("start_time", 0)), 2), round(float(d.get("end_time", 0)), 2))
-        dims_by_key[key] = d.get("virality_score", {}) or {}
-    out: dict = {}
-    for c in candidates:
-        vs = dims_by_key.get((round(c.start_time, 2), round(c.end_time, 2)))
-        if not vs:
-            out[c.id] = c.score
-            continue
-        total = float(sum(v for v in vs.values() if isinstance(v, (int, float))))
-        if dim and dim in vs:
-            out[c.id] = round(total * 0.5 + float(vs[dim]) * 10 * 0.5, 1)
-        else:
-            out[c.id] = total
-    return out
+    # Prioritization/focus requests are handled semantically by the BriefAgent,
+    # which returns a `reorder` with an explicit order — no deterministic ranker.
+    return BriefContext(episode_duration=duration or 1e9, finder=finder)
 
 
 def _approved_curated_clips(brief_dir: Path, session) -> list:

@@ -25,14 +25,19 @@ backend aplicará. Responde SOLO con JSON válido: {"actions": [ ... ]}.
 Catálogo de acciones (campo "type"):
 - drop        {"type":"drop","targets":[ids]}            → quita clips de la selección
 - rescue      {"type":"rescue","targets":[ids]}          → reactiva clips (incl. descartados/bajo umbral)
-- reorder     {"type":"reorder","by":"score"} | {"type":"reorder","order":[ids]}
+- reorder     {"type":"reorder","order":[ids]}           → reordena por prioridad
 - adjust_times{"type":"adjust_times","id":N,"start_time":s,"end_time":e}
-- recurate_focus {"type":"recurate_focus","focus":"texto del enfoque"}
 - find_new    {"type":"find_new","window_start":s,"window_end":e,"hint":"qué buscar"}
 - noop        {"type":"noop","reason":"por qué no actuaste / qué aclaración necesitas"}
 
-Si el pedido es ambiguo (p. ej. "busca algo gracioso" sin minuto), devuelve un noop pidiendo
-la aclaración. Puedes devolver varias acciones en un mismo mensaje."""
+PRIORIZACIÓN: para CUALQUIER pedido de priorizar/ordenar por un enfoque — sea una dimensión
+("los más polémicos", "los de más energía") o algo temático/semántico ("los que hablan de IA",
+"los más accionables", "los que empoderan", "humor negro") — usa `reorder` y construye tú el
+`order` (TODOS los ids, del mejor al peor para ese enfoque) leyendo los títulos y resúmenes de
+los candidatos. NO inventes ids; usa solo los que existen.
+
+Si el pedido es ambiguo (p. ej. "busca algo gracioso" sin minuto para find_new), devuelve un noop
+pidiendo la aclaración. Puedes devolver varias acciones en un mismo mensaje."""
 
 
 class BriefAgent:

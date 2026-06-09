@@ -11,7 +11,6 @@ ACTION_TYPES = (
     "rescue",
     "reorder",
     "adjust_times",
-    "recurate_focus",
     "find_new",
     "noop",
 )
@@ -55,8 +54,6 @@ class BriefAction(BaseModel):
     id: Optional[int] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
-    # recurate_focus
-    focus: Optional[str] = None
     # find_new
     window_start: Optional[float] = None
     window_end: Optional[float] = None

@@ -27,8 +27,6 @@ class BriefContext:
     episode_duration: float = 0.0
     # find_new(window_start, window_end, hint) -> list[dict] of candidate fields
     finder: Optional[Callable[[float, float, Optional[str]], list]] = None
-    # recurate(candidates, focus) -> dict[id -> new_score]
-    ranker: Optional[Callable[[list, str], dict]] = None
 
 
 def _index_by_id(session: BriefSession) -> dict:
@@ -101,17 +99,6 @@ def _adjust_times(session, action, ctx) -> ChangeResult:
     return ChangeResult(ok=True, change_summary=f"Ajusté #{c.id} a {start:.0f}s–{end:.0f}s.")
 
 
-def _recurate_focus(session, action, ctx) -> ChangeResult:
-    if ctx.ranker is None:
-        raise BriefActionError("recurate_focus needs a ranker in context")
-    new_scores = ctx.ranker(session.candidates, action.focus or "")
-    for c in session.candidates:
-        if c.id in new_scores:
-            c.score = float(new_scores[c.id])
-    session.candidates.sort(key=lambda c: c.score, reverse=True)
-    return ChangeResult(ok=True, change_summary=f"Re-rankée por enfoque '{action.focus}'.")
-
-
 def _find_new(session, action, ctx) -> ChangeResult:
     ws, we = action.window_start, action.window_end
     if ws is None or we is None or we <= ws:
@@ -154,7 +141,6 @@ _HANDLERS = {
     "rescue": _rescue,
     "reorder": _reorder,
     "adjust_times": _adjust_times,
-    "recurate_focus": _recurate_focus,
     "find_new": _find_new,
     "noop": _noop,
 }

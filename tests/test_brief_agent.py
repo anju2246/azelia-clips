@@ -77,3 +77,22 @@ def test_prompt_includes_candidates_and_action_catalog():
     assert "Hook sobre IA" in sent and "Debate político" in sent  # candidates present
     for action_type in ("drop", "rescue", "reorder", "adjust_times", "find_new"):
         assert action_type in sent  # action catalog present
+
+
+def test_priority_message_yields_reorder_with_order():
+    # The LLM (which sees the candidates) returns a semantic ordering as reorder.
+    raw = json.dumps({"actions": [{"type": "reorder", "order": [2, 1]}]})
+    agent, _ = _agent_with_llm_returning(raw)
+    actions = agent.interpret("prioriza los polémicos", _candidates())
+    assert len(actions) == 1
+    assert actions[0].type == "reorder"
+    assert actions[0].order == [2, 1]
+
+
+def test_prompt_steers_prioritization_to_reorder_and_drops_recurate():
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("prioriza algo", _candidates())
+    _, kwargs = fake_llm.chat.call_args
+    system = kwargs.get("system_prompt", "")
+    assert "recurate_focus" not in system  # deterministic re-rank retired
+    assert "reorder" in system and "prioriz" in system.lower()  # steer priorities to reorder

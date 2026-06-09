@@ -116,18 +116,6 @@ def test_adjust_times_start_after_end_raises(session, ctx):
         apply(session, BriefAction(type="adjust_times", id=1, start_time=200.0, end_time=150.0), ctx)
 
 
-# ── recurate_focus (injected ranker, no LLM) ─────────────────────────────────
-
-def test_recurate_focus_uses_injected_ranker(session, ctx):
-    # Fake ranker bumps clip #3 to the top
-    ctx.ranker = lambda candidates, focus: {1: 60.0, 2: 65.0, 3: 95.0}
-    res = apply(session, BriefAction(type="recurate_focus", focus="controversy"), ctx)
-    assert res.ok is True
-    assert _by_id(session, 3).score == 95.0
-    # after re-rank, candidates are re-sorted by new score desc
-    assert [c.id for c in session.candidates] == [3, 2, 1]
-
-
 # ── find_new (injected finder, no LLM) ───────────────────────────────────────
 
 def test_find_new_appends_found_candidate(session, ctx):
