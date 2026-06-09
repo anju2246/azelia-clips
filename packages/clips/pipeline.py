@@ -111,6 +111,7 @@ class BatchProcessor:
         transcription_config: dict | None = None, # NEW: Configuration for transcription source
         auth_token: str | None = None, # NEW: User token for community data sync
         user_id: str | None = None, # NEW: User ID for telemetry reporting
+        review_brief: bool | None = None, # NEW: per-job override for the brief gate (None = user setting)
     ):
         from packages.core.config import settings
         self.base_path = Path(external_drive_path) if external_drive_path else settings.podcast_dir
@@ -122,6 +123,7 @@ class BatchProcessor:
         self.target_clip_id = clip_id
         self.auth_token = auth_token
         self.user_id = user_id or "anonymous"
+        self.review_brief = review_brief
         
         # Initialize Transcription Driver
         from packages.clips.transcription.driver import TranscriptionDriver
@@ -476,33 +478,113 @@ class BatchProcessor:
                 console.print(f"[red]Error: Clip {target_clip_id} not found in curation results (1-{len(valid_clips)})[/red]")
                 return 0
         
+        return self._dispatch_after_curation(
+            episode, valid_clips, job_id, start_from_clip
+        )
+
+    # ── Human-in-the-loop brief gate ─────────────────────────────────────────
+
+    def _dispatch_after_curation(self, episode, valid_clips, job_id, start_from_clip):
+        """After curation: open the brief gate (if enabled) or render directly.
+
+        Gate ON  → park the job at `awaiting_brief` and return (no rendering).
+        Gate OFF → render the filtered list exactly as before (no regression).
+        """
+        if self._brief_gate_open(job_id, start_from_clip, episode):
+            return self._open_brief_gate(episode, job_id)
+        return self.process_clips(
+            episode, valid_clips, job_id=job_id, start_from_clip=start_from_clip
+        )
+
+    def _brief_gate_enabled(self) -> bool:
+        """Whether the brief gate is active. Per-job override wins; otherwise the
+        user setting REVIEW_BRIEF_BEFORE_PROCESSING, defaulting ON."""
+        override = getattr(self, "review_brief", None)
+        if override is not None:
+            return bool(override)
+        try:
+            from server.services.user_settings import effective_setting
+            val = effective_setting(self.user_id, "REVIEW_BRIEF_BEFORE_PROCESSING")
+        except Exception:
+            return True
+        if not val:
+            return True  # default ON
+        return str(val).strip().lower() not in ("false", "0", "no", "off")
+
+    def _brief_gate_open(self, job_id, start_from_clip, episode) -> bool:
+        """True if we should pause for the brief now — not on resume, not if the
+        user already approved this episode's brief."""
+        if not job_id or start_from_clip > 0:
+            return False
+        if not self._brief_gate_enabled():
+            return False
+        from packages.clips.curation.brief_builder import load_session
+        try:
+            session = load_session(episode.episode_folder)
+        except Exception:
+            session = None
+        if session is not None and session.status == "approved":
+            return False
+        return True
+
+    def _open_brief_gate(self, episode, job_id) -> int:
+        """Build + persist the brief session and park the job awaiting review."""
+        from packages.clips.curation.brief_builder import build_session, save_session
+        from server.workers.job_store import get_job_store
+        episode_id = f"EP{episode.episode_number:03d}"
+        session = build_session(
+            episode.episode_folder, episode_id, min_score=self.min_score
+        )
+        session.job_id = job_id
+        save_session(episode.episode_folder, session)
+        selected = sum(1 for c in session.candidates if c.selected)
+        get_job_store().update_progress(
+            job_id,
+            68,
+            f"Esperando tu revisión del brief ({selected} clips listos)…",
+            status="awaiting_brief",
+        )
+        console.print(
+            f"[cyan]⏸️ Brief gate abierto: {len(session.candidates)} candidatos, "
+            f"{selected} seleccionados[/cyan]"
+        )
+        return 0
+
+    # ── Render ───────────────────────────────────────────────────────────────
+
+    def process_clips(self, episode, clips, job_id=None, start_from_clip=0) -> int:
+        """Render exactly the given list of clips (extract → reframe → subtitles → export).
+
+        Decoupled from curation so the brief-approve flow can render only the
+        user-approved subset, while the gate-OFF path renders the filtered list.
+        """
+        from server.workers.job_store import get_job_store
+        store = get_job_store() if job_id else None
+        AUTO_APPROVE_SCORE = 80
+
         # Create approved/review subfolders
         approved_folder = episode.clips_folder / "approved"
         review_folder = episode.clips_folder / "review"
-        approved_folder.mkdir(exist_ok=True)
-        review_folder.mkdir(exist_ok=True)
-        
-        # Step 3: Process each clip
+        approved_folder.mkdir(parents=True, exist_ok=True)
+        review_folder.mkdir(parents=True, exist_ok=True)
+
         clips_generated = 0
-        
-        # If resuming, skip already processed clips
+
         if start_from_clip > 0:
             console.print(f"[cyan]▶️ Resuming from clip {start_from_clip + 1}[/cyan]")
-        
-        # Update job store with total clips count
+
         if store and job_id:
-            store.set_total_clips(job_id, len(valid_clips))
-        
-        for i, clip in enumerate(valid_clips, 1):
+            store.set_total_clips(job_id, len(clips))
+
+        for i, clip in enumerate(clips, 1):
             # Skip already processed clips when resuming
             if i <= start_from_clip:
                 console.print(f"[dim]   Skipping clip_{i:02d} (already processed)[/dim]")
                 continue
 
             # In-process abort check — set by /pause and /cancel.
-            # Surfaces faster than the JobStore poll below because no DB round-trip.
             if self._aborted():
-                console.print(f"[yellow]⏸️ Pipeline aborted at clip {i-1}/{len(valid_clips)} (pause/cancel)[/yellow]")
+                console.print(f"[yellow]⏸️ Pipeline aborted at clip {i-1}/{len(clips)} (pause/cancel)[/yellow]")
                 return clips_generated
 
             # Belt-and-suspenders: also poll the JobStore in case the abort
@@ -510,138 +592,50 @@ class BatchProcessor:
             if store and job_id:
                 current_job = store.get_job(job_id)
                 if current_job and current_job.status in ('paused', 'cancelled'):
-                    console.print(f"[yellow]⏸️ Job {current_job.status} at clip {i-1}/{len(valid_clips)}[/yellow]")
+                    console.print(f"[yellow]⏸️ Job {current_job.status} at clip {i-1}/{len(clips)}[/yellow]")
                     return clips_generated
-            
+
             score = clip.virality_score.total
             is_approved = score >= AUTO_APPROVE_SCORE
             target_folder = approved_folder if is_approved else review_folder
             status_icon = "✓" if is_approved else "📋"
-            
+
             clip_name = f"clip_{i:02d}"
             console.print(f"[dim]   Processing {clip_name} ({clip.start_time:.0f}s-{clip.end_time:.0f}s) score={score} {status_icon}[/dim]")
-            
+
             if store and job_id:
-                pct = 70 + (i / len(valid_clips)) * 30
-                store.update_progress(job_id, int(pct), f"Generando {clip_name}/{len(valid_clips)} ({status_icon})")
-            
+                pct = 70 + (i / len(clips)) * 30
+                store.update_progress(job_id, int(pct), f"Generando {clip_name}/{len(clips)} ({status_icon})")
+
             # ✅ AUTO-RESUME: Check if clip already exists
             final_path_approved = approved_folder / f"{clip_name}.mp4"
             final_path_review = review_folder / f"{clip_name}.mp4"
-            
+
             if final_path_approved.exists() or final_path_review.exists():
                 console.print(f"[dim]   ⏩ Skipping {clip_name} (already exists)[/dim]")
-                # Update progress tracking
                 if store and job_id:
-                    # We treat existing clips as "complete" for the progress bar
-                    current_generated = clips_generated + (1 if final_path_approved.exists() else 0) # Approximate
+                    current_generated = clips_generated + (1 if final_path_approved.exists() else 0)
                     store.update_clip_progress(
                         job_id,
                         clip_index=i,
-                        clips_generated=current_generated, # This might be slightly off if we don't track total previously generated, but acceptable for UI
+                        clips_generated=current_generated,
                         message=f"Clip {i} ya existe, saltando..."
                     )
                 continue
-            
-            try:
-                # Use temp files for intermediate processing
-                with tempfile.TemporaryDirectory() as tmp_dir:
-                    tmp_path = Path(tmp_dir)
-                    
-                    # 3a. Extract clip from source
-                    raw_clip = tmp_path / "raw.mp4"
-                    self._extract_clip(
-                        episode.video_path,
-                        raw_clip,
-                        clip.start_time,
-                        clip.end_time,
-                    )
-                    
-                    # 3b. High-precision transcription and diarization strictly for this clip
-                    # (As per user request, we process each clip independently to guarantee high quality word-level timestamps and diarization)
-                    # Load episode voice fingerprints once (cached implicitly
-                    # because _transcribe_clip caches the source).
-                    voice_centroids = self._episode_voice_centroids(
-                        episode.episode_folder
-                    )
-                    clip_transcript = self._transcribe_clip(
-                        raw_clip, voice_centroids=voice_centroids
-                    )
-                    
-                    # 3c. Create split-screen with tracking
-                    # Passes the clip-specific diarization into the FaceTracker
-                    split_clip = tmp_path / "split.mp4"
-                    # clip_transcript.segments now carries episode-level
-                    # SPEAKER_NN labels when voice_embeddings.json exists
-                    # (LocalWhisperSource handles the relabel internally).
-                    # Otherwise it falls back to fresh per-clip ECAPA IDs.
-                    reframe_video(
-                        video_path=str(raw_clip),
-                        output_path=str(split_clip),
-                        pre_cut=True,  # Clip already extracted, don't seek again
-                        speaker_segments=clip_transcript.segments,
-                        # The face tracker uses this to find any saved
-                        # speaker↔face labels (L3) for the episode.
-                        episode_folder=episode.episode_folder,
-                    )
-                    
-                    # 3d. Generate subtitles
-                    subs_path = tmp_path / "subs.ass"
-                    generator = SubtitleGenerator(style='splitscreen')
-                    generator.generate_word_by_word(
-                        clip_transcript,
-                        str(subs_path),
-                        words_per_line=5,
-                        animation='cumulative'
-                    )
-                    
-                    # 3e. Burn subtitles and save to appropriate folder
-                    final_path = target_folder / f"{clip_name}.mp4"
-                    self._burn_subtitles(split_clip, subs_path, final_path)
-                    
-                    # 3f. Save caption to text file
-                    caption_path = target_folder / f"{clip_name}_caption.txt"
-                    caption_content = f"{clip.social_caption}\n\n{' '.join(clip.caption_hashtags)}"
-                    caption_path.write_text(caption_content, encoding='utf-8')
-                    
-                    clips_generated += 1
-                    folder_name = "approved" if is_approved else "review"
-                    console.print(f"[green]   ✓ {clip_name} saved to {folder_name}/[/green]")
-                    
-                    # Community Intelligence sync + clip telemetry removed in local-first MVP.
 
+            generated = self._render_one_clip(
+                episode, clip, clip_name, target_folder, is_approved, i, len(clips)
+            )
+            clips_generated += generated
 
-                    # Update job progress (for pause/resume)
-                    if store and job_id:
-                        store.update_clip_progress(
-                            job_id,
-                            clip_index=i,  # 1-indexed becomes the "completed up to" index
-                            clips_generated=clips_generated,
-                            message=f"Procesado clip {i}/{len(valid_clips)}",
-                        )
-                    
-            except Exception as e:
-                console.print(f"[red]   ✗ Error processing {clip_name}: {e}[/red]")
-                
-                # Cleanup even on error
-                import torch
-                import gc
-                
-                if torch.backends.mps.is_available():
-                    torch.mps.empty_cache()
-                
-                gc.collect()
-                continue
-            
-            # Successful clip cleanup
-            import torch
-            import gc
-            
-            if torch.backends.mps.is_available():
-                torch.mps.empty_cache()
-                torch.mps.synchronize()
-            
-            gc.collect()
+            # Update job progress (for pause/resume)
+            if generated and store and job_id:
+                store.update_clip_progress(
+                    job_id,
+                    clip_index=i,  # 1-indexed becomes the "completed up to" index
+                    clips_generated=clips_generated,
+                    message=f"Procesado clip {i}/{len(clips)}",
+                )
 
         # Clear the active-job marker so subprocesses spawned by unrelated
         # work in this thread later (unlikely but possible) aren't registered
@@ -654,6 +648,78 @@ class BatchProcessor:
                 pass
 
         return clips_generated
+
+    def _render_one_clip(
+        self, episode, clip, clip_name, target_folder, is_approved, i, total
+    ) -> int:
+        """Render a single clip end-to-end. Returns 1 on success, 0 on failure."""
+        from packages.clips.vision.reframer import reframe_video
+        from packages.clips.subtitles.generator import SubtitleGenerator
+        import torch
+        import gc
+
+        try:
+            # Use temp files for intermediate processing
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_path = Path(tmp_dir)
+
+                # 3a. Extract clip from source
+                raw_clip = tmp_path / "raw.mp4"
+                self._extract_clip(
+                    episode.video_path, raw_clip, clip.start_time, clip.end_time
+                )
+
+                # 3b. High-precision transcription/diarization for this clip only.
+                voice_centroids = self._episode_voice_centroids(episode.episode_folder)
+                clip_transcript = self._transcribe_clip(
+                    raw_clip, voice_centroids=voice_centroids
+                )
+
+                # 3c. Create split-screen with face tracking
+                split_clip = tmp_path / "split.mp4"
+                reframe_video(
+                    video_path=str(raw_clip),
+                    output_path=str(split_clip),
+                    pre_cut=True,  # Clip already extracted, don't seek again
+                    speaker_segments=clip_transcript.segments,
+                    episode_folder=episode.episode_folder,
+                )
+
+                # 3d. Generate subtitles
+                subs_path = tmp_path / "subs.ass"
+                generator = SubtitleGenerator(style='splitscreen')
+                generator.generate_word_by_word(
+                    clip_transcript, str(subs_path), words_per_line=5, animation='cumulative'
+                )
+
+                # 3e. Burn subtitles and save to the appropriate folder
+                final_path = target_folder / f"{clip_name}.mp4"
+                self._burn_subtitles(split_clip, subs_path, final_path)
+
+                # 3f. Save caption to text file
+                caption_path = target_folder / f"{clip_name}_caption.txt"
+                caption_content = f"{clip.social_caption}\n\n{' '.join(clip.caption_hashtags)}"
+                caption_path.write_text(caption_content, encoding='utf-8')
+
+                folder_name = "approved" if is_approved else "review"
+                console.print(f"[green]   ✓ {clip_name} saved to {folder_name}/[/green]")
+
+            # Successful clip cleanup
+            if torch.backends.mps.is_available():
+                torch.mps.empty_cache()
+                torch.mps.synchronize()
+            gc.collect()
+            return 1
+
+        except Exception as e:
+            console.print(f"[red]   ✗ Error processing {clip_name}: {e}[/red]")
+            try:
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+            except Exception:
+                pass
+            gc.collect()
+            return 0
 
     def _extract_clip(self, source: Path, output: Path, start: float, end: float) -> None:
         """Extract a clip segment using FFmpeg."""
