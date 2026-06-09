@@ -8,15 +8,13 @@ import {
   type Clip,
   type EpisodeResponse,
 } from "../../lib/api";
-import { ArrowLeft, Loader2, VideoOff, Trash2, MessageSquareWarning } from "lucide-react";
+import { ArrowLeft, Loader2, VideoOff, Trash2 } from "lucide-react";
 import toast from "react-hot-toast";
-import { CriticInsightsModal } from "./CriticInsightsModal";
 
 export const ClipReviewList: React.FC = () => {
   const [job, setJob] = useState<JobResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [jobId, setJobId] = useState<string | null>(null);
-  const [criticOpen, setCriticOpen] = useState(false);
   const [history, setHistory] = useState<any[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(
@@ -181,14 +179,6 @@ export const ClipReviewList: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-2">
-              <button
-                onClick={() => setCriticOpen(true)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium bg-zinc-900/50 border-white/10 text-zinc-300 hover:text-amber-300 hover:border-amber-500/30 hover:bg-amber-500/10"
-                title="See which clips the Critic rejected and leave feedback"
-              >
-                <MessageSquareWarning className="w-4 h-4" />
-                Critic insights
-              </button>
               <button
                 onClick={() => setShowTrash(!showTrash)}
                 className={`flex items-center gap-2 px-4 py-2 rounded-xl transition-all duration-300 border font-medium ${
@@ -355,10 +345,6 @@ export const ClipReviewList: React.FC = () => {
             onReject={handleReject}
           />
         )}
-
-      {criticOpen && jobId && (
-        <CriticInsightsModal jobId={jobId} onClose={() => setCriticOpen(false)} />
-      )}
     </div>
   );
 };

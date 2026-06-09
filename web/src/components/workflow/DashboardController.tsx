@@ -4,6 +4,7 @@ import { UploadZone } from "./UploadZone";
 import { LibraryView } from "./LibraryView";
 import { LiveProcessingWidget } from "./LiveProcessingWidget";
 import { SpeakerIdentificationModal } from "./SpeakerIdentificationModal";
+import { BriefChatModal } from "./BriefChatModal";
 import { MissingApiKeyModal } from "./MissingApiKeyModal";
 import { YouTubeNudge } from "../analytics/YouTubeNudge";
 import { CreditsStatusBanner } from "./CreditsStatusBanner";
@@ -53,6 +54,9 @@ export const DashboardController: React.FC = () => {
     episodeNum: number;
     forceReset: boolean;
   } | null>(null);
+  // Brief gate — modal shown when a job parks at awaiting_brief (after
+  // curation, before the heavy render). Set by LiveProcessingWidget.
+  const [briefJobId, setBriefJobId] = useState<string | null>(null);
 
   // Fetch YouTube connection status so the Pro card doesn't nudge
   // users who already connected during onboarding.
@@ -287,6 +291,7 @@ export const DashboardController: React.FC = () => {
       {activeJobId && (
         <LiveProcessingWidget
           jobId={activeJobId}
+          onAwaitingBrief={() => setBriefJobId(activeJobId)}
           onJobComplete={() => {
             // Keep showing so user can click "Review Clips"
           }}
@@ -431,6 +436,14 @@ export const DashboardController: React.FC = () => {
             setIdentifyEp(null);
             if (ep) launchProcess(ep.episodeNum, ep.forceReset);
           }}
+        />
+      )}
+
+      {briefJobId && (
+        <BriefChatModal
+          jobId={briefJobId}
+          onClose={() => setBriefJobId(null)}
+          onApproved={() => setBriefJobId(null)}
         />
       )}
     </div>

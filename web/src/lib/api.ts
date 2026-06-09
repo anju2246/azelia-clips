@@ -4,12 +4,54 @@
 export type JobStatus =
   | "pending"
   | "processing"
+  | "awaiting_brief"
   | "paused"
   | "resuming"
   | "completed"
   | "error"
   | "failed"
   | "cancelled";
+
+// ── Conversational brief (human-in-the-loop gate, pre-render) ──────────
+export interface BriefCandidate {
+  id: number;
+  start_time: number;
+  end_time: number;
+  title: string;
+  summary: string;
+  reasoning: string;
+  score: number;
+  critic_approved: boolean;
+  above_threshold: boolean;
+  selected: boolean;
+  origin: "curation" | "rescued" | "found";
+}
+
+export interface BriefChatMessage {
+  role: "user" | "assistant";
+  content: string;
+  change_summary?: string | null;
+}
+
+export interface BriefCounts {
+  selected: number;
+  total: number;
+  discarded: number;
+}
+
+export interface BriefResponse {
+  status: string;
+  episode_id: string;
+  candidates: BriefCandidate[];
+  messages: BriefChatMessage[];
+  counts: BriefCounts;
+}
+
+export interface BriefMessageResponse extends BriefResponse {
+  reply: string;
+  change_summary: string;
+  actions: Array<Record<string, unknown>>;
+}
 
 export interface Clip {
   id: number;
@@ -350,6 +392,29 @@ export const ClipsApi = {
   // Open clip location in Finder (macOS)
   openClipLocation: (jobId: string, filename: string) =>
     fetchApi<any>(`/clips/${jobId}/${filename}/open`, { method: "POST" }),
+
+  // ── Conversational brief ─────────────────────────────────────────
+  getBrief: (jobId: string) =>
+    fetchApi<BriefResponse>(`/jobs/${jobId}/brief`),
+
+  sendBriefMessage: (jobId: string, message: string) =>
+    fetchApi<BriefMessageResponse>(`/jobs/${jobId}/brief/message`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message }),
+    }),
+
+  approveBrief: (jobId: string, selectedIds?: number[]) =>
+    fetchApi<{ status: string; approved_count: number }>(
+      `/jobs/${jobId}/brief/approve`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          selectedIds ? { selected_ids: selectedIds } : {},
+        ),
+      },
+    ),
 };
 
 // --- SETTINGS API ---

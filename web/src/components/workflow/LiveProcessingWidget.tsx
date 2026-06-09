@@ -16,6 +16,7 @@ interface LiveProcessingWidgetProps {
   onCancel: () => void;
   onPause?: () => void;
   onResume?: () => void;
+  onAwaitingBrief?: () => void;
 }
 
 export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
@@ -24,12 +25,22 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
   onCancel,
   onPause,
   onResume,
+  onAwaitingBrief,
 }) => {
   const [job, setJob] = useState<JobResponse | null>(null);
   const [wsStatus, setWsStatus] = useState<
     "connecting" | "connected" | "disconnected"
   >("connecting");
   const wsRef = useRef<WebSocket | null>(null);
+  const briefFiredRef = useRef(false);
+
+  // Fire the brief gate once when the job parks at awaiting_brief.
+  const maybeFireBrief = (status?: string) => {
+    if (status === "awaiting_brief" && !briefFiredRef.current) {
+      briefFiredRef.current = true;
+      onAwaitingBrief?.();
+    }
+  };
 
   // Initial fetch
   useEffect(() => {
@@ -47,6 +58,7 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
     try {
       const data = await ClipsApi.getJob(jobId);
       setJob(data);
+      maybeFireBrief(data.status);
       if (
         data.status === "completed" ||
         data.status === "error" ||
@@ -85,6 +97,7 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
                 }
               : null,
           );
+          maybeFireBrief(msg.data.status);
         } else if (msg.event === "error") {
           setJob((prev) =>
             prev ? { ...prev, status: "error", error: msg.data.error } : null,
