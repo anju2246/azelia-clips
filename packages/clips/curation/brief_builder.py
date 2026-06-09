@@ -30,6 +30,30 @@ def _dedup_key(start: float, end: float) -> tuple:
     return (round(float(start), 2), round(float(end), 2))
 
 
+def _clip_texter(job_dir: Path):
+    """Return a fn (start, end) -> transcript text for that window, or '' if no
+    transcript.json is available. Lets the brief card show the clip's words."""
+    tpath = job_dir / "transcript.json"
+    if not tpath.exists():
+        return lambda start, end: ""
+    try:
+        from packages.clips.transcription.transcriber import Transcript
+        transcript = Transcript.load(tpath)
+        segments = transcript.segments
+    except Exception:
+        return lambda start, end: ""
+
+    def text_for(start: float, end: float) -> str:
+        parts = [
+            getattr(s, "text", "") or ""
+            for s in segments
+            if getattr(s, "end", 0) >= start and getattr(s, "start", 0) <= end
+        ]
+        return " ".join(p.strip() for p in parts if p).strip()
+
+    return text_for
+
+
 def build_session(
     job_dir: Path, episode_id: str, min_score: float = 70
 ) -> BriefSession:
@@ -46,6 +70,7 @@ def build_session(
     job_dir = Path(job_dir)
     candidates: list[BriefCandidate] = []
     seen: set[tuple] = set()
+    clip_text = _clip_texter(job_dir)
 
     curation_path = job_dir / "curation.json"
     if curation_path.exists():
@@ -68,6 +93,7 @@ def build_session(
                     above_threshold=above,
                     selected=above,
                     origin="curation",
+                    transcript=clip_text(clip["start_time"], clip["end_time"]),
                 )
             )
 
@@ -94,6 +120,7 @@ def build_session(
                     above_threshold=False,
                     selected=False,
                     origin="rescued",
+                    transcript=clip_text(d["start_time"], d["end_time"]),
                 )
             )
 

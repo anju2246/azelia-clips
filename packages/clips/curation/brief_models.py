@@ -29,6 +29,7 @@ class BriefCandidate(BaseModel):
     above_threshold: bool
     selected: bool
     origin: str  # "curation" | "rescued" | "found"
+    transcript: str = ""  # clip transcript text (for the expandable review card)
 
 
 class ChatMessage(BaseModel):

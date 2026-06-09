@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Loader2, X, Send, Check } from "lucide-react";
+import { Loader2, X, Send, Check, ChevronDown, ChevronRight } from "lucide-react";
 import toast from "react-hot-toast";
 import {
   ClipsApi,
@@ -42,7 +42,29 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [approving, setApproving] = useState(false);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+
+  const toggleExpand = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelect = (id: number) => {
+    setBrief((prev) =>
+      prev
+        ? {
+            ...prev,
+            candidates: prev.candidates.map((c) =>
+              c.id === id ? { ...c, selected: !c.selected } : c,
+            ),
+          }
+        : prev,
+    );
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -98,7 +120,7 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
     }
   };
 
-  const selectedCount = brief?.counts.selected ?? 0;
+  const selectedCount = (brief?.candidates ?? []).filter((c) => c.selected).length;
   const messages = brief?.messages ?? [];
 
   return (
@@ -191,39 +213,101 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
             {/* ── Candidates (right) ──────────────────────────────────── */}
             <div className="flex flex-col w-1/2 min-h-0">
               <div className="flex-1 overflow-y-auto p-5 space-y-2">
-                {(brief?.candidates ?? []).map((c) => (
-                  <div
-                    key={c.id}
-                    data-testid="brief-candidate"
-                    className={`flex items-center gap-3 rounded-xl border p-3 ${
-                      c.selected
-                        ? "border-brand-600/40 bg-brand-600/10"
-                        : "border-zinc-800 bg-zinc-950/40 opacity-70"
-                    }`}
-                  >
+                {(brief?.candidates ?? []).map((c) => {
+                  const isOpen = expanded.has(c.id);
+                  return (
                     <div
-                      className={`flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0 ${
-                        c.selected ? "bg-brand-500 text-white" : "bg-zinc-800 text-zinc-600"
+                      key={c.id}
+                      data-testid="brief-candidate"
+                      className={`rounded-xl border ${
+                        c.selected
+                          ? "border-brand-600/40 bg-brand-600/10"
+                          : "border-zinc-800 bg-zinc-950/40"
                       }`}
                     >
-                      {c.selected && <Check className="w-3.5 h-3.5" />}
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm text-white truncate">
-                          #{c.id} {c.title}
+                      {/* Header row */}
+                      <div className="flex items-center gap-3 p-3">
+                        <button
+                          type="button"
+                          aria-label={c.selected ? "Quitar" : "Seleccionar"}
+                          onClick={() => toggleSelect(c.id)}
+                          className={`flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0 transition-colors ${
+                            c.selected
+                              ? "bg-brand-500 text-white"
+                              : "bg-zinc-800 text-zinc-600 hover:bg-zinc-700"
+                          }`}
+                        >
+                          {c.selected && <Check className="w-3.5 h-3.5" />}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(c.id)}
+                          className="min-w-0 flex-1 text-left"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span
+                              className={`text-sm truncate ${c.selected ? "text-white" : "text-zinc-400"}`}
+                            >
+                              #{c.id} {c.title}
+                            </span>
+                            <OriginBadge c={c} />
+                          </div>
+                          <p className="text-xs text-zinc-500">
+                            {Math.round(c.start_time)}s–{Math.round(c.end_time)}s ·{" "}
+                            {Math.round(c.end_time - c.start_time)}s
+                          </p>
+                        </button>
+                        <span className="text-sm font-semibold text-zinc-300 tabular-nums">
+                          {c.score > 0 ? Math.round(c.score) : "—"}
                         </span>
-                        <OriginBadge c={c} />
+                        <button
+                          type="button"
+                          onClick={() => toggleExpand(c.id)}
+                          className="text-zinc-500 hover:text-white flex-shrink-0"
+                          aria-label={isOpen ? "Contraer" : "Expandir"}
+                        >
+                          {isOpen ? (
+                            <ChevronDown className="w-4 h-4" />
+                          ) : (
+                            <ChevronRight className="w-4 h-4" />
+                          )}
+                        </button>
                       </div>
-                      <p className="text-xs text-zinc-500">
-                        {Math.round(c.start_time)}s–{Math.round(c.end_time)}s
-                      </p>
+
+                      {/* Expanded detail */}
+                      {isOpen && (
+                        <div className="px-3 pb-3 pt-0 space-y-2 border-t border-white/5">
+                          {c.summary && (
+                            <div className="pt-2">
+                              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-0.5">
+                                Tema
+                              </p>
+                              <p className="text-sm text-zinc-200">{c.summary}</p>
+                            </div>
+                          )}
+                          {c.reasoning && (
+                            <div>
+                              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-0.5">
+                                Por qué este clip
+                              </p>
+                              <p className="text-sm text-zinc-300">{c.reasoning}</p>
+                            </div>
+                          )}
+                          {c.transcript && (
+                            <div>
+                              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-0.5">
+                                Transcript
+                              </p>
+                              <p className="text-xs text-zinc-400 leading-relaxed max-h-40 overflow-y-auto bg-black/30 rounded-lg p-2">
+                                {c.transcript}
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <span className="text-sm font-semibold text-zinc-300 tabular-nums">
-                      {c.score > 0 ? Math.round(c.score) : "—"}
-                    </span>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
               <div className="p-4 border-t border-zinc-800 flex items-center gap-2">
                 <button

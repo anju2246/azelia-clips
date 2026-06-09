@@ -25,6 +25,7 @@ export interface BriefCandidate {
   above_threshold: boolean;
   selected: boolean;
   origin: "curation" | "rescued" | "found";
+  transcript: string;
 }
 
 export interface BriefChatMessage {
