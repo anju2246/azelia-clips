@@ -142,3 +142,28 @@ def test_approve_zero_selected_returns_400(client, brief_dir, monkeypatch):
     r = client.post("/api/jobs/job1/brief/approve", json={"selected_ids": []})
     assert r.status_code == 400
     assert "NO_CLIPS_SELECTED" in r.text
+
+
+# ── recurate_focus deterministic re-rank (no LLM) ────────────────────────────
+
+def test_focus_rerank_blends_dimension(brief_dir):
+    session = build_session(brief_dir, "EP001", min_score=70)
+    scores = clips._focus_rerank_scores(brief_dir, session.candidates, "prioriza lo polémico")
+    by_title = {c.title: c for c in session.candidates}
+    why = by_title["Why AI Will Replace Most Jobs"]   # controversy 8, total 85 → 82.5
+    fail = by_title["My Biggest Failure"]              # controversy 4, total 55 → 47.5
+    assert scores[why.id] == 82.5
+    assert scores[fail.id] == 47.5
+    assert scores[why.id] > scores[fail.id]
+
+
+def test_focus_rerank_no_dimension_keeps_totals(brief_dir):
+    session = build_session(brief_dir, "EP001", min_score=70)
+    scores = clips._focus_rerank_scores(brief_dir, session.candidates, "algo sin dimensión")
+    by_title = {c.title: c for c in session.candidates}
+    assert scores[by_title["Why AI Will Replace Most Jobs"].id] == 85.0
+
+
+def test_brief_context_wires_ranker(brief_dir):
+    ctx = clips._brief_context(brief_dir)
+    assert ctx.ranker is not None
