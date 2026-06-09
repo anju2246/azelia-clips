@@ -151,9 +151,15 @@ export const DashboardController: React.FC = () => {
             j.status === "processing" ||
             j.status === "pending" ||
             j.status === "resuming" ||
-            j.status === "paused",
+            j.status === "paused" ||
+            j.status === "awaiting_brief",
         );
-        if (!cancelled) {
+        if (cancelled) return;
+        if (running?.status === "awaiting_brief") {
+          // Re-track the job so LiveProcessingWidget mounts and re-opens the brief.
+          setAndPersistJobId(running.id);
+          setOrphanJob(null);
+        } else {
           setOrphanJob(
             running
               ? {

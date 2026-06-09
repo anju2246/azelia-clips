@@ -13,6 +13,7 @@ from pydantic import BaseModel, Field
 class JobStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
+    AWAITING_BRIEF = "awaiting_brief"
     PAUSED = "paused"
     RESUMING = "resuming"
     COMPLETED = "completed"
