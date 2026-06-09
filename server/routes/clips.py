@@ -23,6 +23,15 @@ from server.workers.job_store import get_job_store
 from packages.core.config import settings
 from server.middleware.auth import require_auth, require_onboarding, require_auth_flexible, User
 from packages.clips.vision.face_tracker import FaceTracker
+from packages.clips.curation.brief_builder import load_session, save_session
+from packages.clips.curation.brief_models import BriefAction, ChatMessage
+from packages.clips.curation.brief_actions import (
+    apply as apply_brief_action,
+    BriefContext,
+    BriefActionError,
+)
+from packages.clips.curation.agents.brief_agent import BriefAgent
+from packages.clips.curation.models import CuratedClip
 
 router = APIRouter()
 store = get_job_store()
@@ -792,6 +801,242 @@ async def save_critic_feedback(payload: dict, user: User = Depends(require_auth)
         user_note=payload.get("user_note"),
     )
     return {"status": "saved", "id": row_id}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Conversational brief (human-in-the-loop gate, pre-render)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _brief_dir(job_id: str, episode_id: str | None = None) -> Path:
+    """Folder holding curation.json / critic_decisions.json / brief_session.json."""
+    return _resolve_clips_dir(job_id, episode_id).parent
+
+
+def _ep_num_from(episode_id: str | None) -> int | None:
+    ep = (episode_id or "").upper()
+    if ep.startswith("EP") and ep[2:5].isdigit():
+        return int(ep[2:5])
+    return None
+
+
+def _brief_payload(session) -> dict:
+    selected = sum(1 for c in session.candidates if c.selected)
+    return {
+        "status": session.status,
+        "episode_id": session.episode_id,
+        "candidates": [c.model_dump() for c in session.candidates],
+        "messages": [m.model_dump() for m in session.messages],
+        "counts": {
+            "selected": selected,
+            "total": len(session.candidates),
+            "discarded": len(session.candidates) - selected,
+        },
+    }
+
+
+def _brief_context(brief_dir: Path) -> BriefContext:
+    """Build the action context (episode duration + lazy finder over the
+    persisted transcript). find_new/recurate are best-effort in v1."""
+    duration = 0.0
+    transcript = None
+    tpath = brief_dir / "transcript.json"
+    try:
+        if tpath.exists():
+            from packages.clips.transcription.transcriber import Transcript
+            transcript = Transcript.load(tpath)
+            duration = float(getattr(transcript, "duration", 0.0) or 0.0)
+    except Exception:
+        transcript = None
+
+    def finder(ws, we, hint):
+        if transcript is None:
+            return []
+        try:
+            from packages.clips.curation.agents.finder import FinderAgent
+            sub = [s for s in transcript.segments if s.end >= ws and s.start <= we]
+            if not sub:
+                return []
+            window = transcript.__class__(
+                segments=sub,
+                language=getattr(transcript, "language", "en"),
+                duration=getattr(transcript, "duration", 0.0),
+                source_file=getattr(transcript, "source_file", ""),
+            )
+            cands = FinderAgent().find_candidates(window)
+            return [
+                {"start_time": c.start_time, "end_time": c.end_time,
+                 "title": c.title or "", "summary": c.summary or "",
+                 "reasoning": c.reasoning or "", "score": 0.0}
+                for c in cands
+            ]
+        except Exception:
+            return []
+
+    return BriefContext(episode_duration=duration or 1e9, finder=finder, ranker=None)
+
+
+def _approved_curated_clips(brief_dir: Path, session) -> list:
+    """Map the user-approved candidates back to renderable CuratedClips."""
+    selected = [c for c in session.candidates if c.selected]
+    keys = {(round(c.start_time, 2), round(c.end_time, 2)) for c in selected}
+    out, matched = [], set()
+    for d in _load_curation(brief_dir):
+        try:
+            cc = CuratedClip.model_validate(d)
+        except Exception:
+            continue
+        k = (round(cc.start_time, 2), round(cc.end_time, 2))
+        if k in keys and k not in matched:
+            out.append(cc)
+            matched.add(k)
+    # selected candidates with no curation entry (e.g. origin="found")
+    for c in selected:
+        k = (round(c.start_time, 2), round(c.end_time, 2))
+        if k not in matched:
+            out.append(CuratedClip(
+                start_time=c.start_time, end_time=c.end_time,
+                title=c.title, summary=c.summary,
+            ))
+            matched.add(k)
+    return out
+
+
+def _record_brief_learning(episode_id: str, session) -> None:
+    """Feed the user's keep/drop/rescue decisions into the Critic learning store.
+
+    A candidate where the user agreed with the Critic → 'agree'; where they
+    diverged (rescued a reject, or dropped an approval) → 'disagree'.
+    """
+    for c in session.candidates:
+        verdict = "agree" if c.selected == c.critic_approved else "disagree"
+        try:
+            store.save_critic_feedback(
+                episode_id=episode_id,
+                start_time=c.start_time,
+                end_time=c.end_time,
+                title=c.title,
+                summary=c.summary,
+                critic_reasoning=c.reasoning,
+                user_verdict=verdict,
+                user_note="brief",
+            )
+        except Exception:
+            pass
+
+
+def _render_approved(job_id: str, ep_num: int) -> None:
+    """Background task: render only the approved subset after brief approval."""
+    from packages.clips.pipeline import BatchProcessor
+    try:
+        proc = BatchProcessor(min_score=settings.min_score if hasattr(settings, "min_score") else 70)
+        eps = proc.discover_episodes(start=ep_num, end=ep_num)
+        if not eps:
+            store.fail_job(job_id, f"Episode {ep_num} not found")
+            return
+        ep = eps[0]
+        session = load_session(ep.episode_folder)
+        clips_list = _approved_curated_clips(ep.episode_folder, session)
+        generated = proc.process_clips(ep, clips_list, job_id=job_id)
+        store.complete_job(job_id, generated)
+    except Exception as e:
+        store.fail_job(job_id, str(e))
+
+
+@router.get("/jobs/{job_id}/brief")
+async def get_brief(job_id: str, user: User = Depends(require_auth)):
+    """Return the brief session for a job that's parked awaiting review."""
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "awaiting_brief":
+        raise HTTPException(status_code=409, detail="Job is not awaiting brief review")
+    session = load_session(_brief_dir(job_id, job.episode_id))
+    if session is None:
+        raise HTTPException(status_code=404, detail="No brief session for this job")
+    return _brief_payload(session)
+
+
+@router.post("/jobs/{job_id}/brief/message")
+async def post_brief_message(job_id: str, payload: dict, user: User = Depends(require_auth)):
+    """Apply conversational feedback to the candidate selection."""
+    message = (payload.get("message") or "").strip()
+    if not message or len(message) > 2000:
+        raise HTTPException(status_code=400, detail="message must be 1–2000 chars")
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "awaiting_brief":
+        raise HTTPException(status_code=409, detail="Job is not awaiting brief review")
+    brief_dir = _brief_dir(job_id, job.episode_id)
+    session = load_session(brief_dir)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No brief session for this job")
+
+    try:
+        actions = BriefAgent().interpret(message, session.candidates, session.messages)
+    except Exception as e:
+        # LLM failure — leave the session untouched so the user can retry.
+        raise HTTPException(status_code=502, detail=f"LLM interpretation failed: {e}")
+
+    ctx = _brief_context(brief_dir)
+    summaries = []
+    for action in actions:
+        try:
+            result = apply_brief_action(session, action, ctx)
+            summaries.append(result.change_summary)
+        except BriefActionError as e:
+            summaries.append(f"No pude aplicar una acción ({e}).")
+    reply = " ".join(s for s in summaries if s) or "Sin cambios."
+
+    session.messages.append(ChatMessage(role="user", content=message))
+    session.messages.append(ChatMessage(role="assistant", content=reply, change_summary=reply))
+    save_session(brief_dir, session)
+
+    payload_out = _brief_payload(session)
+    payload_out.update({
+        "reply": reply,
+        "change_summary": reply,
+        "actions": [a.model_dump() for a in actions],
+    })
+    return payload_out
+
+
+@router.post("/jobs/{job_id}/brief/approve", status_code=202)
+async def approve_brief(
+    job_id: str,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_auth),
+):
+    """Freeze the selection, record learning, and render only the approved clips."""
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "awaiting_brief":
+        raise HTTPException(status_code=409, detail="Job is not awaiting brief review")
+    brief_dir = _brief_dir(job_id, job.episode_id)
+    session = load_session(brief_dir)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No brief session for this job")
+
+    override = payload.get("selected_ids")
+    if override is not None:
+        wanted = set(override)
+        for c in session.candidates:
+            c.selected = c.id in wanted
+
+    approved = [c for c in session.candidates if c.selected]
+    if not approved:
+        raise HTTPException(status_code=400, detail="NO_CLIPS_SELECTED")
+
+    session.status = "approved"
+    save_session(brief_dir, session)
+    _record_brief_learning(job.episode_id, session)
+
+    ep_num = _ep_num_from(job.episode_id)
+    store.update_progress(job_id, 70, "Procesando clips aprobados…", status="processing")
+    background_tasks.add_task(_render_approved, job_id, ep_num)
+    return {"status": "processing", "approved_count": len(approved)}
 
 
 @router.get("/clips/{job_id}/rejected")
