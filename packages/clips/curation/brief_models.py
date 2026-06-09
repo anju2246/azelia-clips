@@ -4,6 +4,18 @@ Domain models for the conversational brief pre-processing feature.
 from typing import List, Optional
 from pydantic import BaseModel
 
+# The conversational agent (T3) emits these action types; the applier (T2)
+# executes them deterministically over the candidate selection.
+ACTION_TYPES = (
+    "drop",
+    "rescue",
+    "reorder",
+    "adjust_times",
+    "recurate_focus",
+    "find_new",
+    "noop",
+)
+
 
 class BriefCandidate(BaseModel):
     """A clip candidate in the brief session."""
@@ -25,6 +37,38 @@ class ChatMessage(BaseModel):
     role: str
     content: str
     change_summary: Optional[str] = None
+
+
+class BriefAction(BaseModel):
+    """A single instruction the LLM proposes; the backend applies it.
+
+    One flat model keyed by ``type`` (rather than a class per action) so the
+    LLM's JSON maps cleanly and unknown/extra fields are ignored.
+    """
+    type: str  # one of ACTION_TYPES
+    # drop / rescue
+    targets: List[int] = []
+    # reorder
+    order: Optional[List[int]] = None
+    by: Optional[str] = None  # "score" | "controversy" | ...
+    # adjust_times
+    id: Optional[int] = None
+    start_time: Optional[float] = None
+    end_time: Optional[float] = None
+    # recurate_focus
+    focus: Optional[str] = None
+    # find_new
+    window_start: Optional[float] = None
+    window_end: Optional[float] = None
+    hint: Optional[str] = None
+    # noop
+    reason: Optional[str] = None
+
+
+class ChangeResult(BaseModel):
+    """Outcome of applying one action to a session."""
+    ok: bool
+    change_summary: str
 
 
 class BriefSession(BaseModel):
