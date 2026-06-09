@@ -48,22 +48,22 @@ def _fake_clip(score):
 
 def test_brief_gate_enabled_default_true():
     p = _proc(review_brief=None)
-    with patch("server.services.user_settings.effective_setting", return_value=""):
+    with patch("packages.core.config.settings.review_brief_before_processing", True):
         assert p._brief_gate_enabled() is True
 
 
 def test_brief_gate_disabled_by_setting():
     p = _proc(review_brief=None)
-    with patch("server.services.user_settings.effective_setting", return_value="false"):
+    with patch("packages.core.config.settings.review_brief_before_processing", False):
         assert p._brief_gate_enabled() is False
 
 
 def test_brief_gate_override_wins_over_setting():
     p_off = _proc(review_brief=False)
-    with patch("server.services.user_settings.effective_setting", return_value="true"):
+    with patch("packages.core.config.settings.review_brief_before_processing", True):
         assert p_off._brief_gate_enabled() is False
     p_on = _proc(review_brief=True)
-    with patch("server.services.user_settings.effective_setting", return_value="false"):
+    with patch("packages.core.config.settings.review_brief_before_processing", False):
         assert p_on._brief_gate_enabled() is True
 
 

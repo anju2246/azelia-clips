@@ -503,13 +503,10 @@ class BatchProcessor:
         if override is not None:
             return bool(override)
         try:
-            from server.services.user_settings import effective_setting
-            val = effective_setting(self.user_id, "REVIEW_BRIEF_BEFORE_PROCESSING")
+            from packages.core.config import settings
+            return bool(getattr(settings, "review_brief_before_processing", True))
         except Exception:
-            return True
-        if not val:
             return True  # default ON
-        return str(val).strip().lower() not in ("false", "0", "no", "off")
 
     def _brief_gate_open(self, job_id, start_from_clip, episode) -> bool:
         """True if we should pause for the brief now — not on resume, not if the

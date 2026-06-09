@@ -113,6 +113,7 @@ async def get_settings(user: User = Depends(require_auth)):
         anthropic_model=settings.anthropic_model,
         transcript_supabase_url=settings.transcript_supabase_url,
         transcript_supabase_key=mask_key(settings.transcript_supabase_key),
+        review_brief_before_processing=settings.review_brief_before_processing,
     )
 
 
@@ -155,6 +156,9 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
     if req.transcript_supabase_key is not None and not _is_masked(req.transcript_supabase_key):
         env["TRANSCRIPT_SUPABASE_KEY"] = req.transcript_supabase_key
         settings.transcript_supabase_key = req.transcript_supabase_key
+    if req.review_brief_before_processing is not None:
+        env["REVIEW_BRIEF_BEFORE_PROCESSING"] = "true" if req.review_brief_before_processing else "false"
+        settings.review_brief_before_processing = req.review_brief_before_processing
 
     _write_env_file(env_path, env)
     reset_llm()  # invalidate cached provider list

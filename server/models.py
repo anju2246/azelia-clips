@@ -73,6 +73,10 @@ class SettingsResponse(BaseModel):
     # User-owned Supabase for transcripts (optional)
     transcript_supabase_url: str = Field(default="")
     transcript_supabase_key: str = Field(default="", description="Masked key")
+    review_brief_before_processing: bool = Field(
+        default=True,
+        description="Pause after curation to review clips in a chat before rendering",
+    )
 
 
 class UpdateSettingsRequest(BaseModel):
@@ -83,6 +87,7 @@ class UpdateSettingsRequest(BaseModel):
     anthropic_model: Optional[str] = None
     transcript_supabase_url: Optional[str] = None
     transcript_supabase_key: Optional[str] = None
+    review_brief_before_processing: Optional[bool] = None
 
 
 class EpisodeResponse(BaseModel):

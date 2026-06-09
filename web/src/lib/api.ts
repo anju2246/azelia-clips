@@ -109,11 +109,13 @@ export interface SettingsResponse {
   vertex_model?: string;
   transcript_supabase_url?: string;
   transcript_supabase_key?: string;
+  review_brief_before_processing?: boolean;
 }
 
 export interface UpdateSettingsRequest {
   podcast_name?: string;
   podcast_dir?: string;
+  review_brief_before_processing?: boolean;
   ai_provider_order?: string[];
   groq_api_key?: string;
   groq_model?: string;

@@ -445,6 +445,40 @@ export const SettingsForm: React.FC = () => {
                     placeholder="e.g. The Inminente Podcast"
                   />
                 </div>
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <label className="block text-sm font-medium text-zinc-300">
+                      Revisar brief antes de procesar
+                    </label>
+                    <p className="text-xs text-zinc-500 mt-1 max-w-md">
+                      Pausa tras la curación para revisar y ajustar los clips en
+                      un chat antes de renderizar.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Alternar revisión del brief"
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        review_brief_before_processing: !(
+                          prev.review_brief_before_processing ??
+                          settings?.review_brief_before_processing ??
+                          true
+                        ),
+                      }))
+                    }
+                    className="flex-shrink-0"
+                  >
+                    {(formData.review_brief_before_processing ??
+                      settings?.review_brief_before_processing ??
+                      true) ? (
+                      <ToggleRight className="w-9 h-9 text-brand-400" />
+                    ) : (
+                      <ToggleLeft className="w-9 h-9 text-zinc-600" />
+                    )}
+                  </button>
+                </div>
                 <div>
                   <label className="block text-sm font-medium text-zinc-300 mb-2">
                     Podcast Root Directory{" "}

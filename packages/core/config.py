@@ -104,6 +104,12 @@ class Settings(BaseSettings):
     )
     podcast_name: str = Field(default="My Podcast", description="Name of the podcast for captions and context")
 
+    # ── Human-in-the-loop brief gate ───────────────────────────────────
+    review_brief_before_processing: bool = Field(
+        default=True,
+        description="Pause after AI curation to review/curate clips in a chat before rendering",
+    )
+
     def ensure_output_dir(self) -> Path:
         """Create output directory if it doesn't exist."""
         self.output_dir.mkdir(parents=True, exist_ok=True)
