@@ -79,6 +79,14 @@ private/
 server/data/
 src.bak/
 
+# Personal job data — curation, briefs, candidate sessions, learnings.
+# NEVER commit: these are the user's own clips, transcripts and learned rules.
+data/
+secrets.env
+*.env
+!*.env.example
+!.env.example
+
 # Scratch/test scripts (exploratory, never commit)
 _scratch/
 
