@@ -18,6 +18,7 @@ export default defineConfig({
         '/api': {
           target: 'http://localhost:8000',
           changeOrigin: true,
+          ws: true, // forward the job-status WebSocket (/api/ws/jobs/...) in dev
         },
       },
     },

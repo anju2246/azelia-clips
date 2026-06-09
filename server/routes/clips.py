@@ -944,6 +944,18 @@ def _render_approved(job_id: str, ep_num: int) -> None:
         store.fail_job(job_id, str(e))
 
 
+def _finalize_unless_parked(job_id: str, clips_count: int) -> None:
+    """Complete the job — unless the brief gate (or a pause/cancel) parked it.
+
+    Without this guard the run wrapper would overwrite an `awaiting_brief` status
+    with `completed(0)`, making the brief modal flash and vanish.
+    """
+    current = store.get_job(job_id)
+    if current and current.status in ("awaiting_brief", "paused", "cancelled"):
+        return
+    store.complete_job(job_id, clips_count)
+
+
 @router.get("/jobs/{job_id}/brief")
 async def get_brief(job_id: str, user: User = Depends(require_auth)):
     """Return the brief session for a job that's parked awaiting review."""
@@ -1421,11 +1433,8 @@ async def resume_job_endpoint(
                     clips_count = processor.process_episode(
                         eps[0], job_id=jid, start_from_clip=start_clip
                     )
-                    # Honor pause/cancel that may have happened during resume
-                    current = store.get_job(jid)
-                    if current and current.status in ("paused", "cancelled"):
-                        return
-                    store.complete_job(jid, clips_count)
+                    # Honor pause/cancel/brief-gate that may have happened mid-run
+                    _finalize_unless_parked(jid, clips_count)
                 except Exception as e:
                     store.fail_job(jid, str(e))
 
@@ -1740,9 +1749,11 @@ async def process_episode_endpoint(
             
             # Run processing
             clips_count = processor.process_episode(ep, job_id=job_id)
-            
-            store.complete_job(job_id, clips_count)
-            
+
+            # Leave the job parked if the brief gate (or pause/cancel) claimed it;
+            # completion then resumes from POST /brief/approve.
+            _finalize_unless_parked(job_id, clips_count)
+
         except Exception as e:
             store.fail_job(job_id, str(e))
 

@@ -144,3 +144,21 @@ def test_approve_zero_selected_returns_400(client, brief_dir, monkeypatch):
     assert "NO_CLIPS_SELECTED" in r.text
 
 
+# ── regression: the run wrapper must not clobber awaiting_brief with completed ──
+
+def test_finalize_skips_when_awaiting_brief(monkeypatch):
+    fake = MagicMock()
+    fake.get_job.return_value = types.SimpleNamespace(status="awaiting_brief")
+    monkeypatch.setattr(clips, "store", fake)
+    clips._finalize_unless_parked("job1", 0)
+    fake.complete_job.assert_not_called()
+
+
+def test_finalize_completes_when_running(monkeypatch):
+    fake = MagicMock()
+    fake.get_job.return_value = types.SimpleNamespace(status="processing")
+    monkeypatch.setattr(clips, "store", fake)
+    clips._finalize_unless_parked("job1", 5)
+    fake.complete_job.assert_called_once_with("job1", 5)
+
+

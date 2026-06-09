@@ -33,6 +33,8 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
   >("connecting");
   const wsRef = useRef<WebSocket | null>(null);
   const briefFiredRef = useRef(false);
+  const completedFiredRef = useRef(false);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Fire the brief gate once when the job parks at awaiting_brief.
   const maybeFireBrief = (status?: string) => {
@@ -42,12 +44,23 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
     }
   };
 
-  // Initial fetch
+  // Fire completion once, whether it arrives via WS or the poll fallback.
+  const markComplete = () => {
+    if (completedFiredRef.current) return;
+    completedFiredRef.current = true;
+    onJobComplete();
+  };
+
+  // Initial fetch + WS for live updates + a polling fallback so the widget
+  // (and the brief gate) keep working even when the WS can't connect (e.g.
+  // the dev proxy doesn't forward WebSockets, or the socket drops).
   useEffect(() => {
     fetchJobStatus();
     connectWebSocket();
+    pollRef.current = setInterval(fetchJobStatus, 3000);
 
     return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
       if (wsRef.current) {
         wsRef.current.close();
       }
@@ -64,8 +77,12 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
         data.status === "error" ||
         data.status === "failed"
       ) {
+        if (pollRef.current) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+        }
         if (wsRef.current) wsRef.current.close();
-        if (data.status === "completed") onJobComplete();
+        if (data.status === "completed") markComplete();
       }
     } catch (error) {
       console.error("Failed to fetch job", error);
@@ -115,7 +132,7 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
               : null,
           );
           toast.success("Clips generated successfully!");
-          onJobComplete();
+          markComplete();
         }
       } catch (e) {
         console.error("WS Parse error", e);

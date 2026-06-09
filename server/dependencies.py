@@ -65,10 +65,10 @@ async def processing_worker(job_id: str, payload: Dict[str, Any]):
 
         clips_count = await asyncio.to_thread(run_processing)
 
-        # Don't clobber paused/cancelled state with 'completed' when the
-        # pipeline returned early because of a pause/cancel signal.
+        # Don't clobber paused/cancelled/awaiting_brief state with 'completed'
+        # when the pipeline returned early (pause/cancel signal, or brief gate).
         current = store.get_job(job_id)
-        if current and current.status in ("paused", "cancelled"):
+        if current and current.status in ("paused", "cancelled", "awaiting_brief"):
             store.update_progress(
                 job_id,
                 current.progress,
