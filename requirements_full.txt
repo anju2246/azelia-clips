@@ -181,7 +181,7 @@ torchaudio==2.9.1
 torchcodec==0.9.1
 torchmetrics==1.8.2
 torchvision==0.24.1
-tornado==6.5.4
+tornado==6.5.6
 tqdm==4.67.1
 treetable==0.2.6
 typer==0.21.1
