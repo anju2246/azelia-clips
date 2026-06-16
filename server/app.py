@@ -16,6 +16,7 @@ from packages.core.config import initialize_active_profile, settings
 from server.dependencies import job_queue
 from server.routes.analytics import router as analytics_router
 from server.routes.clips import router as clips_router
+from server.routes.profiles import router as profiles_router
 from server.routes.settings import router as settings_router
 from server.routes.system import router as system_router
 from server.routes.taxonomy import router as taxonomy_router
@@ -80,6 +81,7 @@ app.include_router(settings_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api")
 app.include_router(taxonomy_router, prefix="/api")
 app.include_router(system_router, prefix="/api")
+app.include_router(profiles_router, prefix="/api")
 
 
 @app.get("/api/health")

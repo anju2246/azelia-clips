@@ -80,6 +80,39 @@ class SettingsResponse(BaseModel):
     )
 
 
+class ProfileResponse(BaseModel):
+    id: str
+    name: str
+    data_dir: str
+    claude_binary: Optional[str] = None
+    claude_config_dir: Optional[str] = None
+    is_default: bool = False
+    created_at: str = ""
+    active: bool = False
+
+
+class ProfilesListResponse(BaseModel):
+    active_profile: Optional[str] = None
+    profiles: List[ProfileResponse] = Field(default_factory=list)
+
+
+class CreateProfileRequest(BaseModel):
+    name: str
+    claude_binary: Optional[str] = None
+    claude_config_dir: Optional[str] = None
+
+
+class UpdateProfileRequest(BaseModel):
+    name: Optional[str] = None
+    claude_binary: Optional[str] = None
+    claude_config_dir: Optional[str] = None
+
+
+class ValidateClaudeRequest(BaseModel):
+    path: Optional[str] = None
+    config_dir: Optional[str] = None
+
+
 class UpdateSettingsRequest(BaseModel):
     podcast_name: Optional[str] = None
     podcast_dir: Optional[str] = None

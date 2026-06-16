@@ -118,20 +118,10 @@ def _is_update_in_progress() -> bool:
 
 
 def _has_active_jobs() -> bool:
-    """True if any job is currently processing/pending."""
-    try:
-        from server.workers.job_store import get_job_store
+    """True if any job is currently rendering. Shared with profile switching."""
+    from server.services.jobs_guard import has_active_jobs
 
-        store = get_job_store()
-        for status in ("processing", "pending", "resuming"):
-            get_by_status = getattr(store, "get_jobs_by_status", None)
-            if callable(get_by_status):
-                jobs = get_by_status(status) or []
-                if jobs:
-                    return True
-    except Exception:
-        return False
-    return False
+    return has_active_jobs()[0]
 
 
 # ─── Endpoints ──────────────────────────────────────────────────────────
