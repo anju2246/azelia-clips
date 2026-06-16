@@ -436,6 +436,94 @@ export const SettingsApi = {
     }),
 };
 
+// --- PROFILES (multi-podcast) API ---
+
+export interface ProfileInfo {
+  id: string;
+  name: string;
+  data_dir: string;
+  claude_binary?: string | null;
+  claude_config_dir?: string | null;
+  is_default: boolean;
+  created_at: string;
+  active: boolean;
+}
+
+export interface ProfilesList {
+  active_profile: string | null;
+  profiles: ProfileInfo[];
+}
+
+export interface ClaudeInstallation {
+  path: string;
+  realpath: string;
+  source: string;
+  version: string | null;
+  valid: boolean;
+}
+
+export interface ClaudeAccount {
+  config_dir: string | null;
+  email: string | null;
+  display_name: string | null;
+  plan: string | null;
+  logged_in: boolean;
+}
+
+export interface ClaudeDetectResponse {
+  installations: ClaudeInstallation[];
+  accounts: ClaudeAccount[];
+}
+
+export interface CreateProfileBody {
+  name: string;
+  claude_binary?: string | null;
+  claude_config_dir?: string | null;
+}
+
+export const ProfilesApi = {
+  list: () => fetchApi<ProfilesList>("/profiles"),
+
+  create: (body: CreateProfileBody) =>
+    fetchApi<ProfileInfo>("/profiles", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  update: (id: string, body: Partial<CreateProfileBody>) =>
+    fetchApi<ProfileInfo>(`/profiles/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  remove: (id: string, deleteData = false) =>
+    fetchApi<{ deleted: string; data_removed: boolean }>(
+      `/profiles/${id}?delete_data=${deleteData}`,
+      { method: "DELETE" },
+    ),
+
+  activate: (id: string) =>
+    fetchApi<{ status: "restarting" | "noop"; active_profile: string }>(
+      `/profiles/${id}/activate`,
+      { method: "POST" },
+    ),
+
+  claudeInstallations: () =>
+    fetchApi<ClaudeDetectResponse>("/claude/installations"),
+
+  validateClaude: (body: { path?: string | null; config_dir?: string | null }) =>
+    fetchApi<{ valid: boolean; reason?: string; version?: string; account?: ClaudeAccount }>(
+      "/claude/validate",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
+};
+
 // --- INTELLIGENCE & ANALYTICS API ---
 
 export const IntelligenceApi = {
