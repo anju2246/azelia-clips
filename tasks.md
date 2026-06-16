@@ -113,7 +113,7 @@ Modelo `Profile` y `ProfileManager` que lee/escribe el registry `~/.azelia/profi
 ---
 
 ## Task T4: Integración config + llm_provider (perfil activo → data_dir + Claude)
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** T1, T2, T3
 **Parallelizable with:** none
@@ -146,7 +146,7 @@ Modelo `Profile` y `ProfileManager` que lee/escribe el registry `~/.azelia/profi
 ---
 
 ## Task T5: Endpoints de perfiles + Claude (F1–F7) + guard de jobs
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** L
 **Dependencies:** T1, T2, T3, T4
 **Parallelizable with:** none
@@ -189,7 +189,7 @@ Router `profiles.py` con F1–F7. Extrae `has_active_jobs()` a un helper compart
 ---
 
 ## Task T6: Frontend — selector de perfil + panel de gestión + selector de cuenta Claude
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** L
 **Dependencies:** T5
 **Parallelizable with:** none
