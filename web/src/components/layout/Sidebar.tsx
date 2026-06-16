@@ -123,8 +123,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* Active podcast profile bubble — click to switch */}
-      <SidebarProfileBubble />
+      {/* Active podcast profile button — navigates to the Podcasts page */}
+      <SidebarProfileBubble currentPath={currentPath} />
     </aside>
   );
 };
