@@ -35,6 +35,14 @@ class ProfileNotFound(ProfileError):
     """Raised when a profile id is not in the registry."""
 
 
+class ActiveProfileError(ProfileError):
+    """Raised when deleting the currently-active profile."""
+
+
+class LastProfileError(ProfileError):
+    """Raised when deleting the only remaining profile."""
+
+
 def slugify(name: str) -> str:
     """Turn a podcast name into a stable, filesystem-safe slug.
 
@@ -298,9 +306,9 @@ class ProfileManager:
         if entry is None:
             raise ProfileNotFound(profile_id)
         if len(data["profiles"]) <= 1:
-            raise ProfileError("Cannot delete the last remaining profile")
+            raise LastProfileError("Cannot delete the last remaining profile")
         if data.get("active_profile") == profile_id:
-            raise ProfileError("Cannot delete the active profile; switch first")
+            raise ActiveProfileError("Cannot delete the active profile; switch first")
 
         data["profiles"] = [d for d in data["profiles"] if d["id"] != profile_id]
         self._save(data)
