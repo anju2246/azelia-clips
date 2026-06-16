@@ -43,7 +43,7 @@ Modelo `Profile` y `ProfileManager` que lee/escribe el registry `~/.azelia/profi
 ---
 
 ## Task T2: Migración del árbol legacy (F9)
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** T1
 **Parallelizable with:** T3
