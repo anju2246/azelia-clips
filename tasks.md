@@ -7,7 +7,7 @@
 ---
 
 ## Task T1: Núcleo de perfiles — ProfileManager + registry + slug
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** none
 **Parallelizable with:** T3
