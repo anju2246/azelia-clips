@@ -12,17 +12,34 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
-def _default_data_dir() -> Path:
-    """User data lives in ~/.azelia/data by default, never inside the checkout.
+def _azelia_home() -> Path:
+    """Where the user installation lives (~/.azelia by default). Holds the
+    machine-global profile registry, outside any single profile's data dir."""
+    return Path(os.environ.get("AZELIA_HOME", Path.home() / ".azelia"))
 
-    Honors AZELIA_DATA_DIR so isolated installs (smoke tests, multi-user
-    boxes) get a completely separate data tree — settings, jobs DB,
-    secrets, everything.
+
+def _resolve_data_dir(home: Path, override: str | None) -> Path:
+    """Resolve the effective data dir WITHOUT side effects (no migration here).
+
+    Order: AZELIA_DATA_DIR override > active profile (if a registry exists) >
+    legacy ~/.azelia/data fallback. Migration that *creates* the registry is
+    deferred to `initialize_active_profile()` at server boot, so merely
+    importing this module never mutates the filesystem.
     """
-    override = os.environ.get("AZELIA_DATA_DIR")
     if override:
         return Path(override).expanduser()
-    return Path.home() / ".azelia" / "data"
+    from packages.core.profiles import ProfileManager
+
+    pm = ProfileManager(home)
+    if pm.registry_path.exists():
+        return pm.active_data_dir()
+    return home / "data"
+
+
+def _default_data_dir() -> Path:
+    """User data lives under the active profile by default, never inside the
+    checkout. Honors AZELIA_DATA_DIR for isolated installs."""
+    return _resolve_data_dir(_azelia_home(), os.environ.get("AZELIA_DATA_DIR"))
 
 
 def _secrets_env_path() -> str:
@@ -58,6 +75,10 @@ class Settings(BaseSettings):
     )
     anthropic_api_key: str = Field(default="", description="Anthropic API key for Claude")
     anthropic_model: str = Field(default="claude-sonnet-4-6", description="Selected Anthropic model")
+
+    # ── Claude Code binding (per active profile, set at boot) ──────────
+    claude_binary: str | None = Field(default=None, description="Path to the Claude Code binary for the active profile (None ⇒ `claude` on PATH)")
+    claude_config_dir: str | None = Field(default=None, description="CLAUDE_CONFIG_DIR for the active profile's Claude account (None ⇒ CLI default)")
 
     # ── User-owned transcript DB (optional, BYO Supabase) ──────────────
     # If the user already has their podcast transcripts in their own Supabase
@@ -124,3 +145,25 @@ class Settings(BaseSettings):
 
 # Global settings instance
 settings = Settings()
+
+
+def initialize_active_profile() -> None:
+    """Run ONCE at server boot: migrate the legacy tree on first run, then bind
+    the active profile's data dir + Claude account onto the live settings.
+
+    This is the only place migration happens (it mutates the filesystem), so it
+    must be called explicitly at startup — never as an import side effect.
+    """
+    from packages.core.profiles import ProfileManager
+
+    home = _azelia_home()
+    override = os.environ.get("AZELIA_DATA_DIR")
+    pm = ProfileManager(home)
+    pm.ensure_initialized(
+        legacy_data_dir=home / "data",
+        override_data_dir=Path(override).expanduser() if override else None,
+    )
+    active = pm.active()
+    settings.data_dir = Path(active.data_dir)
+    settings.claude_binary = active.claude_binary
+    settings.claude_config_dir = active.claude_config_dir

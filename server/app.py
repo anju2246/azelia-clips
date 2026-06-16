@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from packages.core.config import settings
+from packages.core.config import initialize_active_profile, settings
 from server.dependencies import job_queue
 from server.routes.analytics import router as analytics_router
 from server.routes.clips import router as clips_router
@@ -23,6 +23,9 @@ from server.routes.taxonomy import router as taxonomy_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Migrate the legacy tree on first run + bind the active profile to settings.
+    # Must happen before anything reads settings.data_dir.
+    initialize_active_profile()
     # Ensure data dir exists
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     # Start background workers

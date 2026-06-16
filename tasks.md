@@ -77,7 +77,7 @@ Modelo `Profile` y `ProfileManager` que lee/escribe el registry `~/.azelia/profi
 ---
 
 ## Task T3: Detección de binarios y cuentas de Claude Code (F6/F7)
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** none
 **Parallelizable with:** T1, T2
