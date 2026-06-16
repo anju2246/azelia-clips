@@ -13,7 +13,9 @@ export const ProfileSwitcher: React.FC = () => {
   const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
-    ProfilesApi.list().then(setData).catch(() => {});
+    ProfilesApi.list()
+      .then(setData)
+      .catch((e) => console.error("ProfileSwitcher: failed to load profiles", e));
   }, []);
 
   const active = data?.profiles.find((p) => p.active);
@@ -31,6 +33,7 @@ export const ProfileSwitcher: React.FC = () => {
       }
     } catch (e) {
       setSwitching(false);
+      console.error("ProfileSwitcher: activate failed", e);
       alert((e as Error).message);
     }
   };

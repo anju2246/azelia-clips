@@ -22,7 +22,9 @@ export const ProfilesPanel: React.FC = () => {
 
   const load = () => {
     ProfilesApi.list().then(setData).catch((e) => setError((e as Error).message));
-    ProfilesApi.claudeInstallations().then(setClaude).catch(() => {});
+    ProfilesApi.claudeInstallations()
+      .then(setClaude)
+      .catch((e) => console.error("ProfilesPanel: Claude detection failed", e));
   };
   useEffect(() => {
     load();
