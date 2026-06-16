@@ -7,6 +7,7 @@ Priority (configurable via AI_PROVIDER_ORDER):
 If both are available, Claude Code is tried first.
 """
 
+import os
 import subprocess
 from typing import Any, Optional
 
@@ -17,14 +18,28 @@ from packages.core.config import settings
 console = Console()
 
 
+def _claude_cmd() -> str:
+    """The Claude Code executable for the active profile (`claude` on PATH if unset)."""
+    return getattr(settings, "claude_binary", None) or "claude"
+
+
+def _claude_env() -> Optional[dict]:
+    """Env for the active profile's Claude account (CLAUDE_CONFIG_DIR), or None
+    to inherit the process env unchanged."""
+    cfg = getattr(settings, "claude_config_dir", None)
+    if cfg:
+        return {**os.environ, "CLAUDE_CONFIG_DIR": cfg}
+    return None
+
+
 # ─── Provider availability detection ────────────────────────────────────
 
 
 def claude_code_available() -> bool:
-    """True if `claude` CLI is installed and authenticated."""
+    """True if the active profile's `claude` CLI is installed."""
     try:
         result = subprocess.run(
-            ["claude", "--version"], capture_output=True, timeout=3, text=True
+            [_claude_cmd(), "--version"], capture_output=True, timeout=3, text=True, env=_claude_env()
         )
         return result.returncode == 0
     except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
@@ -39,10 +54,11 @@ def claude_code_authenticated() -> Optional[dict]:
         # `claude` CLI doesn't have a stable JSON status command, so we run a
         # trivial query and infer auth from exit code.
         result = subprocess.run(
-            ["claude", "-p", "say only the word ok"],
+            [_claude_cmd(), "-p", "say only the word ok"],
             capture_output=True,
             timeout=15,
             text=True,
+            env=_claude_env(),
         )
         if result.returncode == 0 and "ok" in result.stdout.lower():
             return {"method": "subscription", "active": True}
@@ -151,10 +167,11 @@ class MultiProviderLLM:
         full_prompt = f"{system_prompt}\n\n---\n\n{user_message}"
         try:
             result = subprocess.run(
-                ["claude", "-p", full_prompt],
+                [_claude_cmd(), "-p", full_prompt],
                 capture_output=True,
                 text=True,
                 timeout=300,
+                env=_claude_env(),
             )
         except subprocess.TimeoutExpired as e:
             raise Exception("Claude Code timed out after 5 minutes") from e
