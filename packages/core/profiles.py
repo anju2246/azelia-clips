@@ -255,15 +255,7 @@ class ProfileManager:
         data = self._load()
         existing = {d["id"] for d in data["profiles"]}
         slug = self._unique_slug(slugify(name), existing)
-
         data_dir = self.profiles_root / slug
-        (data_dir / "jobs").mkdir(parents=True, exist_ok=True)
-        secrets = data_dir / "secrets.env"
-        secrets.write_text(f"PODCAST_NAME={name}\n")
-        try:
-            os.chmod(secrets, 0o600)
-        except OSError:
-            pass
 
         profile = Profile(
             id=slug,
@@ -274,10 +266,22 @@ class ProfileManager:
             is_default=not data["profiles"],  # first profile is the default
             created_at=datetime.now(timezone.utc).isoformat(),
         )
+        # Persist the registry entry FIRST: a crash mid-create can't then leave
+        # an orphaned, unregistered directory under profiles/ (data dirs are
+        # created on demand, so a registered-but-empty profile self-heals).
         data["profiles"].append(asdict(profile))
         if data.get("active_profile") is None:
             data["active_profile"] = slug
         self._save(data)
+
+        # Then materialize the profile's data tree + seed its secrets.env.
+        (data_dir / "jobs").mkdir(parents=True, exist_ok=True)
+        secrets = data_dir / "secrets.env"
+        secrets.write_text(f"PODCAST_NAME={name}\n")
+        try:
+            os.chmod(secrets, 0o600)
+        except OSError:
+            pass
         return profile
 
     def update(self, profile_id: str, **fields) -> Profile:
