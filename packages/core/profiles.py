@@ -13,6 +13,7 @@ one-directional to avoid an import cycle). Migration of the legacy
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import re
@@ -157,6 +158,79 @@ class ProfileManager:
 
     def active_data_dir(self) -> Path:
         return Path(self.active().data_dir)
+
+    # ── lifecycle / migration ────────────────────────────────────────────
+
+    _PLACEHOLDER_NAMES = {"", "my podcast"}
+
+    def ensure_initialized(
+        self,
+        legacy_data_dir: Optional[Path] = None,
+        override_data_dir: Optional[Path] = None,
+    ) -> None:
+        """Create the registry on first run. Idempotent.
+
+        - registry already exists  → no-op
+        - AZELIA_DATA_DIR override  → register it as the default profile in-place
+        - legacy ~/.azelia/data     → move it under profiles/<slug>/
+        - nothing                   → create an empty "Inminente" profile
+        """
+        if self.registry_path.exists():
+            return
+        if override_data_dir is not None:
+            self._init_in_place(Path(override_data_dir))
+        elif legacy_data_dir is not None and Path(legacy_data_dir).exists():
+            self._migrate_legacy(Path(legacy_data_dir))
+        else:
+            self.create("Inminente")
+
+    def _resolve_name(self, data_dir: Path) -> str:
+        """Podcast name from a dir's secrets.env, or 'Inminente' if placeholder/missing."""
+        name = ""
+        secrets = data_dir / "secrets.env"
+        if secrets.exists():
+            for line in secrets.read_text().splitlines():
+                if line.startswith("PODCAST_NAME="):
+                    name = line.split("=", 1)[1].strip()
+                    break
+        if name.strip().lower() in self._PLACEHOLDER_NAMES:
+            return "Inminente"
+        return name
+
+    def _register_single(self, slug: str, name: str, data_dir: Path) -> None:
+        profile = Profile(
+            id=slug,
+            name=name,
+            data_dir=str(data_dir),
+            is_default=True,
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+        self._save(
+            {
+                "version": REGISTRY_VERSION,
+                "active_profile": slug,
+                "profiles": [asdict(profile)],
+            }
+        )
+
+    def _init_in_place(self, data_dir: Path) -> None:
+        name = self._resolve_name(data_dir)
+        self._register_single(slugify(name), name, data_dir)
+
+    def _migrate_legacy(self, legacy: Path) -> None:
+        name = self._resolve_name(legacy)
+        slug = slugify(name)
+        self.profiles_root.mkdir(parents=True, exist_ok=True)
+        target = self.profiles_root / slug
+        try:
+            os.rename(legacy, target)
+        except OSError as e:
+            if getattr(e, "errno", None) == errno.EXDEV:
+                target = legacy  # cross-volume: register in-place, don't risk a copy
+            else:
+                raise
+        # registry written only AFTER the move succeeds
+        self._register_single(slug, name, target)
 
     # ── mutations ────────────────────────────────────────────────────────
 
