@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Home, Film, LineChart, Settings, Bell, BellOff } from "lucide-react";
+import { SidebarProfileBubble } from "../profiles/SidebarProfileBubble";
 
 interface SidebarProps {
   currentPath: string;
@@ -122,8 +123,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
       {/* Spacer */}
       <div className="flex-1" />
 
-      {/* v0.1.0: Profile + Logout removed — single-user local mode,
-                no user account to sign out from. */}
+      {/* Active podcast profile bubble — click to switch */}
+      <SidebarProfileBubble />
     </aside>
   );
 };

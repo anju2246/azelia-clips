@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Bell, User } from "lucide-react";
 import { supabase } from "../../lib/supabase";
-import { ProfileSwitcher } from "../profiles/ProfileSwitcher";
 
 export const Header: React.FC = () => {
   const [displayName, setDisplayName] = useState("");
@@ -35,9 +34,6 @@ export const Header: React.FC = () => {
       <div className="flex items-center gap-4 flex-1" />
 
       <div className="flex items-center gap-4">
-        {/* Active podcast profile switcher */}
-        <ProfileSwitcher />
-
         {/* Notifications */}
         <button className="p-2 rounded-full text-zinc-400 hover:text-zinc-100 hover:bg-white/5 transition-colors relative">
           <Bell className="h-5 w-5" />
