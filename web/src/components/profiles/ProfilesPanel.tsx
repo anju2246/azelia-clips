@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Plus, Trash2, Pencil, Check, Cpu } from "lucide-react";
-import { Card } from "./ui";
+import { Card } from "../settings/ui";
 import {
   ProfilesApi,
   type ProfilesList,

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
-import { Check, Settings2 } from "lucide-react";
+import { Check, Settings2, X } from "lucide-react";
 import { ProfilesApi, type ProfilesList } from "../../lib/api";
+import { ProfilesPanel } from "./ProfilesPanel";
 
 /**
  * Round profile bubble pinned at the bottom of the icon sidebar. Shows the
@@ -11,13 +12,22 @@ import { ProfilesApi, type ProfilesList } from "../../lib/api";
 export const SidebarProfileBubble: React.FC = () => {
   const [data, setData] = useState<ProfilesList | null>(null);
   const [open, setOpen] = useState(false);
+  const [manageOpen, setManageOpen] = useState(false);
   const [switching, setSwitching] = useState(false);
 
-  useEffect(() => {
+  const reload = () =>
     ProfilesApi.list()
       .then(setData)
       .catch((e) => console.error("SidebarProfileBubble: failed to load profiles", e));
+
+  useEffect(() => {
+    reload();
   }, []);
+
+  const closeManage = () => {
+    setManageOpen(false);
+    reload(); // reflect any create/rename/delete done in the modal
+  };
 
   const active = data?.profiles.find((p) => p.active);
   const initial = (active?.name?.trim()?.[0] ?? "?").toUpperCase();
@@ -75,12 +85,36 @@ export const SidebarProfileBubble: React.FC = () => {
               {p.active && <Check className="w-4 h-4 text-brand-500 shrink-0" />}
             </button>
           ))}
-          <a
-            href="/dashboard/settings"
-            className="flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 border-t border-white/5 mt-1"
+          <button
+            onClick={() => {
+              setOpen(false);
+              setManageOpen(true);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-zinc-500 hover:text-zinc-300 border-t border-white/5 mt-1"
           >
             <Settings2 className="w-3.5 h-3.5" /> Gestionar perfiles…
-          </a>
+          </button>
+        </div>
+      )}
+
+      {manageOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-start justify-center overflow-y-auto bg-black/60 backdrop-blur-sm p-6"
+          onClick={closeManage}
+        >
+          <div
+            className="relative w-full max-w-2xl mt-12"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={closeManage}
+              className="absolute -top-3 -right-3 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-zinc-800 border border-white/10 text-zinc-400 hover:text-white"
+              title="Cerrar"
+            >
+              <X className="w-4 h-4" />
+            </button>
+            <ProfilesPanel />
+          </div>
         </div>
       )}
     </div>
