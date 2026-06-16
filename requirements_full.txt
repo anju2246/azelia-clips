@@ -125,7 +125,7 @@ pydeck==0.9.1
 pyflakes==3.4.0
 Pygments==2.19.2
 pyiceberg==0.10.0
-PyJWT==2.10.1
+PyJWT==2.13.0
 pyparsing==3.3.1
 pyroaring==1.0.3
 python-dateutil==2.9.0.post0
