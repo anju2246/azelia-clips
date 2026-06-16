@@ -1,0 +1,8 @@
+---
+import DashboardLayout from "../../layouts/DashboardLayout.astro";
+import { ProfilesView } from "../../components/profiles/ProfilesView";
+---
+
+<DashboardLayout title="Podcasts">
+    <ProfilesView client:load />
+</DashboardLayout>
