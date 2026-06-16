@@ -28,6 +28,7 @@ import {
 import { DirectoryPicker } from "./DirectoryPicker";
 import { useAIModels } from "../../hooks/useAIModels";
 import { SystemUpdateCard } from "../system/SystemUpdateCard";
+import { ProfilesPanel } from "./ProfilesPanel";
 import { YouTubeConnect } from "../analytics/YouTubeConnect";
 import toast, { Toaster } from "react-hot-toast";
 
@@ -393,6 +394,11 @@ export const SettingsForm: React.FC = () => {
         <p className="text-zinc-500 mt-2">
           Configure local intelligence paths, API keys, and pipeline behaviors.
         </p>
+      </div>
+
+      {/* Multi-podcast profiles — always visible at the top of Settings */}
+      <div className="mb-8">
+        <ProfilesPanel />
       </div>
 
       {/* Tab navigation — keeps the long form scannable without refactoring
