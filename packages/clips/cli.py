@@ -384,18 +384,23 @@ def start(
 
     threading.Thread(target=open_browser, daemon=True).start()
 
-    # Self-update restart watcher.
-    # The self_update.sh script touches ~/.azelia/data/.restart when an update
-    # finishes. The azelia wrapper bin (see install.sh) loops on exit code 42
-    # and re-launches the server with the freshly installed code.
+    # Restart watcher. Triggered by:
+    #   - self_update.sh touching <data_dir>/.restart after an update, and
+    #   - a profile switch (POST /api/profiles/{id}/activate) doing the same.
+    # The azelia wrapper bin (see install.sh) loops on exit code 42 and
+    # re-launches the server with the freshly resolved active profile.
+    #
+    # NOTE: re-read settings.data_dir on every tick. It can change after boot
+    # (first-run migration moves ~/.azelia/data → profiles/<slug>/), so a path
+    # captured once would watch a directory that no longer exists.
     def restart_watcher():
         from packages.core.config import settings as _s
-        sentinel = _s.data_dir / ".restart"
         while True:
             try:
+                sentinel = _s.data_dir / ".restart"
                 if sentinel.exists():
                     sentinel.unlink()
-                    console.print("[bold yellow]🔄 Self-update finished — restarting server…[/bold yellow]")
+                    console.print("[bold yellow]🔄 Restart requested — relaunching server…[/bold yellow]")
                     os._exit(42)
             except Exception:
                 pass
