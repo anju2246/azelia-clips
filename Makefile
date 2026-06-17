@@ -1,4 +1,4 @@
-.PHONY: setup dev test clean
+.PHONY: setup dev dev-iso test clean
 
 VENV := venv
 PYTHON := $(VENV)/bin/python
@@ -16,6 +16,9 @@ $(VENV)/bin/activate:
 dev: setup  ## Start the backend + frontend dev servers
 	$(PYTHON) -m uvicorn server.app:app --reload --port 8000 &
 	cd web && npm run dev
+
+dev-iso: setup  ## Dev server isolated from an installed instance (own home ~/.azelia-dev + port 8010)
+	AZELIA_HOME=$$HOME/.azelia-dev $(VENV)/bin/azelia start --dev --port 8010
 
 test: setup  ## Run all tests
 	$(PYTHON) -m pytest tests/ -v
