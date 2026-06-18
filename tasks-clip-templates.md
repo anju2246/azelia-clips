@@ -56,7 +56,7 @@ sintetizados desde `STYLES`, el store por perfil con I/O `.azt`, y la config (`t
 ---
 
 ## Task T2: CRUD API + lista/clonado en UI
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** T1
 **Parallelizable with:** none
