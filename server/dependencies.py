@@ -56,6 +56,7 @@ async def processing_worker(job_id: str, payload: Dict[str, Any]):
             max_duration=settings_dict.get("max_duration", 90),
             min_score=settings_dict.get("min_score", 70),
             transcription_config=transcription_config,
+            template_id=settings_dict.get("template_id"),
         )
 
         def run_processing():

@@ -114,6 +114,7 @@ async def get_settings(user: User = Depends(require_auth)):
         transcript_supabase_url=settings.transcript_supabase_url,
         transcript_supabase_key=mask_key(settings.transcript_supabase_key),
         review_brief_before_processing=settings.review_brief_before_processing,
+        default_template_id=settings.default_template_id,
     )
 
 
@@ -159,6 +160,9 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
     if req.review_brief_before_processing is not None:
         env["REVIEW_BRIEF_BEFORE_PROCESSING"] = "true" if req.review_brief_before_processing else "false"
         settings.review_brief_before_processing = req.review_brief_before_processing
+    if req.default_template_id is not None:
+        env["DEFAULT_TEMPLATE_ID"] = req.default_template_id
+        settings.default_template_id = req.default_template_id
 
     _write_env_file(env_path, env)
     reset_llm()  # invalidate cached provider list

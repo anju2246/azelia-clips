@@ -51,6 +51,7 @@ class ProcessRequest(BaseModel):
     max_duration: int = 90
     min_score: int = 70
     subtitle_style: str = "highlight"
+    template_id: Optional[str] = None  # Clip template to apply (None = profile default)
     transcription_source: str = "local_whisper"
     # Optional: user-owned Supabase for transcript ingestion (not Azelia's)
     supabase_url: Optional[str] = None
@@ -78,6 +79,7 @@ class SettingsResponse(BaseModel):
         default=True,
         description="Pause after curation to review clips in a chat before rendering",
     )
+    default_template_id: str = Field(default="splitscreen", description="Default clip template slug")
 
 
 class ProfileResponse(BaseModel):
@@ -122,6 +124,7 @@ class UpdateSettingsRequest(BaseModel):
     transcript_supabase_url: Optional[str] = None
     transcript_supabase_key: Optional[str] = None
     review_brief_before_processing: Optional[bool] = None
+    default_template_id: Optional[str] = None
 
 
 class EpisodeResponse(BaseModel):
