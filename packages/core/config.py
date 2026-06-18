@@ -125,6 +125,13 @@ class Settings(BaseSettings):
     )
     podcast_name: str = Field(default="My Podcast", description="Name of the podcast for captions and context")
 
+    # ── Clip templates ─────────────────────────────────────────────────
+    default_template_id: str = Field(
+        default="splitscreen",
+        alias="DEFAULT_TEMPLATE_ID",
+        description="Slug of the clip template applied by default (per profile). Override per-job at upload.",
+    )
+
     # ── Human-in-the-loop brief gate ───────────────────────────────────
     review_brief_before_processing: bool = Field(
         default=True,
@@ -139,6 +146,12 @@ class Settings(BaseSettings):
     def jobs_dir(self) -> Path:
         """Where job data lives. Created on demand."""
         d = self.data_dir / "jobs"
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def templates_dir(self) -> Path:
+        """Where the active profile's clip templates (.azt) live. Created on demand."""
+        d = self.data_dir / "templates"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
