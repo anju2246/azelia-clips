@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Home, Film, LineChart, Settings, Bell, BellOff } from "lucide-react";
+import { Home, Film, LineChart, Settings, Bell, BellOff, Palette } from "lucide-react";
 import { SidebarProfileBubble } from "../profiles/SidebarProfileBubble";
 
 interface SidebarProps {
@@ -13,6 +13,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentPath }) => {
   const toolLinks = [
     { href: "/dashboard", label: "Dashboard", icon: Home },
     { href: "/dashboard/review", label: "Review Clips", icon: Film },
+    { href: "/dashboard/templates", label: "Templates", icon: Palette },
     { href: "/dashboard/intelligence", label: "Intelligence", icon: LineChart },
   ];
 

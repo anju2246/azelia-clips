@@ -9,6 +9,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+from packages.clips.templates.models import ClipTemplate, LayoutSpec, SubtitleSpec
+
 
 class JobStatus(str, Enum):
     PENDING = "pending"
@@ -125,6 +127,37 @@ class UpdateSettingsRequest(BaseModel):
     transcript_supabase_key: Optional[str] = None
     review_brief_before_processing: Optional[bool] = None
     default_template_id: Optional[str] = None
+
+
+# ── Clip templates ──────────────────────────────────────────────────────────
+
+
+class TemplateListResponse(BaseModel):
+    templates: List[ClipTemplate] = Field(default_factory=list)
+
+
+class CreateTemplateRequest(BaseModel):
+    """Create a custom template. subtitles/layout default to a sane baseline."""
+
+    name: str = Field(min_length=1, max_length=60)
+    description: str = Field(default="", max_length=280)
+    author: str = Field(default="", max_length=60)
+    subtitles: Optional[SubtitleSpec] = None
+    layout: Optional[LayoutSpec] = None
+
+
+class UpdateTemplateRequest(BaseModel):
+    """Replace the editable fields of a custom template (id/timestamps preserved)."""
+
+    name: str = Field(min_length=1, max_length=60)
+    description: str = Field(default="", max_length=280)
+    author: str = Field(default="", max_length=60)
+    subtitles: Optional[SubtitleSpec] = None
+    layout: Optional[LayoutSpec] = None
+
+
+class CloneTemplateRequest(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
 
 
 class EpisodeResponse(BaseModel):
