@@ -524,6 +524,84 @@ export const ProfilesApi = {
     ),
 };
 
+// --- CLIP TEMPLATES API ---
+
+export interface SubtitleSpec {
+  font_name: string;
+  font_size: number;
+  primary_color: string;
+  secondary_color: string;
+  outline_color: string;
+  back_color: string;
+  bold: boolean;
+  outline: number;
+  shadow: number;
+  alignment: number;
+  margin_v: number;
+  animation: "highlight" | "karaoke" | "box" | "cumulative";
+  words_per_line: number;
+}
+
+export interface LayoutSpec {
+  type: "split" | "fullscreen";
+  output_width: number;
+  output_height: number;
+  wide_height_ratio: number;
+}
+
+export interface ClipTemplate {
+  schema_version: number;
+  id: string;
+  name: string;
+  description: string;
+  author: string;
+  is_builtin: boolean;
+  created_at: string;
+  updated_at: string;
+  subtitles: SubtitleSpec;
+  layout: LayoutSpec;
+}
+
+export interface CreateTemplateBody {
+  name: string;
+  description?: string;
+  author?: string;
+  subtitles?: SubtitleSpec;
+  layout?: LayoutSpec;
+}
+
+export const TemplatesApi = {
+  list: () => fetchApi<{ templates: ClipTemplate[] }>("/templates"),
+
+  get: (id: string) => fetchApi<ClipTemplate>(`/templates/${id}`),
+
+  create: (body: CreateTemplateBody) =>
+    fetchApi<ClipTemplate>("/templates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  update: (id: string, body: CreateTemplateBody) =>
+    fetchApi<ClipTemplate>(`/templates/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  remove: (id: string) =>
+    fetchApi<{ status: string; id: string }>(`/templates/${id}`, {
+      method: "DELETE",
+    }),
+
+  clone: (id: string, name: string) =>
+    fetchApi<ClipTemplate>(`/templates/${id}/clone`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    }),
+};
+
 // --- INTELLIGENCE & ANALYTICS API ---
 
 export const IntelligenceApi = {
