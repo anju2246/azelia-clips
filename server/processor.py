@@ -25,6 +25,7 @@ class SingleVideoProcessor(BatchProcessor):
             external_drive_path=output_dir,  # dummy base path for the parent's check
             transcription_config=transcription_config,
             use_supabase=False,
+            template_id=kwargs.get('template_id'),
         )
         self.base_path.mkdir(parents=True, exist_ok=True)
         

@@ -28,10 +28,12 @@ class SubtitleSpec(BaseModel):
 class LayoutSpec(BaseModel):
     """Layout specification for clip composition."""
 
+    # Default reproduces the historical split layout exactly: a 608px wide shot
+    # (true 16:9 at 1080px width) over a 1312px close-up.  608 / 1920 ≈ 0.3167.
     type: Literal["split", "fullscreen"] = "split"
     output_width: int = 1080
     output_height: int = 1920
-    wide_height_ratio: float = Field(default=0.32, ge=0.20, le=0.50)
+    wide_height_ratio: float = Field(default=608 / 1920, ge=0.20, le=0.50)
 
 
 class ClipTemplate(BaseModel):

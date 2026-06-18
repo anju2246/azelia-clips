@@ -112,9 +112,11 @@ class BatchProcessor:
         auth_token: str | None = None, # NEW: User token for community data sync
         user_id: str | None = None, # NEW: User ID for telemetry reporting
         review_brief: bool | None = None, # NEW: per-job override for the brief gate (None = user setting)
+        template_id: str | None = None, # NEW: clip template to apply (None = profile default)
     ):
         from packages.core.config import settings
         self.base_path = Path(external_drive_path) if external_drive_path else settings.podcast_dir
+        self.template_id = template_id
         self.clips_per_episode = clips_per_episode
         self.min_duration = min_duration
         self.max_duration = max_duration
@@ -652,8 +654,16 @@ class BatchProcessor:
         """Render a single clip end-to-end. Returns 1 on success, 0 on failure."""
         from packages.clips.vision.reframer import reframe_video
         from packages.clips.subtitles.generator import SubtitleGenerator
+        from packages.clips.templates.render import template_to_render_plan
         import torch
         import gc
+
+        # Resolve the clip template once (profile default when template_id is None).
+        from packages.core.config import settings
+        from packages.clips.templates.store import TemplateStore
+        plan = template_to_render_plan(
+            TemplateStore(settings.templates_dir()).resolve(self.template_id)
+        )
 
         try:
             # Use temp files for intermediate processing
@@ -672,7 +682,7 @@ class BatchProcessor:
                     raw_clip, voice_centroids=voice_centroids
                 )
 
-                # 3c. Create split-screen with face tracking
+                # 3c. Reframe per the template's layout (split-screen or full-screen)
                 split_clip = tmp_path / "split.mp4"
                 reframe_video(
                     video_path=str(raw_clip),
@@ -680,13 +690,16 @@ class BatchProcessor:
                     pre_cut=True,  # Clip already extracted, don't seek again
                     speaker_segments=clip_transcript.segments,
                     episode_folder=episode.episode_folder,
+                    layout_type=plan.layout_type,
+                    wide_height_ratio=plan.wide_height_ratio,
                 )
 
-                # 3d. Generate subtitles
+                # 3d. Generate subtitles from the template's style
                 subs_path = tmp_path / "subs.ass"
-                generator = SubtitleGenerator(style='splitscreen')
+                generator = SubtitleGenerator(style=plan.style)
                 generator.generate_word_by_word(
-                    clip_transcript, str(subs_path), words_per_line=5, animation='cumulative'
+                    clip_transcript, str(subs_path),
+                    words_per_line=plan.words_per_line, animation=plan.animation,
                 )
 
                 # 3e. Burn subtitles and save to the appropriate folder

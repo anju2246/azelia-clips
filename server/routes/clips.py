@@ -46,6 +46,23 @@ def mask_key(key: str) -> str:
     return f"{key[:4]}...{key[-4:]}"
 
 
+def _resolve_template_or_422(template_store, template_id: str | None) -> str | None:
+    """Validate a per-job template_id. None passes through (profile default is
+    applied downstream). An unknown id raises HTTP 422 TEMPLATE_NOT_FOUND."""
+    from packages.clips.templates.store import TemplateNotFound
+
+    if template_id is None:
+        return None
+    try:
+        template_store.get(template_id)
+    except TemplateNotFound:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "TEMPLATE_NOT_FOUND", "message": "El template seleccionado no existe"},
+        )
+    return template_id
+
+
 # ─── Video Upload & Processing ──────────────────────────────────────────────
 
 @router.post("/process", response_model=JobResponse)
@@ -56,6 +73,7 @@ async def process_video(
     max_duration: int = Form(90),
     min_score: int = Form(70),
     subtitle_style: str = Form("highlight"),
+    template_id: str | None = Form(None),
     transcription_source: str = Form("local_whisper"),
     assemblyai_key: str | None = Form(None),
     supabase_url: str | None = Form(None),
@@ -93,12 +111,17 @@ async def process_video(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
     
+    # Validate the per-job template (None → profile default applied in the pipeline)
+    from packages.clips.templates.store import TemplateStore
+    template_id = _resolve_template_or_422(TemplateStore(settings.templates_dir()), template_id)
+
     # Create Job config
     process_settings = ProcessRequest(
         min_duration=min_duration,
         max_duration=max_duration,
         min_score=min_score,
-        subtitle_style=subtitle_style
+        subtitle_style=subtitle_style,
+        template_id=template_id or settings.default_template_id,
     )
     
     # Build transcription config. The user can optionally route through their

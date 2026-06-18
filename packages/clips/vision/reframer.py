@@ -216,15 +216,36 @@ class VideoReframer:
         self.reframe_dynamic(video_path, output_path, trajectory, start_time, duration)
 
 
+def compute_split_heights(
+    wide_height_ratio: float, target_height: int = 1920
+) -> tuple[int, int]:
+    """Split a vertical frame into (wide_height, closeup_height) from a ratio.
+
+    Both heights are forced even (libx264 requires it) and always sum to
+    ``target_height``. The default ratio (608/1920) reproduces the historical
+    608px wide / 1312px close-up layout exactly.
+    """
+    wide = int(round(target_height * wide_height_ratio))
+    if wide % 2 != 0:
+        wide += 1
+    closeup = target_height - wide
+    if closeup % 2 != 0:
+        # Rebalance so both stay even and the sum is preserved.
+        closeup += 1
+        wide -= 1
+    return wide, closeup
+
+
 def reframe_video(
     video_path: Path | str,
     output_path: Path | str,
-    wide_height_ratio: float = 0.32,  # Wide shot takes ~32% of bottom (608/1920)
+    wide_height_ratio: float = 608 / 1920,  # Wide shot height as a fraction of 1920 (default = 608px)
     start_time: float = 0,
     duration: float | None = None,
     pre_cut: bool = False,  # If True, video is already a cut clip - skip -ss/-t
     speaker_segments: list[dict] | None = None,
     episode_folder: Path | str | None = None,
+    layout_type: str = "split",  # "split" (close-up + wide) or "fullscreen" (face-tracked full crop)
 ) -> Path:
     """
     Create split screen with:
@@ -264,18 +285,22 @@ def reframe_video(
     # Target dimensions (9:16 vertical)
     target_width = 1080
     target_height = 1920
-    
-    # Wide shot: 16:9 at bottom
-    wide_actual_height = int(target_width * 9 / 16)  # 607.5 -> 608
-    if wide_actual_height % 2 != 0:
-        wide_actual_height += 1  # Ensure even for libx264
-    
-    # Close-up: fills the space above the wide shot
-    closeup_height = target_height - wide_actual_height  # 1920 - 608 = 1312
-    
-    console.print(f"[blue]📐[/blue] Creating split screen (predefined layout)")
-    console.print(f"[dim]   Close-up: 1080x{closeup_height} (fits above wide)[/dim]")
-    console.print(f"[dim]   Wide: 1080x{wide_actual_height} (16:9 at bottom)[/dim]")
+
+    fullscreen = layout_type == "fullscreen"
+    if fullscreen:
+        # No wide shot: the face-tracked close-up fills the whole 9:16 frame.
+        wide_actual_height = 0
+        closeup_height = target_height
+        console.print(f"[blue]📐[/blue] Creating full-screen layout (face-tracked crop)")
+        console.print(f"[dim]   Close-up: {target_width}x{closeup_height} (full frame)[/dim]")
+    else:
+        # Split: close-up over a wide shot whose height comes from the ratio.
+        wide_actual_height, closeup_height = compute_split_heights(
+            wide_height_ratio, target_height
+        )
+        console.print(f"[blue]📐[/blue] Creating split screen (ratio {wide_height_ratio:.3f})")
+        console.print(f"[dim]   Close-up: {target_width}x{closeup_height} (fits above wide)[/dim]")
+        console.print(f"[dim]   Wide: {target_width}x{wide_actual_height} (at bottom)[/dim]")
     
     # -----------------------------------------------------------
     # STEP 1: Create close-up following the active speaker
@@ -333,10 +358,42 @@ def reframe_video(
         except Exception:
             pass  # use default
         
-        # Close-up sized to fit exactly above wide shot
+        # Close-up sized to fit exactly above wide shot (or full frame if fullscreen)
         reframer = VideoReframer(output_width=target_width, output_height=closeup_height)
         reframer.reframe_dynamic(video_path, closeup_path, trajectory, start_time, duration, zoom_factor=zoom_factor)
-        
+
+        from packages.core.process_registry import run_tracked
+
+        # -----------------------------------------------------------
+        # FULLSCREEN: no wide shot — mux the (normalized) source audio onto the
+        # full-frame close-up and we're done.
+        # -----------------------------------------------------------
+        if fullscreen:
+            console.print(f"\n[blue]Step 2:[/blue] Muxing audio (full-screen)...")
+            stack_start = 0 if pre_cut else start_time
+            cmd_fs = [
+                shutil.which("ffmpeg") or "ffmpeg", "-y",
+                "-i", str(closeup_path),
+                "-ss", str(stack_start),
+                "-i", str(video_path),
+                "-t", str(duration),
+                "-filter_complex",
+                "[1:a]compand=attacks=0.05:decays=0.3:points=-80/-80|-45/-25|-20/-15|-5/-5|0/-3:gain=3,"
+                "loudnorm=I=-16:TP=-1.5:LRA=7[a]",
+                "-map", "0:v", "-map", "[a]",
+                "-c:v", "copy",
+                "-c:a", "aac", "-b:a", "192k",
+                str(output_path),
+            ]
+            with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as p:
+                p.add_task("Muxing audio...", total=None)
+                fs_result = run_tracked(cmd_fs, capture_output=True, text=True)
+            if fs_result.returncode != 0:
+                console.print(f"[red]Error:[/red] {fs_result.stderr[-500:]}")
+                raise RuntimeError("Full-screen audio mux failed")
+            console.print(f"\n[green]✓[/green] Saved to {output_path}")
+            return output_path
+
         # -----------------------------------------------------------
         # STEP 2: Create wide shot (16:9)
         # -----------------------------------------------------------
@@ -355,8 +412,7 @@ def reframe_video(
             "-an",
             str(wide_path)
         ]
-        
-        from packages.core.process_registry import run_tracked
+
         with Progress(SpinnerColumn(), TextColumn("[progress.description]{task.description}"), console=console) as p:
             p.add_task("Encoding wide shot...", total=None)
             wide_result = run_tracked(cmd_wide, capture_output=True, text=True)
