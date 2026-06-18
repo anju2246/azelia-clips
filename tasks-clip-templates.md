@@ -6,7 +6,7 @@
 ---
 
 ## Task T1: Dominio del template + store por perfil + config
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** none
 **Parallelizable with:** none (fundación)
@@ -98,7 +98,9 @@ campos ni preview todavía (eso es T4).
 ---
 
 ## Task T3: Aplicar template en el pipeline (default por perfil + override por job)
-**Status:** [ ]
+**Status:** [x]  — backend + plumbing + unit tests. **Verificación manual pendiente** (FFmpeg no es
+unit-testable): correr un clip real con (a) sin template → idéntico al actual, (b) template custom
+split con otro `wide_height_ratio`, (c) template `fullscreen` (mux de audio nuevo). Usar `/run` o `/verify`.
 **Complexity:** L
 **Dependencies:** T1
 **Parallelizable with:** T2
