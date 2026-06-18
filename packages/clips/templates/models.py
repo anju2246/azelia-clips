@@ -50,9 +50,9 @@ class ClipTemplate(BaseModel):
 
     def to_azt_bytes(self) -> bytes:
         """Serialize to .azt JSON bytes."""
-        raise NotImplementedError
+        return self.model_dump_json(indent=2).encode("utf-8")
 
     @classmethod
     def from_azt_bytes(cls, data: bytes) -> "ClipTemplate":
         """Deserialize from .azt JSON bytes."""
-        raise NotImplementedError
+        return cls.model_validate_json(data)
