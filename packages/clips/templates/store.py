@@ -33,6 +33,7 @@ class TemplateInvalid(Exception):
 
 
 _DEFAULT_BUILTIN = "splitscreen"
+_SAFE_ID = re.compile(r"^[a-z0-9-]{1,48}$")
 
 
 def _slugify(name: str) -> str:
@@ -51,19 +52,27 @@ class TemplateStore:
     # ── helpers ──────────────────────────────────────────────────────────
 
     def _path(self, id: str) -> Path:
+        # Defense in depth: only ever touch files whose name is a clean slug, so
+        # an id like "../../x" can never escape templates_dir.
+        if not _SAFE_ID.match(id):
+            raise TemplateNotFound(id)
         return self.templates_dir / f"{id}.azt"
 
     def _slug_taken(self, slug: str) -> bool:
         return get_builtin(slug) is not None or self._path(slug).exists()
 
     def _unique_slug(self, base: str) -> str:
-        """Return ``base`` or the first ``base-N`` suffix that is free."""
+        """Return ``base`` or the first free ``base-N``, always ≤ 48 chars."""
+        base = base[:48] or "template"
         if not self._slug_taken(base):
             return base
         i = 2
-        while self._slug_taken(f"{base}-{i}"):
+        while True:
+            suffix = f"-{i}"
+            candidate = base[: 48 - len(suffix)] + suffix
+            if not self._slug_taken(candidate):
+                return candidate
             i += 1
-        return f"{base}-{i}"
 
     def _write(self, template: ClipTemplate) -> None:
         self.templates_dir.mkdir(parents=True, exist_ok=True)

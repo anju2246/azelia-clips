@@ -173,3 +173,33 @@ def test_store_resolve_unknown_raises_not_found(tmp_path):
 
     with pytest.raises(TemplateNotFound):
         store.resolve("unknown-template-xyz")
+
+
+def test_store_rejects_path_traversal_id(tmp_path):
+    """An id that isn't a clean slug must never escape templates_dir."""
+    store = TemplateStore(tmp_path)
+    with pytest.raises(TemplateNotFound):
+        store.get("../../etc/passwd")
+    with pytest.raises(TemplateNotFound):
+        store.delete("../secrets")
+
+
+def test_store_slug_disambiguation_stays_within_48_chars(tmp_path):
+    """Long names that collide must not produce slugs that violate the id pattern."""
+    from datetime import datetime
+
+    store = TemplateStore(tmp_path)
+    now = datetime(2026, 1, 1).isoformat()
+    max_id = "a" * 48  # already at the id length limit
+    first = store.create(
+        ClipTemplate(id=max_id, name="Long", created_at=now, updated_at=now,
+                     subtitles=SubtitleSpec(), layout=LayoutSpec())
+    )
+    # Collision on a 48-char slug: the -N suffix must not push it past 48.
+    second = store.create(
+        ClipTemplate(id=max_id, name="Long", created_at=now, updated_at=now,
+                     subtitles=SubtitleSpec(), layout=LayoutSpec())
+    )
+    assert first.id == max_id
+    assert len(second.id) <= 48
+    assert second.id != first.id
