@@ -178,6 +178,11 @@ class TemplateChatResponse(BaseModel):
     provider_used: str = ""
 
 
+class ImportTemplateResponse(BaseModel):
+    template: ClipTemplate
+    warnings: List[str] = Field(default_factory=list)
+
+
 class EpisodeResponse(BaseModel):
     id: str
     number: int

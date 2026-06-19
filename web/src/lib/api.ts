@@ -616,6 +616,15 @@ export const TemplatesApi = {
         body: JSON.stringify(body),
       },
     ),
+
+  importFile: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetchApi<{ template: ClipTemplate; warnings: string[] }>(
+      "/templates/import",
+      { method: "POST", body: form },
+    );
+  },
 };
 
 // --- INTELLIGENCE & ANALYTICS API ---

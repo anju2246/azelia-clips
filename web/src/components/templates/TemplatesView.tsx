@@ -1,6 +1,6 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { Copy, Trash2, Lock, Plus, Layout, Type, Save, X, Pencil } from "lucide-react";
+import { Copy, Trash2, Lock, Plus, Layout, Type, Save, X, Pencil, Download, Upload } from "lucide-react";
 import { TemplatesApi, SettingsApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec } from "../../lib/api";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplatePreview } from "./TemplatePreview";
@@ -16,6 +16,7 @@ export const TemplatesView: React.FC = () => {
   const [draft, setDraft] = useState<ClipTemplate | null>(null);
   const [saving, setSaving] = useState(false);
   const [visionAvailable, setVisionAvailable] = useState(false);
+  const importRef = useRef<HTMLInputElement>(null);
 
   const refresh = () =>
     TemplatesApi.list()
@@ -68,6 +69,36 @@ export const TemplatesView: React.FC = () => {
     }
   };
 
+  const handleExport = (t: ClipTemplate) => {
+    const blob = new Blob([JSON.stringify(t, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${t.id}.azt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const res = await TemplatesApi.importFile(file);
+      if (res.warnings?.includes("FONT_NOT_INSTALLED")) {
+        toast(`Importado. Ojo: la fuente "${res.template.subtitles.font_name}" no está instalada.`, {
+          icon: "⚠️",
+        });
+      } else {
+        toast.success("Template importado");
+      }
+      await refresh();
+      setDraft(res.template);
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
+
   const patchDraft = (patch: {
     subtitles?: Partial<SubtitleSpec>;
     layout?: Partial<LayoutSpec>;
@@ -114,12 +145,27 @@ export const TemplatesView: React.FC = () => {
             de solo lectura: clónalos para editarlos a tu gusto.
           </p>
         </div>
-        <button
-          onClick={handleCreate}
-          className="shrink-0 inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 transition"
-        >
-          <Plus size={16} /> Nuevo
-        </button>
+        <div className="flex shrink-0 items-center gap-2">
+          <input
+            ref={importRef}
+            type="file"
+            accept=".azt,application/json"
+            className="hidden"
+            onChange={handleImport}
+          />
+          <button
+            onClick={() => importRef.current?.click()}
+            className="inline-flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm hover:bg-zinc-800 transition"
+          >
+            <Upload size={15} /> Importar
+          </button>
+          <button
+            onClick={handleCreate}
+            className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 transition"
+          >
+            <Plus size={16} /> Nuevo
+          </button>
+        </div>
       </div>
 
       {/* Editor panel */}
@@ -228,6 +274,13 @@ export const TemplatesView: React.FC = () => {
                   className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs hover:bg-zinc-800 transition"
                 >
                   <Copy size={13} /> Clonar
+                </button>
+                <button
+                  onClick={() => handleExport(t)}
+                  title="Exportar .azt"
+                  className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-2.5 py-1.5 text-xs hover:bg-zinc-800 transition"
+                >
+                  <Download size={13} />
                 </button>
                 {!t.is_builtin && (
                   <button
