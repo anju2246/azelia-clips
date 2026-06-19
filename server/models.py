@@ -82,6 +82,7 @@ class SettingsResponse(BaseModel):
         description="Pause after curation to review clips in a chat before rendering",
     )
     default_template_id: str = Field(default="splitscreen", description="Default clip template slug")
+    vision_available: bool = Field(default=False, description="Whether reference-image (vision via Claude Code) is usable")
 
 
 class ProfileResponse(BaseModel):

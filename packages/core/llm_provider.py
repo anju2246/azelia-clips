@@ -46,6 +46,13 @@ def claude_code_available() -> bool:
         return False
 
 
+def vision_available() -> bool:
+    """True if image input is possible. Vision is Claude-Code-only (no Anthropic
+    fallback, by product decision): the user's CLI subscription reads the image
+    via its Read tool, at $0 cost."""
+    return claude_code_available()
+
+
 def claude_code_authenticated() -> Optional[dict]:
     """Returns auth info dict if Claude Code is authenticated, else None."""
     if not claude_code_available():
@@ -68,6 +75,10 @@ def claude_code_authenticated() -> Optional[dict]:
 
 
 # ─── Multi-provider client ──────────────────────────────────────────────
+
+
+class VisionUnavailable(Exception):
+    """No vision-capable provider (Claude Code) is available."""
 
 
 class MultiProviderLLM:
@@ -178,6 +189,37 @@ class MultiProviderLLM:
 
         if result.returncode != 0:
             raise Exception(f"Claude Code error (exit {result.returncode}): {result.stderr[:500]}")
+        return result.stdout.strip()
+
+    def chat_vision(self, system_prompt: str, user_message: str, image_path: str, temperature: float = 0.7) -> str:
+        """Vision turn — Claude-Code-only (no Anthropic fallback).
+
+        The CLI reads the image off disk via its Read tool, so we reference the
+        absolute path in the prompt and allow only Read. Verified: `claude -p`
+        with `--allowedTools Read` resolves image files.
+        """
+        if not claude_code_available():
+            raise VisionUnavailable(
+                "Adjuntar una imagen requiere Claude Code instalado y autenticado."
+            )
+        full_prompt = (
+            f"{system_prompt}\n\n---\n\n"
+            f"Imagen de referencia (léela con tu herramienta Read): {image_path}\n\n"
+            f"{user_message}"
+        )
+        try:
+            result = subprocess.run(
+                [_claude_cmd(), "-p", full_prompt, "--allowedTools", "Read"],
+                capture_output=True,
+                text=True,
+                timeout=300,
+                env=_claude_env(),
+            )
+        except subprocess.TimeoutExpired as e:
+            raise Exception("Claude Code timed out after 5 minutes") from e
+
+        if result.returncode != 0:
+            raise Exception(f"Claude Code vision error (exit {result.returncode}): {result.stderr[:500]}")
         return result.stdout.strip()
 
 

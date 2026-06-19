@@ -132,31 +132,67 @@ async def clone_template(id: str, req: CloneTemplateRequest, user: User = Depend
 
 @router.post("/templates/chat", response_model=TemplateChatResponse)
 async def chat_template(req: TemplateChatRequest, user: User = Depends(require_auth)):
-    """AI-assisted edit: returns an updated draft (not persisted)."""
+    """AI-assisted edit: returns an updated draft (not persisted).
+
+    With a reference image, vision runs through Claude Code only (no Anthropic
+    fallback); the image is written to a temp file and removed afterwards.
+    """
+    import os
+    import tempfile
+
     from packages.clips.templates import ai_editor
 
-    try:
-        llm = ai_editor.get_llm()
-    except ValueError:
-        raise HTTPException(
-            status_code=503,
-            detail={"error_code": "LLM_UNAVAILABLE", "message": "Configura Claude Code o una API key"},
-        )
+    image_path: str | None = None
+    tmp_handle: str | None = None
 
     try:
-        result = ai_editor.edit(
-            req.template,
-            [m.model_dump() for m in req.messages],
-            llm=llm,
-        )
-    except ai_editor.TemplateChatError:
-        raise HTTPException(
-            status_code=502,
-            detail={"error_code": "LLM_BAD_OUTPUT", "message": "El asistente no pudo generar un cambio válido"},
-        )
+        if req.image_b64:
+            if not ai_editor.vision_available():
+                raise HTTPException(
+                    status_code=422,
+                    detail={"error_code": "VISION_UNAVAILABLE", "message": "Adjuntar imagen requiere Claude Code"},
+                )
+            try:
+                data, ext = ai_editor.decode_reference_image(req.image_b64)
+            except ai_editor.ImageInvalid as e:
+                raise HTTPException(
+                    status_code=422,
+                    detail={"error_code": "IMAGE_INVALID", "message": str(e)},
+                )
+            fd, tmp_handle = tempfile.mkstemp(suffix=ext, prefix="azelia_ref_")
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
+            image_path = tmp_handle
+        else:
+            # Text-only path still requires some LLM provider.
+            try:
+                ai_editor.get_llm()
+            except ValueError:
+                raise HTTPException(
+                    status_code=503,
+                    detail={"error_code": "LLM_UNAVAILABLE", "message": "Configura Claude Code o una API key"},
+                )
 
-    return TemplateChatResponse(
-        explanation=result["explanation"],
-        template=result["template"],
-        provider_used=result.get("provider_used", ""),
-    )
+        try:
+            result = ai_editor.edit(
+                req.template,
+                [m.model_dump() for m in req.messages],
+                image_path=image_path,
+            )
+        except ai_editor.TemplateChatError:
+            raise HTTPException(
+                status_code=502,
+                detail={"error_code": "LLM_BAD_OUTPUT", "message": "El asistente no pudo generar un cambio válido"},
+            )
+
+        return TemplateChatResponse(
+            explanation=result["explanation"],
+            template=result["template"],
+            provider_used=result.get("provider_used", ""),
+        )
+    finally:
+        if tmp_handle and os.path.exists(tmp_handle):
+            try:
+                os.unlink(tmp_handle)
+            except OSError:
+                pass

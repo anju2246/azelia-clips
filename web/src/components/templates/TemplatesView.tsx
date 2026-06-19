@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import toast from "react-hot-toast";
 import { Copy, Trash2, Lock, Plus, Layout, Type, Save, X, Pencil } from "lucide-react";
-import { TemplatesApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec } from "../../lib/api";
+import { TemplatesApi, SettingsApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec } from "../../lib/api";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplatePreview } from "./TemplatePreview";
 import { TemplateChat } from "./TemplateChat";
@@ -15,6 +15,7 @@ export const TemplatesView: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<ClipTemplate | null>(null);
   const [saving, setSaving] = useState(false);
+  const [visionAvailable, setVisionAvailable] = useState(false);
 
   const refresh = () =>
     TemplatesApi.list()
@@ -24,6 +25,9 @@ export const TemplatesView: React.FC = () => {
 
   useEffect(() => {
     refresh();
+    SettingsApi.getSettings()
+      .then((s) => setVisionAvailable(!!s.vision_available))
+      .catch(() => setVisionAvailable(false));
   }, []);
 
   const handleCreate = async () => {
@@ -164,7 +168,11 @@ export const TemplatesView: React.FC = () => {
                 onChange={patchDraft}
               />
               {!draft.is_builtin && (
-                <TemplateChat draft={draft} onApply={(t) => setDraft(t)} />
+                <TemplateChat
+                  draft={draft}
+                  onApply={(t) => setDraft(t)}
+                  visionAvailable={visionAvailable}
+                />
               )}
             </div>
           </div>

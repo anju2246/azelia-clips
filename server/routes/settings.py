@@ -14,7 +14,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException
 
 from packages.core.config import settings
-from packages.core.llm_provider import claude_code_available, claude_code_authenticated, reset_llm
+from packages.core.llm_provider import (
+    claude_code_available,
+    claude_code_authenticated,
+    reset_llm,
+    vision_available,
+)
 from packages.core.services.model_registry import model_registry
 from server.middleware.auth import User, require_auth
 from server.models import SettingsResponse, UpdateSettingsRequest
@@ -23,6 +28,14 @@ router = APIRouter()
 
 
 # ─── Helpers ────────────────────────────────────────────────────────────
+
+
+def _vision_available_safe() -> bool:
+    """vision_available() shells out to `claude`; never let that break /settings."""
+    try:
+        return vision_available()
+    except Exception:
+        return False
 
 
 def _get_allowed_roots() -> list[Path]:
@@ -115,6 +128,7 @@ async def get_settings(user: User = Depends(require_auth)):
         transcript_supabase_key=mask_key(settings.transcript_supabase_key),
         review_brief_before_processing=settings.review_brief_before_processing,
         default_template_id=settings.default_template_id,
+        vision_available=_vision_available_safe(),
     )
 
 

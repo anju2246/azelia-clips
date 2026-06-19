@@ -111,6 +111,8 @@ export interface SettingsResponse {
   transcript_supabase_url?: string;
   transcript_supabase_key?: string;
   review_brief_before_processing?: boolean;
+  default_template_id?: string;
+  vision_available?: boolean;
 }
 
 export interface UpdateSettingsRequest {
