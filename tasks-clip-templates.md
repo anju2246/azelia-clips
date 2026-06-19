@@ -261,7 +261,7 @@ Anthropic API (base64). Si ningún proveedor con visión → `VISION_UNAVAILABLE
 ---
 
 ## Task T7: Import / Export `.azt`
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** T2
 **Parallelizable with:** T4, T5
