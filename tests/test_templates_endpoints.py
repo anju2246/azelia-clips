@@ -98,3 +98,65 @@ def test_put_builtin_returns_409_readonly(client):
 def test_delete_missing_returns_404(client):
     r = client.delete("/api/templates/does-not-exist")
     assert r.status_code == 404
+
+
+# ── import / export (T7) ─────────────────────────────────────────────────────
+
+import io
+import json
+
+
+def test_export_import_roundtrip_creates_equivalent_template(client, monkeypatch):
+    import server.routes.templates as tr
+
+    monkeypatch.setattr(tr, "_font_installed", lambda name: True)
+
+    # Export a builtin as .azt
+    exp = client.get("/api/templates/splitscreen/export")
+    assert exp.status_code == 200
+    azt = exp.content
+
+    # Re-import it
+    r = client.post(
+        "/api/templates/import",
+        files={"file": ("splitscreen.azt", io.BytesIO(azt), "application/json")},
+    )
+    assert r.status_code == 201
+    body = r.json()
+    imported = body["template"]
+    assert imported["is_builtin"] is False  # forced custom
+    assert imported["subtitles"]["margin_v"] == 620  # style preserved
+    assert body["warnings"] == []
+
+
+def test_import_unknown_schema_version_returns_422(client):
+    bad = json.dumps({"schema_version": 99, "id": "x", "name": "X"}).encode()
+    r = client.post(
+        "/api/templates/import",
+        files={"file": ("x.azt", io.BytesIO(bad), "application/json")},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "IMPORT_VERSION_UNSUPPORTED"
+
+
+def test_import_non_json_returns_422(client):
+    r = client.post(
+        "/api/templates/import",
+        files={"file": ("x.azt", io.BytesIO(b"not json{{"), "application/json")},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "IMPORT_PARSE_ERROR"
+
+
+def test_import_missing_font_returns_warning_not_error(client, monkeypatch):
+    import server.routes.templates as tr
+
+    monkeypatch.setattr(tr, "_font_installed", lambda name: False)
+
+    azt = client.get("/api/templates/podcast/export").content
+    r = client.post(
+        "/api/templates/import",
+        files={"file": ("podcast.azt", io.BytesIO(azt), "application/json")},
+    )
+    assert r.status_code == 201
+    assert "FONT_NOT_INSTALLED" in r.json()["warnings"]
