@@ -23,12 +23,27 @@ class FakeLLM:
     def __init__(self, responses):
         self.responses = list(responses)
         self.calls = 0
+        self.vision_calls = 0
+        self.last_image_path = None
         self.providers = [{"name": "fake-model"}]
 
     def chat(self, system_prompt, user_message, **kw):
         r = self.responses[min(self.calls, len(self.responses) - 1)]
         self.calls += 1
         return r
+
+    def chat_vision(self, system_prompt, user_message, image_path, **kw):
+        self.vision_calls += 1
+        self.last_image_path = image_path
+        r = self.responses[min(self.calls, len(self.responses) - 1)]
+        self.calls += 1
+        return r
+
+
+# A 1x1 PNG, base64.
+_PNG_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
 
 
 # ── ai_editor unit ───────────────────────────────────────────────────────────
@@ -92,6 +107,98 @@ def client(tmp_path, monkeypatch):
     from server.app import app
 
     return TestClient(app)
+
+
+# ── vision (T6) ──────────────────────────────────────────────────────────────
+
+
+def test_edit_with_image_uses_chat_vision():
+    from packages.clips.templates.ai_editor import edit
+
+    base = _tmpl()
+    good = json.dumps({
+        "explanation": "copié el estilo",
+        "template": {"subtitles": base.subtitles.model_dump(), "layout": base.layout.model_dump()},
+    })
+    fake = FakeLLM([good])
+    out = edit(base, [{"role": "user", "content": "replica esto"}], image_path="/tmp/x.png", llm=fake)
+
+    assert fake.vision_calls == 1
+    assert fake.calls == 0  # text chat() not used
+    assert fake.last_image_path == "/tmp/x.png"
+    assert out["explanation"] == "copié el estilo"
+
+
+def test_decode_reference_image_rejects_garbage():
+    from packages.clips.templates.ai_editor import ImageInvalid, decode_reference_image
+
+    with pytest.raises(ImageInvalid):
+        decode_reference_image("not-base64-image!!!")
+
+
+def test_chat_endpoint_image_without_vision_returns_422(client, monkeypatch):
+    import packages.clips.templates.ai_editor as ae
+
+    monkeypatch.setattr(ae, "vision_available", lambda: False)
+
+    template = client.get("/api/templates/splitscreen").json()
+    r = client.post(
+        "/api/templates/chat",
+        json={
+            "template": template,
+            "messages": [{"role": "user", "content": "replica"}],
+            "image_b64": _PNG_B64,
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "VISION_UNAVAILABLE"
+
+
+def test_chat_endpoint_invalid_image_returns_422(client, monkeypatch):
+    import packages.clips.templates.ai_editor as ae
+
+    monkeypatch.setattr(ae, "vision_available", lambda: True)
+
+    template = client.get("/api/templates/splitscreen").json()
+    r = client.post(
+        "/api/templates/chat",
+        json={
+            "template": template,
+            "messages": [{"role": "user", "content": "replica"}],
+            "image_b64": "Zm9vYmFy",  # valid base64, not an image
+        },
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "IMAGE_INVALID"
+
+
+def test_chat_endpoint_temp_image_deleted_after_call(client, monkeypatch):
+    import packages.clips.templates.ai_editor as ae
+
+    monkeypatch.setattr(ae, "vision_available", lambda: True)
+    captured = {}
+
+    def fake_edit(template, messages, image_path=None, llm=None):
+        captured["path"] = image_path
+        assert image_path and __import__("os").path.exists(image_path)
+        return {"explanation": "ok", "template": template, "provider_used": "claude-code-cli"}
+
+    monkeypatch.setattr(ae, "edit", fake_edit)
+
+    template = client.get("/api/templates/splitscreen").json()
+    r = client.post(
+        "/api/templates/chat",
+        json={
+            "template": template,
+            "messages": [{"role": "user", "content": "replica"}],
+            "image_b64": _PNG_B64,
+        },
+    )
+    assert r.status_code == 200
+    # The temp file existed during the call but is cleaned up afterwards.
+    import os
+
+    assert not os.path.exists(captured["path"])
 
 
 def test_chat_endpoint_no_provider_returns_503(client, monkeypatch):
