@@ -220,8 +220,10 @@ patch al draft y refresca el preview. No persiste (guardado explícito vía T2).
 
 ---
 
-## Task T6: Imagen de referencia (visión) — spike CC CLI + fallback Anthropic
-**Status:** [ ]
+## Task T6: Imagen de referencia (visión) — Claude Code only (SIN fallback Anthropic)
+**Status:** [x]  — spike confirmado (`claude -p --allowedTools Read` lee imágenes). Visión exclusiva por
+Claude Code por decisión local-first/$0. **Verificación manual pendiente:** flujo real de replicar un
+template desde una imagen en el navegador.
 **Complexity:** L
 **Dependencies:** T5
 **Parallelizable with:** none
