@@ -4,11 +4,21 @@ Templates live per-profile under <data_dir>/templates/<slug>.azt. Built-ins are
 synthesized read-only presets. Domain exceptions map to the spec's HTTP codes.
 """
 
+import json
+import shutil
+import subprocess
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import Response
+from pydantic import ValidationError
 
-from packages.clips.templates.models import ClipTemplate, LayoutSpec, SubtitleSpec
+from packages.clips.templates.models import (
+    SCHEMA_VERSION,
+    ClipTemplate,
+    LayoutSpec,
+    SubtitleSpec,
+)
 from packages.clips.templates.store import (
     TemplateNotFound,
     TemplateReadOnly,
@@ -19,6 +29,7 @@ from server.middleware.auth import User, require_auth
 from server.models import (
     CloneTemplateRequest,
     CreateTemplateRequest,
+    ImportTemplateResponse,
     TemplateChatRequest,
     TemplateChatResponse,
     TemplateListResponse,
@@ -51,6 +62,23 @@ def _read_only(id: str) -> HTTPException:
         status_code=409,
         detail={"error_code": "TEMPLATE_READONLY", "message": "Los presets no se editan; clónalo primero"},
     )
+
+
+def _font_installed(name: str) -> bool:
+    """Best-effort: True if a font matching `name` is installed.
+
+    Uses fontconfig (`fc-list`) when available; if we can't determine it, assume
+    installed so we don't warn spuriously. Non-fatal either way.
+    """
+    fc = shutil.which("fc-list")
+    if not fc:
+        return True  # can't tell → don't cry wolf
+    try:
+        out = subprocess.run([fc, ":family"], capture_output=True, text=True, timeout=5)
+        families = out.stdout.lower()
+        return name.split()[0].lower() in families
+    except (subprocess.SubprocessError, OSError):
+        return True
 
 
 @router.get("/templates", response_model=TemplateListResponse)
@@ -128,6 +156,55 @@ async def clone_template(id: str, req: CloneTemplateRequest, user: User = Depend
         return _store().clone(id, req.name)
     except TemplateNotFound:
         raise _not_found(id)
+
+
+@router.get("/templates/{id}/export")
+async def export_template(id: str, user: User = Depends(require_auth)):
+    """Download a template as a portable .azt (JSON) file."""
+    try:
+        template = _store().get(id)
+    except TemplateNotFound:
+        raise _not_found(id)
+    return Response(
+        content=template.to_azt_bytes(),
+        media_type="application/json",
+        headers={"Content-Disposition": f'attachment; filename="{id}.azt"'},
+    )
+
+
+@router.post("/templates/import", response_model=ImportTemplateResponse, status_code=201)
+async def import_template(file: UploadFile = File(...), user: User = Depends(require_auth)):
+    """Import a .azt file as a new custom template (slug disambiguated)."""
+    raw = await file.read()
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "IMPORT_PARSE_ERROR", "message": "El archivo no es un .azt válido"},
+        )
+
+    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "IMPORT_VERSION_UNSUPPORTED", "message": "Versión de formato no soportada"},
+        )
+
+    try:
+        template = ClipTemplate.model_validate(data)
+    except ValidationError:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "IMPORT_PARSE_ERROR", "message": "El .azt no respeta el esquema"},
+        )
+
+    # Never trust the file's id/is_builtin; create() reassigns/disambiguates the slug.
+    created = _store().create(template.model_copy(update={"is_builtin": False}))
+
+    warnings: list[str] = []
+    if not _font_installed(created.subtitles.font_name):
+        warnings.append("FONT_NOT_INSTALLED")
+    return ImportTemplateResponse(template=created, warnings=warnings)
 
 
 @router.post("/templates/chat", response_model=TemplateChatResponse)
