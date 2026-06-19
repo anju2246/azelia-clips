@@ -9,15 +9,61 @@ Vision (a reference image) is wired in T6 via ``chat_vision``; here only the
 text path is exercised.
 """
 
+import base64
+import binascii
 import json
 import re
 
 from packages.clips.templates.models import ClipTemplate, LayoutSpec, SubtitleSpec
-from packages.core.llm_provider import get_llm
+from packages.core.llm_provider import get_llm, vision_available
+
+__all__ = [
+    "edit",
+    "get_llm",
+    "vision_available",
+    "decode_reference_image",
+    "TemplateChatError",
+    "ImageInvalid",
+]
 
 
 class TemplateChatError(Exception):
     """The model failed to produce a valid template after the retry."""
+
+
+class ImageInvalid(Exception):
+    """The reference image is not a supported type or is too large."""
+
+
+_MAX_IMAGE_BYTES = 5 * 1024 * 1024
+
+
+def decode_reference_image(image_b64: str) -> tuple[bytes, str]:
+    """Decode + validate a reference image. Returns (bytes, extension).
+
+    Accepts a raw base64 string or a data URL. Rejects non-image payloads,
+    unsupported types, and anything over 5 MB. Raises ImageInvalid.
+    """
+    payload = image_b64.strip()
+    if payload.startswith("data:"):
+        _, _, payload = payload.partition(",")
+    try:
+        data = base64.b64decode(payload, validate=True)
+    except (binascii.Error, ValueError) as e:
+        raise ImageInvalid("La imagen no es base64 válido") from e
+
+    if not data:
+        raise ImageInvalid("Imagen vacía")
+    if len(data) > _MAX_IMAGE_BYTES:
+        raise ImageInvalid("La imagen supera 5 MB")
+
+    if data[:8].startswith(b"\x89PNG\r\n\x1a\n"):
+        return data, ".png"
+    if data[:3] == b"\xff\xd8\xff":
+        return data, ".jpg"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return data, ".webp"
+    raise ImageInvalid("Tipo no soportado (png/jpeg/webp)")
 
 
 _ALLOWED_ANIMATIONS = ["highlight", "karaoke", "box", "cumulative"]
@@ -111,7 +157,10 @@ def edit(
 
     last_err: Exception | None = None
     for attempt in range(2):
-        raw = llm.chat(system, user)
+        if image_path:
+            raw = llm.chat_vision(system, user, image_path)
+        else:
+            raw = llm.chat(system, user)
         try:
             result = _coerce(raw, template)
             result["provider_used"] = provider_used

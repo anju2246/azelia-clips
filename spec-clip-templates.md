@@ -185,19 +185,19 @@ HTTP 200
 Extiende la capa LLM con capacidad de visión, usada por F3 cuando `image_b64 != null`.
 
 **Business Rules:**
-1. Orden de visión: **Claude Code CLI primero** — guardar la imagen en archivo temporal y referenciar su
-   ruta absoluta en el prompt para que la CLI la lea (**spike**: verificar soporte real de imágenes en
-   `claude -p`). Si falla o no soporta → **fallback Anthropic API** con bloque de contenido `image` (base64).
-2. Si **ningún** proveedor con visión está disponible (CC sin soporte y sin API key), responder error claro
-   y permitir continuar el chat en modo solo-texto.
-3. Validar la imagen: tipos `image/png|jpeg|webp`, tamaño ≤ 5 MB.
+1. Visión **exclusivamente vía Claude Code CLI** (suscripción del usuario, $0). **Sin fallback a Anthropic
+   API.** Se guarda la imagen en archivo temporal y se referencia su ruta absoluta en el prompt para que la
+   CLI la lea con su herramienta Read (**spike**: verificar soporte real de imágenes en `claude -p`).
+2. Si Claude Code no está disponible o no soporta imágenes → `VISION_UNAVAILABLE`; el chat de **texto** sigue
+   operativo (usando el router normal). El adjuntar imagen se deshabilita en la UI cuando no hay visión.
+3. Validar la imagen: tipos `image/png|jpeg|webp`, tamaño ≤ 5 MB. Archivo temporal con borrado garantizado.
 4. El system prompt instruye: "analiza la imagen y traduce su estilo de subtítulos/layout a los campos del
    template; no inventes campos fuera del esquema".
 
 **Error cases:**
 | Condición | HTTP | Error Code | Mensaje |
 |-----------|------|-----------|---------|
-| Imagen pero ningún proveedor con visión | 422 | VISION_UNAVAILABLE | Adjuntar imagen requiere visión; configura una API key |
+| Imagen pero Claude Code no disponible/sin visión | 422 | VISION_UNAVAILABLE | Adjuntar imagen requiere Claude Code |
 | Imagen demasiado grande / tipo inválido | 422 | IMAGE_INVALID | Imagen no soportada (png/jpeg/webp, ≤ 5MB) |
 
 ### F5 — Preview en vivo (mockup interactivo, frontend)
@@ -248,7 +248,7 @@ Extiende la capa LLM con capacidad de visión, usada por F3 cuando `image_b64 !=
 ## Riesgos / Spikes
 | Riesgo | Mitigación |
 |--------|-----------|
-| Claude Code CLI puede no aceptar imágenes en `-p` | Spike temprano; Anthropic API es el camino garantizado; degradar a solo-texto si no hay visión |
+| Claude Code CLI puede no aceptar imágenes en `-p` | Spike temprano; **sin fallback a Anthropic** (decisión local-first/$0): si no hay visión por CC, `VISION_UNAVAILABLE` y el chat sigue en solo-texto |
 | Fidelidad del mockup CSS vs render FFmpeg real | Documentar que es aproximado; campos mapeados 1:1 con `SubtitleStyle`; arrastre limitado a `alignment`+`margin_v` (lo que ASS sabe reproducir); (opcional futuro: botón render de prueba) |
 | Arrastre libre que ASS no pueda reproducir | El drag siempre hace *snap* a ancla+margen; nunca posición por píxel (`\pos`) en v1 |
 | Fuentes referenciadas por nombre ausentes en otra máquina | `warnings` en import (`FONT_NOT_INSTALLED`); no fatal |
