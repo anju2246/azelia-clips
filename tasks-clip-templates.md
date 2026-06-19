@@ -146,7 +146,8 @@ resuelto (subtítulos + layout `wide_height_ratio`). Incluye **test de no-regres
 ---
 
 ## Task T4: Editor de campos + preview interactivo (mockup)
-**Status:** [ ]
+**Status:** [x]  — lógica de snap/colores con tests puros (esbuild+node). **Verificación visual pendiente**
+del drag real en el navegador (`/run` o `npm run dev`).
 **Complexity:** L
 **Dependencies:** T2
 **Parallelizable with:** T3
