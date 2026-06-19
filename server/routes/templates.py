@@ -251,7 +251,12 @@ async def chat_template(req: TemplateChatRequest, user: User = Depends(require_a
                 )
 
         try:
-            result = ai_editor.edit(
+            # edit() shells out to the LLM (subprocess, up to 5 min) — run it off
+            # the event loop so a single chat doesn't freeze the whole server.
+            import asyncio
+
+            result = await asyncio.to_thread(
+                ai_editor.edit,
                 req.template,
                 [m.model_dump() for m in req.messages],
                 image_path=image_path,

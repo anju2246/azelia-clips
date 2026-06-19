@@ -157,6 +157,7 @@ def edit(
 
     last_err: Exception | None = None
     for attempt in range(2):
+        # Vision unavailability is a hard error, not a "bad output" to retry.
         if image_path:
             raw = llm.chat_vision(system, user, image_path)
         else:

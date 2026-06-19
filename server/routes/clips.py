@@ -1443,6 +1443,7 @@ async def resume_job_endpoint(
                         min_score=saved_req.get("min_score", 70),
                         use_supabase=use_sb,
                         transcription_config=transcription_config,
+                        template_id=saved_req.get("template_id") or settings.default_template_id,
                     )
                     store.update_progress(jid, int(paused_pct), "Buscando episodio…")
                     eps = processor.discover_episodes(start=num, end=num)
@@ -1755,6 +1756,7 @@ async def process_episode_endpoint(
                 max_duration=req.max_duration,
                 min_score=req.min_score,
                 use_supabase=use_sb,
+                template_id=req.template_id or settings.default_template_id,
                 transcription_config={
                     "source_type": eff_source_ep,
                     "assemblyai_api_key": getattr(req, "assemblyai_key", None),
