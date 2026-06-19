@@ -600,6 +600,20 @@ export const TemplatesApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name }),
     }),
+
+  chat: (body: {
+    template: ClipTemplate;
+    messages: { role: string; content: string }[];
+    image_b64?: string | null;
+  }) =>
+    fetchApi<{ explanation: string; template: ClipTemplate; provider_used: string }>(
+      "/templates/chat",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      },
+    ),
 };
 
 // --- INTELLIGENCE & ANALYTICS API ---
