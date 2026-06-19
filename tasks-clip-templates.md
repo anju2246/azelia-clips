@@ -185,7 +185,7 @@ ajusta `wide_height_ratio` (clamp 0.20–0.50). Guardado vía `PUT` (T2). Fronte
 ---
 
 ## Task T5: Chat de IA (texto) para editar el template
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** T2, T4
 **Parallelizable with:** none
