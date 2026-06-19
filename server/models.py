@@ -160,6 +160,23 @@ class CloneTemplateRequest(BaseModel):
     name: str = Field(min_length=1, max_length=60)
 
 
+class TemplateChatMessage(BaseModel):
+    role: str = "user"
+    content: str = ""
+
+
+class TemplateChatRequest(BaseModel):
+    template: ClipTemplate
+    messages: List[TemplateChatMessage] = Field(default_factory=list)
+    image_b64: Optional[str] = None  # reference image (vision; T6)
+
+
+class TemplateChatResponse(BaseModel):
+    explanation: str
+    template: ClipTemplate
+    provider_used: str = ""
+
+
 class EpisodeResponse(BaseModel):
     id: str
     number: int

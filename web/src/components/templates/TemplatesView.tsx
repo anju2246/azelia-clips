@@ -4,6 +4,7 @@ import { Copy, Trash2, Lock, Plus, Layout, Type, Save, X, Pencil } from "lucide-
 import { TemplatesApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec } from "../../lib/api";
 import { TemplateEditor } from "./TemplateEditor";
 import { TemplatePreview } from "./TemplatePreview";
+import { TemplateChat } from "./TemplateChat";
 
 /**
  * Full-page Templates view: list + an editor panel with an interactive preview.
@@ -155,12 +156,17 @@ export const TemplatesView: React.FC = () => {
               editable={!draft.is_builtin}
               onChange={patchDraft}
             />
-            <TemplateEditor
-              subtitles={draft.subtitles}
-              layout={draft.layout}
-              disabled={draft.is_builtin}
-              onChange={patchDraft}
-            />
+            <div className="flex flex-col gap-4">
+              <TemplateEditor
+                subtitles={draft.subtitles}
+                layout={draft.layout}
+                disabled={draft.is_builtin}
+                onChange={patchDraft}
+              />
+              {!draft.is_builtin && (
+                <TemplateChat draft={draft} onApply={(t) => setDraft(t)} />
+              )}
+            </div>
           </div>
           {draft.is_builtin && (
             <p className="mt-4 text-xs text-zinc-500">

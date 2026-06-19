@@ -19,6 +19,8 @@ from server.middleware.auth import User, require_auth
 from server.models import (
     CloneTemplateRequest,
     CreateTemplateRequest,
+    TemplateChatRequest,
+    TemplateChatResponse,
     TemplateListResponse,
     UpdateTemplateRequest,
 )
@@ -126,3 +128,35 @@ async def clone_template(id: str, req: CloneTemplateRequest, user: User = Depend
         return _store().clone(id, req.name)
     except TemplateNotFound:
         raise _not_found(id)
+
+
+@router.post("/templates/chat", response_model=TemplateChatResponse)
+async def chat_template(req: TemplateChatRequest, user: User = Depends(require_auth)):
+    """AI-assisted edit: returns an updated draft (not persisted)."""
+    from packages.clips.templates import ai_editor
+
+    try:
+        llm = ai_editor.get_llm()
+    except ValueError:
+        raise HTTPException(
+            status_code=503,
+            detail={"error_code": "LLM_UNAVAILABLE", "message": "Configura Claude Code o una API key"},
+        )
+
+    try:
+        result = ai_editor.edit(
+            req.template,
+            [m.model_dump() for m in req.messages],
+            llm=llm,
+        )
+    except ai_editor.TemplateChatError:
+        raise HTTPException(
+            status_code=502,
+            detail={"error_code": "LLM_BAD_OUTPUT", "message": "El asistente no pudo generar un cambio válido"},
+        )
+
+    return TemplateChatResponse(
+        explanation=result["explanation"],
+        template=result["template"],
+        provider_used=result.get("provider_used", ""),
+    )
