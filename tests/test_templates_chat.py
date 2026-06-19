@@ -22,22 +22,25 @@ class FakeLLM:
 
     def __init__(self, responses):
         self.responses = list(responses)
-        self.calls = 0
-        self.vision_calls = 0
+        self._idx = 0
+        self.calls = 0  # text chat() calls
+        self.vision_calls = 0  # chat_vision() calls
         self.last_image_path = None
         self.providers = [{"name": "fake-model"}]
 
-    def chat(self, system_prompt, user_message, **kw):
-        r = self.responses[min(self.calls, len(self.responses) - 1)]
-        self.calls += 1
+    def _next(self):
+        r = self.responses[min(self._idx, len(self.responses) - 1)]
+        self._idx += 1
         return r
+
+    def chat(self, system_prompt, user_message, **kw):
+        self.calls += 1
+        return self._next()
 
     def chat_vision(self, system_prompt, user_message, image_path, **kw):
         self.vision_calls += 1
         self.last_image_path = image_path
-        r = self.responses[min(self.calls, len(self.responses) - 1)]
-        self.calls += 1
-        return r
+        return self._next()
 
 
 # A 1x1 PNG, base64.
