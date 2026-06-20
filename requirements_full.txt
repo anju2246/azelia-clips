@@ -119,7 +119,7 @@ pyasn1==0.6.2
 pyasn1_modules==0.4.2
 pycparser==2.23
 pydantic==2.12.5
-pydantic-settings==2.12.0
+pydantic-settings==2.14.2
 pydantic_core==2.41.5
 pydeck==0.9.1
 pyflakes==3.4.0
