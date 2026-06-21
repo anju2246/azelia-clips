@@ -1,20 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
-import { Copy, Trash2, Lock, Plus, Layout, Type, Save, X, Pencil, Download, Upload } from "lucide-react";
-import { TemplatesApi, SettingsApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec } from "../../lib/api";
-import { TemplateEditor } from "./TemplateEditor";
-import { TemplatePreview } from "./TemplatePreview";
-import { TemplateChat } from "./TemplateChat";
+import { Copy, Trash2, Lock, Plus, Layout, Type, Pencil, Download, Upload } from "lucide-react";
+import { TemplatesApi, SettingsApi, type ClipTemplate } from "../../lib/api";
+import { TemplateEditorModal } from "./TemplateEditorModal";
 
 /**
- * Full-page Templates view: list + an editor panel with an interactive preview.
- * Built-ins are read-only (clone to edit). Custom templates save via PUT.
+ * Full-page Templates gallery. Editing/viewing a template opens a full-screen
+ * 3-panel editor (controls · interactive preview · AI chat). Built-ins are
+ * read-only (clone to edit); custom templates save via PUT.
  */
 export const TemplatesView: React.FC = () => {
   const [templates, setTemplates] = useState<ClipTemplate[]>([]);
   const [loading, setLoading] = useState(true);
   const [draft, setDraft] = useState<ClipTemplate | null>(null);
-  const [saving, setSaving] = useState(false);
   const [visionAvailable, setVisionAvailable] = useState(false);
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -99,39 +97,7 @@ export const TemplatesView: React.FC = () => {
     }
   };
 
-  const patchDraft = (patch: {
-    subtitles?: Partial<SubtitleSpec>;
-    layout?: Partial<LayoutSpec>;
-  }) =>
-    setDraft((d) =>
-      d
-        ? {
-            ...d,
-            subtitles: { ...d.subtitles, ...patch.subtitles },
-            layout: { ...d.layout, ...patch.layout },
-          }
-        : d,
-    );
-
-  const handleSave = async () => {
-    if (!draft) return;
-    setSaving(true);
-    try {
-      await TemplatesApi.update(draft.id, {
-        name: draft.name,
-        description: draft.description,
-        author: draft.author,
-        subtitles: draft.subtitles,
-        layout: draft.layout,
-      });
-      toast.success("Guardado");
-      await refresh();
-    } catch (e) {
-      toast.error((e as Error).message);
-    } finally {
-      setSaving(false);
-    }
-  };
+  const presets = templates.filter((t) => t.is_builtin);
 
   return (
     <div className="max-w-5xl mx-auto pb-12">
@@ -161,73 +127,25 @@ export const TemplatesView: React.FC = () => {
           </button>
           <button
             onClick={handleCreate}
-            className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2 text-sm font-semibold text-black hover:bg-zinc-200 transition"
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-400 transition"
           >
             <Plus size={16} /> Nuevo
           </button>
         </div>
       </div>
 
-      {/* Editor panel */}
+      {/* Full-screen 3-panel editor */}
       {draft && (
-        <div className="mb-8 rounded-xl border border-zinc-800 bg-zinc-900/50 p-5">
-          <div className="mb-4 flex items-center justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <span className="font-semibold">{draft.name}</span>
-              {draft.is_builtin && (
-                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wide text-amber-400/90 border border-amber-400/30 rounded px-1.5 py-0.5">
-                  <Lock size={10} /> solo lectura
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-2">
-              {!draft.is_builtin && (
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="inline-flex items-center gap-1 rounded-md bg-white px-3 py-1.5 text-xs font-semibold text-black hover:bg-zinc-200 disabled:opacity-50"
-                >
-                  <Save size={13} /> {saving ? "Guardando…" : "Guardar"}
-                </button>
-              )}
-              <button
-                onClick={() => setDraft(null)}
-                className="inline-flex items-center gap-1 rounded-md border border-zinc-700 px-3 py-1.5 text-xs hover:bg-zinc-800"
-              >
-                <X size={13} /> Cerrar
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-[270px_1fr] gap-6">
-            <TemplatePreview
-              subtitles={draft.subtitles}
-              layout={draft.layout}
-              editable={!draft.is_builtin}
-              onChange={patchDraft}
-            />
-            <div className="flex flex-col gap-4">
-              <TemplateEditor
-                subtitles={draft.subtitles}
-                layout={draft.layout}
-                disabled={draft.is_builtin}
-                onChange={patchDraft}
-              />
-              {!draft.is_builtin && (
-                <TemplateChat
-                  draft={draft}
-                  onApply={(t) => setDraft(t)}
-                  visionAvailable={visionAvailable}
-                />
-              )}
-            </div>
-          </div>
-          {draft.is_builtin && (
-            <p className="mt-4 text-xs text-zinc-500">
-              Este es un preset. Clónalo desde la lista para editarlo.
-            </p>
-          )}
-        </div>
+        <TemplateEditorModal
+          template={draft}
+          presets={presets}
+          visionAvailable={visionAvailable}
+          onClose={() => setDraft(null)}
+          onSaved={(t) => {
+            setDraft(t);
+            refresh();
+          }}
+        />
       )}
 
       {loading ? (
@@ -237,8 +155,8 @@ export const TemplatesView: React.FC = () => {
           {templates.map((t) => (
             <div
               key={t.id}
-              className={`rounded-xl border bg-zinc-900/50 p-4 flex flex-col gap-3 ${
-                draft?.id === t.id ? "border-cyan-500/60" : "border-zinc-800"
+              className={`rounded-xl border bg-zinc-900/50 p-4 flex flex-col gap-3 transition hover:border-emerald-500/40 ${
+                draft?.id === t.id ? "border-emerald-500/60" : "border-zinc-800"
               }`}
             >
               <div className="flex items-center gap-2 min-w-0">
