@@ -14,6 +14,7 @@ from packages.clips.templates.models import (
     ClipTemplate,
     IntroTitleSpec,
     LayoutSpec,
+    ProgressBarSpec,
     SubtitleSpec,
 )
 
@@ -153,6 +154,7 @@ class CreateTemplateRequest(BaseModel):
     layout: Optional[LayoutSpec] = None
     intro_title: Optional[IntroTitleSpec] = None
     branding: Optional[BrandingSpec] = None
+    progress_bar: Optional[ProgressBarSpec] = None
 
 
 class UpdateTemplateRequest(BaseModel):
@@ -167,6 +169,7 @@ class UpdateTemplateRequest(BaseModel):
     # model_fields_set to tell "not sent" from "sent as null".)
     intro_title: Optional[IntroTitleSpec] = None
     branding: Optional[BrandingSpec] = None
+    progress_bar: Optional[ProgressBarSpec] = None
 
 
 class CloneTemplateRequest(BaseModel):
