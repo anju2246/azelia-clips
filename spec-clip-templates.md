@@ -235,6 +235,106 @@ Extiende la capa LLM con capacidad de visión, usada por F3 cuando `image_b64 !=
 |-----------|------|-----------|---------|
 | `template_id` no existe al procesar | 422 | TEMPLATE_NOT_FOUND | El template seleccionado no existe |
 
+---
+
+# v2 Extensions — Conectar + Ampliar el techo (T8–T13)
+
+> **schema_version pasa de 1 → 2.** Todos los campos nuevos son **opcionales** y su default
+> equivale a **desactivado** (`None`/`enabled=false`), de modo que: (a) un `.azt` v1 se carga sin
+> cambios (los campos nuevos toman su default), (b) la **no-regresión** se mantiene — sin tocar nada,
+> un clip sale idéntico a hoy. Import de v1 sigue siendo válido; import de v2 en un Azelia viejo NO es
+> objetivo (forward-compat no requerida).
+
+## Entidades nuevas (todas opcionales en `ClipTemplate`)
+
+### BrandingSpec (logo / marca de agua) — campo `branding: BrandingSpec | None = None`
+| Campo | Tipo | Constraints | Default | Descripción |
+|-------|------|-------------|---------|-------------|
+| logo_path | str \| None | ruta de archivo PNG/WebP existente bajo el `data_dir` del perfil | None | Imagen del logo (con alpha) |
+| position | enum | `top-left`\|`top-right`\|`bottom-left`\|`bottom-right` | `top-right` | Esquina del overlay |
+| scale | float | 0.02–0.30 | 0.10 | Ancho del logo como fracción del ancho de salida (1080) |
+| opacity | float | 0.0–1.0 | 1.0 | Opacidad del overlay |
+| margin | int | 0–200 | 40 | Margen en px desde los bordes |
+
+### ProgressBarSpec — campo `progress_bar: ProgressBarSpec | None = None`
+| Campo | Tipo | Constraints | Default | Descripción |
+|-------|------|-------------|---------|-------------|
+| enabled | bool | — | false | Activa la barra de progreso |
+| color | str | ASS ABGR `^&H[0-9A-Fa-f]{8}$` | `&H0000FFFF` | Color de la barra rellena |
+| height | int | 2–40 | 12 | Alto de la barra en px |
+| position | enum | `top`\|`bottom` | `bottom` | Borde donde se ancla |
+
+### IntroTitleSpec (hook title los primeros N seg) — campo `intro_title: IntroTitleSpec | None = None`
+| Campo | Tipo | Constraints | Default | Descripción |
+|-------|------|-------------|---------|-------------|
+| enabled | bool | — | false | Muestra un título en pantalla al inicio del clip |
+| duration_s | float | 1.0–8.0 | 4.0 | Segundos que permanece el título |
+| font_name | str | 1–60 chars | hereda `subtitles.font_name` si vacío | Fuente del título |
+| font_size | int | 12–200 | 72 | Tamaño del título |
+| color | str | ASS ABGR | `&H00FFFFFF` | Color del texto |
+| outline_color | str | ASS ABGR | `&H00000000` | Color del contorno |
+| position | enum | `top`\|`center`\|`bottom` | `center` | Posición vertical |
+| box | bool | — | true | Caja semitransparente detrás del texto |
+| delay_captions | bool | — | true | Si true, **los subtítulos no aparecen** hasta que termina el título (`duration_s`) — "el título sale **antes** que los captions" |
+
+> **Texto del título:** proviene de `CuratedClip.title` (ya generado por la curación). El template
+> **no** define el texto — solo su estilo, duración y posición. Si `clip.title` está vacío, el título
+> no se dibuja aunque `enabled=true` (no se inventa texto).
+
+### BumpersSpec (intro / outro) — campo `bumpers: BumpersSpec | None = None`
+| Campo | Tipo | Constraints | Default | Descripción |
+|-------|------|-------------|---------|-------------|
+| intro_path | str \| None | ruta de un .mp4 bajo el `data_dir` del perfil | None | Clip de intro a concatenar antes |
+| outro_path | str \| None | ruta de un .mp4 bajo el `data_dir` del perfil | None | Clip de outro a concatenar después |
+
+> Los bumpers se **normalizan** a 1080×1920 y al codec/fps del clip antes de concatenar (concat por
+> re-encode, no demuxer, para tolerar parámetros distintos). Si una ruta no existe → warning no fatal,
+> se omite ese bumper.
+
+## Features nuevas
+
+### F7 — Conectar el template al flujo de proceso (completa F6 en el frontend) — **T8**
+El backend de F6 ya está; falta el **frontend** y el campo en `ProcessRequest` (TS):
+- `web/src/lib/api.ts`: `ProcessRequest.template_id?: string`.
+- Selector "Template" en el formulario de subida/proceso (UploadWidget / la ruta real de upload):
+  lista `GET /api/templates`, default = `default_template_id` del perfil.
+- `SettingsForm.tsx`: control para `default_template_id` (selector de templates del perfil).
+- El `template_id` elegido viaja en el `FormData` de `processVideo` y en `processLocalVideo`.
+
+**Done:** elegir un template en upload o fijar el default en Settings hace que el clip renderizado
+use ese template (verificable end-to-end con un clip real).
+
+### F8 — Fidelidad de fuentes — **T9**
+- Cargar como **web fonts reales** (Google Fonts/`@font-face`) las fuentes ofrecidas en el editor
+  (Anton, Bebas Neue, Oswald, Montserrat, Poppins, Impact-alt…), para que el preview no mienta.
+- Backend: endpoint/utilidad que reporte qué fuentes están **instaladas en la máquina** (las que el
+  render ASS puede honrar); el editor marca visualmente las no instaladas y el guardado emite warning
+  `FONT_NOT_INSTALLED` (coherente con import). Sin bloquear.
+
+### F9 — Logo / marca de agua — **T10**
+Overlay del `branding.logo_path` vía filtro FFmpeg `overlay` en el paso de burn/compose, en la
+esquina/escala/opacidad/margen indicados. Sin branding → sin cambios.
+
+### F10 — Barra de progreso — **T11**
+Barra que crece linealmente 0→100% a lo largo del clip, dibujada con `drawbox`/expresión temporal
+en el burn. Solo si `progress_bar.enabled`.
+
+### F11 — Hook title (título los primeros N segundos) — **T13**
+Dibuja `clip.title` centrado (o top/bottom) durante `intro_title.duration_s` (default 4s) como evento
+ASS temporizado (o `drawtext`), con caja opcional. Si `delay_captions=true`, los eventos de subtítulos
+se **desplazan** para empezar en `duration_s` (los captions salen **después** del título). Sin
+`intro_title` o con `clip.title` vacío → sin cambios.
+
+### F12 — Intro / Outro (bumpers) — **T12**
+Concatena `bumpers.intro_path` antes y `bumpers.outro_path` después del clip final, normalizando a
+1080×1920 + codec/fps del clip. Rutas ausentes → warning, se omiten.
+
+**Error cases (nuevas) — aplican a F9/F12 (assets en disco):**
+| Condición | Comportamiento |
+|-----------|----------------|
+| `logo_path`/`intro_path`/`outro_path` no existe | Warning no fatal en el job log; se omite ese overlay/bumper (no aborta el render) |
+| asset fuera del `data_dir` del perfil (path traversal) | Rechazado en validación del template (no se guarda) |
+
 ## Non-Functional Requirements
 - **Local-first**: nada sale de la máquina salvo la llamada LLM que el usuario ya elige (Claude Code/Anthropic).
 - **Aislamiento por perfil**: templates del perfil A nunca visibles desde el perfil B.
@@ -267,3 +367,17 @@ Extiende la capa LLM con capacidad de visión, usada por F3 cuando `image_b64 !=
 - [ ] El pipeline aplica el template seleccionado (default por perfil + override por job) en lugar del
       `splitscreen` hardcodeado; sin template elegido, el resultado es idéntico al actual.
 - [ ] Todos los tests nuevos pasan bajo el runner del proyecto (`pytest`).
+
+### Done Conditions v2 (T8–T13)
+- [ ] **T8** El frontend permite elegir template en upload y fijar `default_template_id` en Settings; el
+      clip renderizado usa ese template (verificación end-to-end con un clip real).
+- [ ] **T9** El preview del editor usa las fuentes reales (web fonts cargadas); las fuentes no instaladas
+      en la máquina se marcan y emiten `FONT_NOT_INSTALLED` al guardar (no bloquean).
+- [ ] **T10** Con `branding.logo_path`, el clip final muestra el logo en la esquina/escala/opacidad
+      indicadas; sin branding, el render es idéntico al actual (no-regresión).
+- [ ] **T11** Con `progress_bar.enabled`, el clip muestra una barra que va 0→100%; desactivada, sin cambios.
+- [ ] **T12** Con `bumpers.intro_path`/`outro_path` válidos, el clip final los concatena normalizados;
+      rutas ausentes → warning, no aborta.
+- [ ] **T13** Con `intro_title.enabled` y `clip.title` no vacío, el clip muestra el título los primeros
+      `duration_s` seg y (si `delay_captions`) los subtítulos empiezan después; desactivado, sin cambios.
+- [ ] `schema_version=2`: un `.azt` v1 se sigue cargando (campos nuevos toman default = desactivado).
