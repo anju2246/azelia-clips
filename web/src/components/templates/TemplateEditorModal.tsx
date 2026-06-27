@@ -11,8 +11,6 @@ import {
   X,
   Check,
   Lock,
-  Minus,
-  Plus,
   Megaphone,
   Image as ImageIcon,
 } from "lucide-react";
@@ -852,30 +850,6 @@ export const TemplateEditorModal: React.FC<Props> = ({
               if (p.branding) brand(p.branding);
             }}
           />
-
-          <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/90 px-2 py-1.5 shadow-lg">
-            <span className="px-1 text-slate-400">
-              <Type size={15} />
-            </span>
-            <button
-              disabled={!editable}
-              onClick={() => subs({ font_size: Math.max(12, s.font_size - 2) })}
-              className="rounded p-1 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
-            >
-              <Minus size={14} />
-            </button>
-            <span className="w-7 text-center text-xs tabular-nums text-slate-300">{s.font_size}</span>
-            <button
-              disabled={!editable}
-              onClick={() => subs({ font_size: Math.min(200, s.font_size + 2) })}
-              className="rounded p-1 text-slate-300 hover:bg-slate-800 disabled:opacity-40"
-            >
-              <Plus size={14} />
-            </button>
-            <div className="mx-1 h-5 w-px bg-slate-700" />
-            <ColorDot ass={s.primary_color} disabled={!editable} onChange={(c) => subs({ primary_color: c })} />
-            <ColorDot ass={s.secondary_color} disabled={!editable} onChange={(c) => subs({ secondary_color: c })} />
-          </div>
         </div>
 
         {/* Right: chat */}
@@ -895,19 +869,3 @@ export const TemplateEditorModal: React.FC<Props> = ({
   );
 };
 
-const ColorDot: React.FC<{ ass: string; disabled?: boolean; onChange: (ass: string) => void }> = ({
-  ass,
-  disabled,
-  onChange,
-}) => (
-  <span className="relative h-6 w-6 overflow-hidden rounded-md border border-slate-600">
-    <span className="block h-full w-full" style={{ background: assToHex(ass) }} />
-    <input
-      type="color"
-      value={assToHex(ass)}
-      disabled={disabled}
-      onChange={(e) => onChange(cssToAss(e.target.value))}
-      className="absolute -inset-2 h-[calc(100%+1rem)] w-[calc(100%+1rem)] cursor-pointer opacity-0 disabled:cursor-default"
-    />
-  </span>
-);
