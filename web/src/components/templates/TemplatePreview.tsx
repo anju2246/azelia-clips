@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from "react";
+import { Minus, Plus, Trash2, Type as TypeIcon } from "lucide-react";
 import { TemplatesApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec, type BrandingSpec } from "../../lib/api";
 import { pointToAlignment, ratioFromDivider } from "./snap";
-import { assToCss } from "./colors";
+import { assToCss, assToHex, cssToAss } from "./colors";
 
 const TARGET_W = 1080;
 const TARGET_H = 1920;
@@ -34,6 +35,7 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
   const [livePos, setLivePos] = useState<null | { xPct: number; yPct: number }>(null);
   const [sample, setSample] = useState("Y ESO LO CAMBIA TODO");
   const [activeIdx, setActiveIdx] = useState(0); // live animation cursor
+  const [selected, setSelected] = useState<null | "subs" | "logo">(null);
   const introOn = !!intro?.enabled;
   const [view, setView] = useState<"captions" | "hook">("captions");
   const showHook = introOn && view === "hook";
@@ -148,11 +150,110 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
         </div>
       )}
 
+      {/* contextual toolbar — appears for the selected element (on-canvas editing) */}
+      {editable && (
+        <div className="flex h-9 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900/90 px-2 text-slate-200 shadow-lg">
+          {selected === "subs" && (
+            <>
+              <TypeIcon size={14} className="text-slate-400" />
+              <button
+                onClick={() => onChange({ subtitles: { font_size: Math.max(12, subtitles.font_size - 2) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Minus size={13} />
+              </button>
+              <span className="w-7 text-center text-xs tabular-nums">{subtitles.font_size}</span>
+              <button
+                onClick={() => onChange({ subtitles: { font_size: Math.min(200, subtitles.font_size + 2) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Plus size={13} />
+              </button>
+              <div className="mx-1 h-5 w-px bg-slate-700" />
+              <label
+                className="relative h-6 w-6 cursor-pointer overflow-hidden rounded border border-slate-600"
+                title="Color del texto"
+                style={{ background: assToCss(subtitles.primary_color) }}
+              >
+                <input
+                  type="color"
+                  value={assToHex(subtitles.primary_color)}
+                  onChange={(e) => onChange({ subtitles: { primary_color: cssToAss(e.target.value) } })}
+                  className="absolute -inset-2 h-[200%] w-[200%] cursor-pointer opacity-0"
+                />
+              </label>
+              <label
+                className="relative h-6 w-6 cursor-pointer overflow-hidden rounded border border-slate-600"
+                title="Color de resalte"
+                style={{ background: assToCss(subtitles.secondary_color) }}
+              >
+                <input
+                  type="color"
+                  value={assToHex(subtitles.secondary_color)}
+                  onChange={(e) => onChange({ subtitles: { secondary_color: cssToAss(e.target.value) } })}
+                  className="absolute -inset-2 h-[200%] w-[200%] cursor-pointer opacity-0"
+                />
+              </label>
+            </>
+          )}
+          {selected === "logo" && branding && (
+            <>
+              <span className="px-1 text-[10px] uppercase tracking-wide text-slate-400">Logo</span>
+              <button
+                onClick={() => onChange({ branding: { scale: Math.max(0.02, (branding.scale ?? 0.1) - 0.02) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Minus size={13} />
+              </button>
+              <span className="w-9 text-center text-xs tabular-nums">{Math.round((branding.scale ?? 0.1) * 100)}%</span>
+              <button
+                onClick={() => onChange({ branding: { scale: Math.min(0.3, (branding.scale ?? 0.1) + 0.02) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Plus size={13} />
+              </button>
+              <div className="mx-1 h-5 w-px bg-slate-700" />
+              <span className="text-[10px] text-slate-400">opacidad</span>
+              <button
+                onClick={() => onChange({ branding: { opacity: Math.max(0, (branding.opacity ?? 1) - 0.1) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Minus size={13} />
+              </button>
+              <span className="w-9 text-center text-xs tabular-nums">{Math.round((branding.opacity ?? 1) * 100)}%</span>
+              <button
+                onClick={() => onChange({ branding: { opacity: Math.min(1, (branding.opacity ?? 1) + 0.1) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Plus size={13} />
+              </button>
+              <div className="mx-1 h-5 w-px bg-slate-700" />
+              <button
+                onClick={() => {
+                  onChange({ branding: { logo_path: null } });
+                  setSelected(null);
+                }}
+                className="rounded p-1 text-red-300 hover:bg-slate-800"
+                title="Quitar logo"
+              >
+                <Trash2 size={13} />
+              </button>
+            </>
+          )}
+          {!selected && (
+            <span className="px-1 text-[11px] text-slate-500">
+              Toca el subtítulo o el logo para editarlo aquí · arrástralo para moverlo
+            </span>
+          )}
+        </div>
+      )}
+
       <div
         ref={frameRef}
         onPointerMove={onPointerMove}
         onPointerUp={endDrag}
         onPointerLeave={endDrag}
+        onPointerDown={() => setSelected(null)}
         className="relative mx-auto overflow-hidden rounded-2xl border border-slate-700/70 bg-gradient-to-b from-slate-800 to-slate-900 shadow-2xl select-none"
         style={{ aspectRatio: "9 / 16", width: 300, touchAction: "none" }}
       >
@@ -265,8 +366,15 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
             src={TemplatesApi.assetUrl(branding.logo_path)}
             alt="logo"
             draggable={false}
-            onPointerDown={() => editable && setDragging("logo")}
-            className={`absolute z-30 object-contain ${editable ? "cursor-grab active:cursor-grabbing" : ""}`}
+            onPointerDown={(e) => {
+              if (!editable) return;
+              e.stopPropagation();
+              setSelected("logo");
+              setDragging("logo");
+            }}
+            className={`absolute z-30 object-contain ${editable ? "cursor-grab active:cursor-grabbing" : ""} ${
+              selected === "logo" ? "outline outline-2 outline-emerald-400/80 outline-offset-2" : ""
+            }`}
             style={
               dragging === "logo" && livePos
                 ? { left: `${livePos.xPct}%`, top: `${livePos.yPct}%`, transform: "translate(-50%,-50%)", width: `${(branding.scale ?? 0.1) * 100}%`, opacity: branding.opacity ?? 1 }
@@ -300,10 +408,15 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
         ) : (
           /* CAPTIONS view: the subtitle block */
           <div
-            onPointerDown={() => editable && setDragging("subs")}
+            onPointerDown={(e) => {
+              if (!editable) return;
+              e.stopPropagation();
+              setSelected("subs");
+              setDragging("subs");
+            }}
             className={`absolute z-20 flex flex-col items-center text-center leading-tight ${
               editable ? "cursor-grab active:cursor-grabbing" : ""
-            }`}
+            } ${selected === "subs" ? "rounded outline outline-2 outline-emerald-400/80 outline-offset-4" : ""}`}
             style={{
               ...subsStyle,
               fontFamily: `"${subtitles.font_name}", sans-serif`,
