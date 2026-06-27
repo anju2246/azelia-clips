@@ -26,6 +26,7 @@ import {
   type IntroTitleSpec,
   type BrandingSpec,
   type ProgressBarSpec,
+  type BumpersSpec,
 } from "../../lib/api";
 import { TemplatePreview } from "./TemplatePreview";
 import { TemplateChat } from "./TemplateChat";
@@ -48,7 +49,7 @@ const NAV: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "encuadre", label: "Encuadre", icon: Frame },
   { id: "animacion", label: "Animación", icon: Wand2 },
   { id: "hook", label: "Hook", icon: Megaphone },
-  { id: "marca", label: "Marca", icon: ImageIcon },
+  { id: "marca", label: "Extras", icon: ImageIcon },
   { id: "presets", label: "Presets", icon: LayoutGrid },
 ];
 
@@ -210,6 +211,27 @@ export const TemplateEditorModal: React.FC<Props> = ({
     }
   };
 
+  const bmp = (p: Partial<BumpersSpec>) => {
+    setSavedAt(false);
+    setDraft((d) => ({ ...d, bumpers: { ...(d.bumpers ?? {}), ...p } }));
+  };
+  const introInputRef = useRef<HTMLInputElement>(null);
+  const outroInputRef = useRef<HTMLInputElement>(null);
+  const handleBumperUpload =
+    (slot: "intro_path" | "outro_path") =>
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      e.target.value = "";
+      if (!file) return;
+      try {
+        const { path } = await TemplatesApi.uploadBumper(file);
+        bmp({ [slot]: path });
+        toast.success(slot === "intro_path" ? "Intro subido" : "Outro subido");
+      } catch (err) {
+        toast.error((err as Error).message);
+      }
+    };
+
   const handleSave = async () => {
     setSaving(true);
     try {
@@ -222,6 +244,7 @@ export const TemplateEditorModal: React.FC<Props> = ({
         intro_title: draft.intro_title ?? null,
         branding: draft.branding ?? null,
         progress_bar: draft.progress_bar ?? null,
+        bumpers: draft.bumpers ?? null,
       });
       setDraft(saved);
       setSavedAt(true);
@@ -678,6 +701,61 @@ export const TemplateEditorModal: React.FC<Props> = ({
                     </Row>
                   </>
                 )}
+
+                <div className="mt-2 border-t border-slate-800 pt-4">
+                  <h3 className="mb-1 text-sm font-semibold text-slate-200">
+                    Intro / Outro
+                  </h3>
+                  <p className="mb-3 text-xs text-slate-500">
+                    Clips que se concatenan antes y después (se normalizan a
+                    1080×1920).
+                  </p>
+                  <input
+                    ref={introInputRef}
+                    type="file"
+                    accept="video/mp4,video/quicktime,video/x-matroska"
+                    className="hidden"
+                    onChange={handleBumperUpload("intro_path")}
+                  />
+                  <input
+                    ref={outroInputRef}
+                    type="file"
+                    accept="video/mp4,video/quicktime,video/x-matroska"
+                    className="hidden"
+                    onChange={handleBumperUpload("outro_path")}
+                  />
+                  {(
+                    [
+                      ["intro_path", "Intro", introInputRef],
+                      ["outro_path", "Outro", outroInputRef],
+                    ] as const
+                  ).map(([slot, label, ref]) => (
+                    <div key={slot} className="mb-2 flex items-center gap-2">
+                      <button
+                        disabled={!editable}
+                        onClick={() => ref.current?.click()}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                      >
+                        {draft.bumpers?.[slot] ? `Cambiar ${label}` : `Subir ${label}`}
+                      </button>
+                      {draft.bumpers?.[slot] && (
+                        <>
+                          <span className="truncate font-mono text-[11px] text-slate-400">
+                            {draft.bumpers[slot]}
+                          </span>
+                          <button
+                            disabled={!editable}
+                            onClick={() => bmp({ [slot]: null })}
+                            className="rounded p-1 text-slate-400 hover:bg-slate-800 disabled:opacity-50"
+                            title={`Quitar ${label}`}
+                          >
+                            <X size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 

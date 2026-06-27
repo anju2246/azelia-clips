@@ -608,6 +608,11 @@ export const DEFAULT_PROGRESS_BAR: ProgressBarSpec = {
   position: "bottom",
 };
 
+export interface BumpersSpec {
+  intro_path?: string | null;
+  outro_path?: string | null;
+}
+
 export interface ClipTemplate {
   schema_version: number;
   id: string;
@@ -622,6 +627,7 @@ export interface ClipTemplate {
   intro_title?: IntroTitleSpec | null;
   branding?: BrandingSpec | null;
   progress_bar?: ProgressBarSpec | null;
+  bumpers?: BumpersSpec | null;
 }
 
 export interface CreateTemplateBody {
@@ -633,6 +639,7 @@ export interface CreateTemplateBody {
   intro_title?: IntroTitleSpec | null;
   branding?: BrandingSpec | null;
   progress_bar?: ProgressBarSpec | null;
+  bumpers?: BumpersSpec | null;
 }
 
 export const TemplatesApi = {
@@ -699,6 +706,17 @@ export const TemplatesApi = {
     const form = new FormData();
     form.append("file", file);
     return fetchApi<{ logo_path: string }>("/templates/branding/logo", {
+      method: "POST",
+      body: form,
+    });
+  },
+
+  /** Upload an intro/outro bumper video; returns its path relative to the
+   *  profile data dir (what BumpersSpec.*_path expects). */
+  uploadBumper: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetchApi<{ path: string }>("/templates/bumpers/upload", {
       method: "POST",
       body: form,
     });

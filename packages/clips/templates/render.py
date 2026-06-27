@@ -22,6 +22,7 @@ class RenderPlan:
     intro_title: object | None = None  # IntroTitleSpec | None (hook title, T13)
     branding: object | None = None  # BrandingSpec | None (logo overlay, T10)
     progress_bar: object | None = None  # ProgressBarSpec | None (T11)
+    bumpers: object | None = None  # BumpersSpec | None (intro/outro, T12)
 
 
 def template_to_style(template: ClipTemplate) -> SubtitleStyle:
@@ -59,4 +60,5 @@ def template_to_render_plan(template: ClipTemplate) -> RenderPlan:
         intro_title=getattr(template, "intro_title", None),
         branding=getattr(template, "branding", None),
         progress_bar=getattr(template, "progress_bar", None),
+        bumpers=getattr(template, "bumpers", None),
     )

@@ -274,3 +274,39 @@ def test_create_branding_rejects_absolute_path(client):
         json={"name": "Bad Brand", "branding": {"logo_path": "/etc/passwd"}},
     )
     assert r.status_code == 422
+
+
+def test_bumpers_roundtrip_and_upload(client):
+    """T12 — upload a bumper, reference it in a template; it persists."""
+    up = client.post(
+        "/api/templates/bumpers/upload",
+        files={"file": ("Intro Clip.mp4", io.BytesIO(b"\x00" * 64), "video/mp4")},
+    )
+    assert up.status_code == 200, up.text
+    rel = up.json()["path"]
+    assert rel.startswith("bumpers/") and rel.endswith(".mp4")
+
+    created = client.post(
+        "/api/templates",
+        json={"name": "Bumped", "bumpers": {"intro_path": rel}},
+    )
+    assert created.status_code == 201, created.text
+    got = client.get(f"/api/templates/{created.json()['id']}").json()
+    assert got["bumpers"]["intro_path"] == rel
+
+
+def test_bumper_upload_rejects_non_video(client):
+    r = client.post(
+        "/api/templates/bumpers/upload",
+        files={"file": ("x.txt", io.BytesIO(b"nope"), "text/plain")},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "VIDEO_INVALID"
+
+
+def test_create_bumpers_rejects_absolute_path(client):
+    r = client.post(
+        "/api/templates",
+        json={"name": "Bad Bump", "bumpers": {"intro_path": "/etc/passwd"}},
+    )
+    assert r.status_code == 422

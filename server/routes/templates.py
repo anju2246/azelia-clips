@@ -116,6 +116,7 @@ async def create_template(req: CreateTemplateRequest, user: User = Depends(requi
         intro_title=req.intro_title,
         branding=req.branding,
         progress_bar=req.progress_bar,
+        bumpers=req.bumpers,
     )
     return _store().create(template)
 
@@ -152,6 +153,11 @@ async def update_template(id: str, req: UpdateTemplateRequest, user: User = Depe
                 req.progress_bar
                 if "progress_bar" in req.model_fields_set
                 else existing.progress_bar
+            ),
+            "bumpers": (
+                req.bumpers
+                if "bumpers" in req.model_fields_set
+                else existing.bumpers
             ),
             "updated_at": datetime.now().isoformat(),
         }
@@ -224,6 +230,35 @@ async def upload_branding_logo(file: UploadFile = File(...), user: User = Depend
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_bytes(raw)
     return {"logo_path": str(rel)}
+
+
+_BUMPER_TYPES = {"video/mp4": ".mp4", "video/quicktime": ".mov", "video/x-matroska": ".mkv"}
+
+
+@router.post("/templates/bumpers/upload")
+async def upload_bumper(file: UploadFile = File(...), user: User = Depends(require_auth)):
+    """Store an intro/outro bumper under <data_dir>/bumpers and return its path
+    relative to the profile data dir (what BumpersSpec.*_path expects)."""
+    import re as _re
+
+    ext = _BUMPER_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "VIDEO_INVALID", "message": "Bumper no soportado (mp4/mov/mkv)"},
+        )
+    raw = await file.read()
+    if len(raw) > 200 * 1024 * 1024:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "VIDEO_INVALID", "message": "Bumper demasiado grande (≤ 200MB)"},
+        )
+    stem = _re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(file.filename or "bumper").stem)[:48] or "bumper"
+    rel = Path("bumpers") / f"{stem}{ext}"
+    dest = settings.data_dir / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(raw)
+    return {"path": str(rel)}
 
 
 @router.post("/templates/import", response_model=ImportTemplateResponse, status_code=201)
