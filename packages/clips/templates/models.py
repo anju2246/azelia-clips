@@ -47,15 +47,54 @@ class SubtitleSpec(BaseModel):
     words_per_line: int = Field(default=5, ge=1, le=10)
 
 
+class RegionSource(BaseModel):
+    """What fills a layout region.
+
+    ``active_speaker`` = a dynamic crop that follows whoever is talking (the
+    historical behavior). ``speaker`` = a crop locked to one labeled person
+    (for stacked multi-guest layouts). ``wide`` = the untracked 16:9 shot.
+    """
+
+    mode: Literal["active_speaker", "speaker", "wide"] = "active_speaker"
+    speaker_ref: Optional[str] = Field(default=None, max_length=60)
+    zoom: Optional[float] = Field(default=None, ge=0.4, le=1.0)
+
+
+class Region(BaseModel):
+    """A rectangle in the normalized (0..1) output frame, filled by a source."""
+
+    x: float = Field(default=0.0, ge=0.0, le=1.0)
+    y: float = Field(default=0.0, ge=0.0, le=1.0)
+    w: float = Field(default=1.0, gt=0.0, le=1.0)
+    h: float = Field(default=1.0, gt=0.0, le=1.0)
+    source: RegionSource = Field(default_factory=RegionSource)
+
+
 class LayoutSpec(BaseModel):
-    """Layout specification for clip composition."""
+    """Layout specification for clip composition.
+
+    ``split``/``fullscreen`` keep their dedicated meaning and code path (zero
+    regression). ``regions`` activates the generic multi-region compositor, used
+    for 2-guest stacked splits, grids, etc. (see ``layout.resolve_regions``).
+    """
 
     # Default reproduces the historical split layout exactly: a 608px wide shot
     # (true 16:9 at 1080px width) over a 1312px close-up.  608 / 1920 ≈ 0.3167.
-    type: Literal["split", "fullscreen"] = "split"
+    type: Literal["split", "fullscreen", "regions"] = "split"
     output_width: int = 1080
     output_height: int = 1920
     wide_height_ratio: float = Field(default=608 / 1920, ge=0.20, le=0.50)
+    # Only consulted when type == "regions". Each region maps a source onto a
+    # rect of the output frame.
+    regions: list[Region] = Field(default_factory=list)
+    fallback: Literal["fullscreen", "split"] = "fullscreen"
+
+    @field_validator("regions")
+    @classmethod
+    def _regions_present_for_regions_type(cls, v, info):
+        if info.data.get("type") == "regions" and not v:
+            raise ValueError("type='regions' requires at least one region")
+        return v
 
 
 class IntroTitleSpec(BaseModel):
