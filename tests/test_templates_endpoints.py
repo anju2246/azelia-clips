@@ -200,3 +200,38 @@ def test_create_and_get_roundtrips_intro_title(client):
     )
     assert put.status_code == 200
     assert put.json()["intro_title"] is None
+
+
+def test_import_v1_azt_endpoint_migrates_to_current(client):
+    """Regression (found in /verify): the import ENDPOINT — not just the store —
+    must accept a v1 .azt and migrate it forward, not reject it as unsupported."""
+    v1 = {
+        "schema_version": 1,
+        "id": "legacy",
+        "name": "Legacy v1",
+        "description": "",
+        "author": "",
+        "is_builtin": False,
+        "created_at": "2025-01-01T00:00:00",
+        "updated_at": "2025-01-01T00:00:00",
+        "subtitles": {
+            "font_name": "Arial", "font_size": 52,
+            "primary_color": "&H00FFFFFF", "secondary_color": "&H0000FFFF",
+            "outline_color": "&H00000000", "back_color": "&H80000000",
+            "bold": True, "outline": 3, "shadow": 2, "alignment": 2,
+            "margin_v": 50, "animation": "cumulative", "words_per_line": 5,
+        },
+        "layout": {
+            "type": "split", "output_width": 1080, "output_height": 1920,
+            "wide_height_ratio": 0.3167,
+        },
+    }
+    r = client.post(
+        "/api/templates/import",
+        files={"file": ("legacy.azt", io.BytesIO(json.dumps(v1).encode()), "application/json")},
+    )
+    assert r.status_code == 201, r.text
+    t = r.json()["template"]
+    assert t["schema_version"] == 2
+    assert t["is_builtin"] is False
+    assert t["intro_title"] is None

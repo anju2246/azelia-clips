@@ -14,7 +14,7 @@ from packages.clips.templates.builtins import get_builtin, list_builtins
 from packages.clips.templates.models import SCHEMA_VERSION, ClipTemplate
 
 # Versions we can load/import and migrate forward to SCHEMA_VERSION.
-_SUPPORTED_SCHEMA_VERSIONS = {1, 2}
+SUPPORTED_SCHEMA_VERSIONS = {1, 2}
 
 
 class TemplateNotFound(Exception):
@@ -164,7 +164,7 @@ class TemplateStore:
         # Accept the current version and any prior we can migrate forward. A v1
         # file just gets re-stamped to the current version — its missing v2
         # fields already took their (default-off) defaults during validation.
-        if template.schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
+        if template.schema_version not in SUPPORTED_SCHEMA_VERSIONS:
             raise TemplateInvalid(
                 f"Unsupported schema_version {template.schema_version}"
             )
