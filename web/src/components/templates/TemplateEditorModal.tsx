@@ -477,52 +477,6 @@ export const TemplateEditorModal: React.FC<Props> = ({
                     </p>
                   </Row>
                 )}
-
-                <div className="mt-2 border-t border-slate-800 pt-4">
-                  <Row label="Barra de progreso">
-                    <Toggle
-                      options={[
-                        { value: "off", label: "Off" },
-                        { value: "on", label: "On" },
-                      ]}
-                      value={draft.progress_bar?.enabled ? "on" : "off"}
-                      disabled={!editable}
-                      onChange={(v) => pbar({ enabled: v === "on" })}
-                    />
-                  </Row>
-                  {draft.progress_bar?.enabled && (
-                    <div className="mt-4 flex flex-col gap-4">
-                      <Row label="Color">
-                        <Swatch
-                          label="Barra"
-                          ass={draft.progress_bar.color}
-                          disabled={!editable}
-                          onChange={(c) => pbar({ color: c })}
-                        />
-                      </Row>
-                      <Row label="Alto" value={`${draft.progress_bar.height}px`}>
-                        <Slider
-                          min={2}
-                          max={40}
-                          value={draft.progress_bar.height}
-                          disabled={!editable}
-                          onChange={(v) => pbar({ height: v })}
-                        />
-                      </Row>
-                      <Row label="Borde">
-                        <Toggle
-                          options={[
-                            { value: "bottom", label: "Abajo" },
-                            { value: "top", label: "Arriba" },
-                          ]}
-                          value={draft.progress_bar.position}
-                          disabled={!editable}
-                          onChange={(v) => pbar({ position: v as ProgressBarSpec["position"] })}
-                        />
-                      </Row>
-                    </div>
-                  )}
-                </div>
               </div>
             )}
 
@@ -813,6 +767,52 @@ export const TemplateEditorModal: React.FC<Props> = ({
                     </div>
                   ))}
                 </div>
+
+                <div className="mt-2 border-t border-slate-800 pt-4">
+                  <Row label="Barra de progreso">
+                    <Toggle
+                      options={[
+                        { value: "off", label: "Off" },
+                        { value: "on", label: "On" },
+                      ]}
+                      value={draft.progress_bar?.enabled ? "on" : "off"}
+                      disabled={!editable}
+                      onChange={(v) => pbar({ enabled: v === "on" })}
+                    />
+                  </Row>
+                  {draft.progress_bar?.enabled && (
+                    <div className="mt-4 flex flex-col gap-4">
+                      <Row label="Color">
+                        <Swatch
+                          label="Barra"
+                          ass={draft.progress_bar.color}
+                          disabled={!editable}
+                          onChange={(c) => pbar({ color: c })}
+                        />
+                      </Row>
+                      <Row label="Alto" value={`${draft.progress_bar.height}px`}>
+                        <Slider
+                          min={2}
+                          max={40}
+                          value={draft.progress_bar.height}
+                          disabled={!editable}
+                          onChange={(v) => pbar({ height: v })}
+                        />
+                      </Row>
+                      <Row label="Borde">
+                        <Toggle
+                          options={[
+                            { value: "bottom", label: "Abajo" },
+                            { value: "top", label: "Arriba" },
+                          ]}
+                          value={draft.progress_bar.position}
+                          disabled={!editable}
+                          onChange={(v) => pbar({ position: v as ProgressBarSpec["position"] })}
+                        />
+                      </Row>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 
@@ -848,6 +848,7 @@ export const TemplateEditorModal: React.FC<Props> = ({
             onChange={(p) => {
               if (p.subtitles || p.layout) patch({ subtitles: p.subtitles, layout: p.layout });
               if (p.branding) brand(p.branding);
+              if (p.introTitle) intro(p.introTitle);
             }}
           />
         </div>
