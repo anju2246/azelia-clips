@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import {
   Upload,
   X,
@@ -7,11 +7,15 @@ import {
   HardDrive,
   Zap,
   Sliders,
+  LayoutTemplate,
 } from "lucide-react";
 import {
   ClipsApi,
+  TemplatesApi,
+  SettingsApi,
   type ProcessRequest,
   type ProcessLocalRequest,
+  type ClipTemplate,
 } from "../../lib/api";
 import {
   getPipelineDefaults,
@@ -67,6 +71,32 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
     ...getPipelineDefaults(),
     ...PRESETS.quick.config,
   }));
+
+  // Templates available for this profile. The selected template_id rides along
+  // in `config` so it reaches processVideo/processLocalVideo. Default comes from
+  // the profile's `default_template_id` (settings), so leaving it untouched
+  // reproduces the profile default — same behavior as before this selector.
+  const [templates, setTemplates] = useState<ClipTemplate[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    Promise.all([TemplatesApi.list(), SettingsApi.getSettings()])
+      .then(([list, settings]) => {
+        if (cancelled) return;
+        setTemplates(list.templates);
+        setConfig((prev) =>
+          prev.template_id
+            ? prev
+            : { ...prev, template_id: settings.default_template_id },
+        );
+      })
+      .catch(() => {
+        /* templates are optional UI — never block upload on a fetch error */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -253,6 +283,38 @@ export const UploadZone: React.FC<UploadZoneProps> = ({
               </div>
               <p className="text-xs text-zinc-500 mt-2 text-center">
                 {PRESETS[preset].blurb}
+              </p>
+            </div>
+
+            {/* Template selector — which visual style (subtitles + layout) to
+                render with. Defaults to the profile's default template. */}
+            <div className="w-full max-w-md mx-auto mb-6 text-left">
+              <label className="flex items-center gap-2 text-sm font-medium text-zinc-400 mb-2">
+                <LayoutTemplate className="w-4 h-4" /> Template
+              </label>
+              <select
+                value={config.template_id ?? ""}
+                onChange={(e) =>
+                  setConfig({ ...config, template_id: e.target.value })
+                }
+                className="w-full px-3 py-2.5 bg-black border border-zinc-800 rounded-lg text-sm focus:outline-none focus:border-brand-500 text-white cursor-pointer"
+              >
+                {templates.length === 0 && (
+                  <option value="">Default template</option>
+                )}
+                {templates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name}
+                    {t.is_builtin ? " (preset)" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-zinc-500 mt-1.5">
+                Manage templates in{" "}
+                <a href="/dashboard/templates" className="text-brand-400 hover:underline">
+                  Templates
+                </a>
+                .
               </p>
             </div>
 

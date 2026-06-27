@@ -51,7 +51,9 @@ def _resolve_template_or_422(template_store, template_id: str | None) -> str | N
     applied downstream). An unknown id raises HTTP 422 TEMPLATE_NOT_FOUND."""
     from packages.clips.templates.store import TemplateNotFound
 
-    if template_id is None:
+    # Empty/whitespace (e.g. an empty multipart field) means "use the profile
+    # default", same as omitting it — not an unknown template.
+    if template_id is None or not template_id.strip():
         return None
     try:
         template_store.get(template_id)
