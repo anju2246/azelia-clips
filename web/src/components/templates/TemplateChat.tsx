@@ -49,6 +49,21 @@ const prettyPath = (p: string): string => {
 
 const isAssColor = (v: unknown) => typeof v === "string" && /^&H[0-9A-Fa-f]{8}$/.test(v);
 
+// Human description of a layout (so a regions change reads as people, not JSON).
+function describeLayout(l: ClipTemplate["layout"]): string {
+  if (!l) return "—";
+  if (l.type === "fullscreen") return "Pantalla completa";
+  if (l.type === "split") return "1 invitado (close-up + plano abierto)";
+  const parts = (l.regions ?? []).map((r) =>
+    r.source.mode === "wide"
+      ? "Plano abierto"
+      : r.source.mode === "speaker"
+        ? r.source.speaker_ref || "Persona"
+        : "Quien habla",
+  );
+  return parts.length ? parts.join(" + ") : "Personalizado";
+}
+
 const ValueChip: React.FC<{ v: unknown }> = ({ v }) => {
   if (v === null || v === undefined || v === "") return <span className="text-slate-500">—</span>;
   if (typeof v === "boolean") return <span>{v ? "Sí" : "No"}</span>;
@@ -60,6 +75,7 @@ const ValueChip: React.FC<{ v: unknown }> = ({ v }) => {
       </span>
     );
   if (typeof v === "number") return <span>{Math.round(v * 100) / 100}</span>;
+  if (typeof v === "object") return <span className="text-slate-400">(varios)</span>;
   return <span className="truncate">{String(v)}</span>;
 };
 
@@ -178,28 +194,43 @@ export const TemplateChat: React.FC<Props> = ({ draft, onApply, visionAvailable 
         {/* Proposed change set — review then apply. */}
         {pending && (
           <div className="self-stretch rounded-lg border border-emerald-500/30 bg-slate-900/80 p-3">
-            {pending.changes.length > 0 ? (
-              <>
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
-                  Cambios propuestos
-                </p>
-                <ul className="flex flex-col gap-1.5">
-                  {pending.changes.map((c) => (
-                    <li key={c.path} className="flex items-center justify-between gap-2 text-xs">
-                      <span className="text-slate-300">{prettyPath(c.path)}</span>
-                      <span className="flex items-center gap-1.5 text-slate-400">
-                        <ValueChip v={c.old} /> <span className="text-slate-600">→</span>{" "}
+            {(() => {
+              // Collapse all layout.* changes into one friendly "Composición" row;
+              // raw region objects must never reach the user as [object Object].
+              const layoutChanged = pending.changes.some((c) => c.path.startsWith("layout"));
+              const rest = pending.changes.filter((c) => !c.path.startsWith("layout"));
+              const rows = rest.length + (layoutChanged ? 1 : 0);
+              if (rows === 0)
+                return <p className="text-xs text-slate-400">El asistente no propuso cambios.</p>;
+              return (
+                <>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                    Cambios propuestos
+                  </p>
+                  <ul className="flex flex-col gap-1.5">
+                    {layoutChanged && (
+                      <li className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-slate-300">Composición</span>
                         <span className="text-emerald-300">
-                          <ValueChip v={c.new} />
+                          {describeLayout(pending.template.layout)}
                         </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </>
-            ) : (
-              <p className="text-xs text-slate-400">El asistente no propuso cambios.</p>
-            )}
+                      </li>
+                    )}
+                    {rest.map((c) => (
+                      <li key={c.path} className="flex items-center justify-between gap-2 text-xs">
+                        <span className="text-slate-300">{prettyPath(c.path)}</span>
+                        <span className="flex items-center gap-1.5 text-slate-400">
+                          <ValueChip v={c.old} /> <span className="text-slate-600">→</span>{" "}
+                          <span className="text-emerald-300">
+                            <ValueChip v={c.new} />
+                          </span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              );
+            })()}
 
             {pending.unsupported.length > 0 && (
               <div className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/5 px-2 py-1.5 text-xs text-amber-300/90">
