@@ -31,7 +31,20 @@ import {
 } from "../../lib/api";
 import { TemplatePreview } from "./TemplatePreview";
 import { TemplateChat } from "./TemplateChat";
+import { LegoLayoutEditor } from "./LegoLayoutEditor";
 import { assToHex, cssToAss } from "./colors";
+
+// Mirror of layout.resolve_regions — turn any layout into an editable region list.
+function layoutToRegions(l: LayoutSpec) {
+  if (l.type === "regions") return l.regions ?? [];
+  if (l.type === "fullscreen")
+    return [{ x: 0, y: 0, w: 1, h: 1, source: { mode: "active_speaker" as const } }];
+  const wide = l.wide_height_ratio;
+  return [
+    { x: 0, y: 0, w: 1, h: 1 - wide, source: { mode: "active_speaker" as const } },
+    { x: 0, y: 1 - wide, w: 1, h: wide, source: { mode: "wide" as const, speaker_ref: null } },
+  ];
+}
 
 type Section = "texto" | "encuadre" | "animacion" | "hook" | "marca" | "presets";
 const ANIMATIONS = ["highlight", "karaoke", "box", "cumulative"] as const;
@@ -424,30 +437,26 @@ export const TemplateEditorModal: React.FC<Props> = ({
                   </p>
                 </Row>
 
+                {l.type !== "regions" && editable && (
+                  <button
+                    onClick={() => lay({ type: "regions", regions: layoutToRegions(l) })}
+                    className="self-start rounded-lg border border-slate-700 px-3 py-1.5 text-xs text-slate-300 hover:border-emerald-500/60 hover:text-white"
+                  >
+                    🧩 Personalizar layout (Lego)
+                  </button>
+                )}
+
                 {l.type === "regions" && (
-                  <Row label="Invitados (arriba / abajo)">
-                    <div className="flex flex-col gap-2">
-                      {(l.regions ?? []).slice(0, 2).map((r, i) => (
-                        <input
-                          key={i}
-                          value={r.source.speaker_ref ?? ""}
-                          disabled={!editable}
-                          onChange={(e) => {
-                            const regions = (l.regions ?? []).map((rg, j) =>
-                              j === i
-                                ? { ...rg, source: { ...rg.source, speaker_ref: e.target.value } }
-                                : rg,
-                            );
-                            lay({ regions });
-                          }}
-                          placeholder={i === 0 ? "Invitado de arriba" : "Invitado de abajo"}
-                          className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm disabled:opacity-50"
-                        />
-                      ))}
-                    </div>
+                  <Row label="Bloques del layout">
+                    <LegoLayoutEditor
+                      regions={l.regions ?? []}
+                      editable={editable}
+                      onChange={(regions) => lay({ regions })}
+                    />
                     <p className="mt-1 text-xs text-slate-500">
-                      Asignación automática por cara (izquierda→arriba). El render fija cada cara
-                      en su mitad.
+                      Apila bloques (quien habla / persona fija / plano abierto) y arrastra los
+                      bordes para redimensionar — el snap te lleva a proporciones limpias. Mostrar 2
+                      personas a la vez requiere que ambas caras estén en el video original.
                     </p>
                   </Row>
                 )}
