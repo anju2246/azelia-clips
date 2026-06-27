@@ -219,3 +219,105 @@ def test_chat_endpoint_no_provider_returns_503(client, monkeypatch):
     )
     assert r.status_code == 503
     assert r.json()["detail"]["error_code"] == "LLM_UNAVAILABLE"
+
+
+# ── T14: full-schema editing + change diff + unsupported signal ───────────────
+
+
+def test_edit_can_set_intro_title_via_chat():
+    """The assistant can now touch v2 fields (intro_title), not just subtitles/layout."""
+    from packages.clips.templates.ai_editor import edit
+
+    base = _tmpl()
+    resp = json.dumps({
+        "explanation": "Activé el título inicial",
+        "template": {
+            "subtitles": base.subtitles.model_dump(),
+            "layout": base.layout.model_dump(),
+            "intro_title": {
+                "enabled": True, "duration_s": 4.0, "font_name": "", "font_size": 72,
+                "color": "&H00FFFFFF", "outline_color": "&H00000000",
+                "position": "center", "box": True, "delay_captions": True,
+            },
+        },
+    })
+    out = edit(base, [{"role": "user", "content": "pon un título inicial"}], llm=FakeLLM([resp]))
+    assert out["template"].intro_title is not None
+    assert out["template"].intro_title.enabled is True
+
+
+def test_edit_returns_field_level_changes():
+    """edit() reports exactly which fields changed (old→new), computed server-side."""
+    from packages.clips.templates.ai_editor import edit
+
+    base = _tmpl()
+    resp = json.dumps({
+        "explanation": "Más grande y rojo",
+        "template": {
+            "subtitles": {**base.subtitles.model_dump(), "font_size": 80, "primary_color": "&H000000FF"},
+            "layout": base.layout.model_dump(),
+        },
+    })
+    out = edit(base, [{"role": "user", "content": "x"}], llm=FakeLLM([resp]))
+    changes = out["changes"]
+    by_path = {c["path"]: c for c in changes}
+    assert "subtitles.font_size" in by_path
+    assert by_path["subtitles.font_size"]["old"] == 52
+    assert by_path["subtitles.font_size"]["new"] == 80
+    assert "subtitles.primary_color" in by_path
+    # unchanged fields are NOT reported
+    assert "subtitles.bold" not in by_path
+
+
+def test_edit_passes_through_unsupported_requests():
+    """When the user asks for something the schema can't express, the model says so."""
+    from packages.clips.templates.ai_editor import edit
+
+    base = _tmpl()
+    resp = json.dumps({
+        "explanation": "Apliqué lo que pude",
+        "unsupported": ["header tipo tweet", "segundo invitado"],
+        "template": {"subtitles": base.subtitles.model_dump(), "layout": base.layout.model_dump()},
+    })
+    out = edit(base, [{"role": "user", "content": "header tweet + 2 invitados"}], llm=FakeLLM([resp]))
+    assert "header tipo tweet" in out["unsupported"]
+    assert "segundo invitado" in out["unsupported"]
+
+
+def test_edit_no_changes_returns_empty_diff():
+    from packages.clips.templates.ai_editor import edit
+
+    base = _tmpl()
+    resp = json.dumps({
+        "explanation": "Sin cambios",
+        "template": {"subtitles": base.subtitles.model_dump(), "layout": base.layout.model_dump()},
+    })
+    out = edit(base, [{"role": "user", "content": "x"}], llm=FakeLLM([resp]))
+    assert out["changes"] == []
+    assert out["unsupported"] == []
+
+
+def test_chat_endpoint_returns_changes_and_unsupported(client, monkeypatch):
+    """T14 — the HTTP layer surfaces the diff + unsupported list to the UI."""
+    import packages.clips.templates.ai_editor as ae
+
+    def fake_edit(template, messages, image_path=None, llm=None):
+        return {
+            "explanation": "más grande",
+            "template": template,
+            "provider_used": "fake",
+            "changes": [{"path": "subtitles.font_size", "old": 52, "new": 80}],
+            "unsupported": ["header tipo tweet"],
+        }
+
+    monkeypatch.setattr(ae, "edit", fake_edit)
+    template = client.get("/api/templates/splitscreen").json()
+    r = client.post(
+        "/api/templates/chat",
+        json={"template": template, "messages": [{"role": "user", "content": "más grande + tweet header"}]},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["changes"][0]["path"] == "subtitles.font_size"
+    assert body["changes"][0]["new"] == 80
+    assert body["unsupported"] == ["header tipo tweet"]

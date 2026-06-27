@@ -190,10 +190,20 @@ class TemplateChatRequest(BaseModel):
     image_b64: Optional[str] = None  # reference image (vision; T6)
 
 
+class TemplateChatChange(BaseModel):
+    path: str
+    old: object | None = None
+    new: object | None = None
+
+
 class TemplateChatResponse(BaseModel):
     explanation: str
     template: ClipTemplate
     provider_used: str = ""
+    # Field-level diff of what the assistant changed (path/old/new), and a list
+    # of requests it couldn't fulfill because no field supports them.
+    changes: list[TemplateChatChange] = []
+    unsupported: list[str] = []
 
 
 class ImportTemplateResponse(BaseModel):

@@ -678,14 +678,17 @@ export const TemplatesApi = {
     messages: { role: string; content: string }[];
     image_b64?: string | null;
   }) =>
-    fetchApi<{ explanation: string; template: ClipTemplate; provider_used: string }>(
-      "/templates/chat",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    ),
+    fetchApi<{
+      explanation: string;
+      template: ClipTemplate;
+      provider_used: string;
+      changes: { path: string; old: unknown; new: unknown }[];
+      unsupported: string[];
+    }>("/templates/chat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
 
   importFile: (file: File) => {
     const form = new FormData();

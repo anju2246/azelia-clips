@@ -14,7 +14,15 @@ import binascii
 import json
 import re
 
-from packages.clips.templates.models import ClipTemplate, LayoutSpec, SubtitleSpec
+from packages.clips.templates.models import (
+    BrandingSpec,
+    BumpersSpec,
+    ClipTemplate,
+    IntroTitleSpec,
+    LayoutSpec,
+    ProgressBarSpec,
+    SubtitleSpec,
+)
 from packages.core.llm_provider import get_llm, vision_available
 
 __all__ = [
@@ -71,18 +79,37 @@ _ALLOWED_ANIMATIONS = ["highlight", "karaoke", "box", "cumulative"]
 
 def build_system_prompt() -> str:
     return (
-        "Eres un asistente que edita TEMPLATES de subtítulos/clips. "
+        "Eres un asistente que edita TEMPLATES visuales de clips. "
         "Devuelves SIEMPRE y SOLO un objeto JSON con esta forma exacta:\n"
         '{"explanation": "<qué cambiaste, en una frase>", '
-        '"template": {"name": "...", "description": "...", '
-        '"subtitles": {<campos>}, "layout": {<campos>}}}\n\n'
-        "Campos de subtitles: font_name (str), font_size (12-200), "
-        "primary_color/secondary_color/outline_color/back_color (formato ASS '&HAABBGGRR'), "
-        "bold (bool), outline (0-10), shadow (0-10), alignment (1-9 numpad ASS), "
-        "margin_v (0-1920), animation (uno de: " + ", ".join(_ALLOWED_ANIMATIONS) + "), "
-        "words_per_line (1-10).\n"
-        "Campos de layout: type ('split' o 'fullscreen'), wide_height_ratio (0.20-0.50).\n"
-        "Respeta esos rangos. No inventes campos. No añadas texto fuera del JSON."
+        '"unsupported": ["<cada cosa que te pidieron y NO pudiste hacer porque no hay '
+        'campo para ello>"], '
+        '"template": {"name": "...", "description": "...", "subtitles": {...}, '
+        '"layout": {...}, "intro_title": {...}|null, "branding": {...}|null, '
+        '"progress_bar": {...}|null, "bumpers": {...}|null}}\n\n'
+        "CAMPOS EDITABLES (no inventes otros):\n"
+        "subtitles: font_name (str), font_size (12-200), "
+        "primary_color/secondary_color/outline_color/back_color (ASS '&HAABBGGRR'), "
+        "bold (bool), outline (0-10), shadow (0-10), alignment (1-9 numpad ASS: "
+        "1=abajo-izq 2=abajo-centro 3=abajo-der 4=medio-izq 5=centro 6=medio-der "
+        "7=arriba-izq 8=arriba-centro 9=arriba-der), margin_v (0-1920), "
+        "animation (" + ", ".join(_ALLOWED_ANIMATIONS) + "), words_per_line (1-10).\n"
+        "layout: type ('split'=closeup+plano abierto | 'fullscreen'), wide_height_ratio (0.20-0.50).\n"
+        "intro_title (título inicial / hook): enabled (bool), duration_s (1-8), "
+        "font_name, font_size (12-200), color/outline_color (ASS), "
+        "position ('top'|'center'|'bottom'), box (bool), delay_captions (bool). null = sin título.\n"
+        "branding (logo/marca de agua): logo_path (ruta; déjalo como está, no lo inventes), "
+        "position ('top-left'|'top-right'|'bottom-left'|'bottom-right'), scale (0.02-0.30), "
+        "opacity (0-1), margin (0-200). null = sin logo.\n"
+        "progress_bar: enabled (bool), color (ASS), height (2-40), position ('top'|'bottom'). null = sin barra.\n"
+        "bumpers (intro/outro): intro_path, outro_path (rutas; no las inventes). null = sin bumpers.\n\n"
+        "REGLAS:\n"
+        "- Cambia SOLO lo que el usuario pide; conserva el resto del template tal cual.\n"
+        "- Respeta los rangos/enums. No inventes valores de rutas (logo/bumpers).\n"
+        "- LO QUE NO PUEDAS HACER (p.ej. 'layout para 2 invitados', 'header/tweet superior', "
+        "'b-roll', 'emojis automáticos') va en 'unsupported' con palabras del usuario; NO lo "
+        "inventes ni lo fuerces en otro campo.\n"
+        "- No añadas texto fuera del JSON."
     )
 
 
@@ -110,8 +137,32 @@ def _extract_json(raw: str) -> dict:
     return json.loads(text[start : end + 1])
 
 
+def _opt(spec_cls, value, current):
+    """Coerce an optional nested spec: a dict → validated spec, explicit null →
+    None (disable), missing key → keep current."""
+    if value is None:
+        return None
+    if isinstance(value, dict):
+        return spec_cls(**value)
+    return current
+
+
+def _diff(old: dict, new: dict, prefix: str = "") -> list[dict]:
+    """Flat list of {path, old, new} for every leaf that changed."""
+    changes: list[dict] = []
+    keys = set(old or {}) | set(new or {})
+    for k in sorted(keys):
+        path = f"{prefix}{k}"
+        ov, nv = (old or {}).get(k), (new or {}).get(k)
+        if isinstance(ov, dict) or isinstance(nv, dict):
+            changes.extend(_diff(ov or {}, nv or {}, prefix=f"{path}."))
+        elif ov != nv:
+            changes.append({"path": path, "old": ov, "new": nv})
+    return changes
+
+
 def _coerce(raw: str, base: ClipTemplate) -> dict:
-    """Validate the model reply into {explanation, template}. Raises on bad data."""
+    """Validate the model reply into {explanation, template, changes, unsupported}."""
     data = _extract_json(raw)
     t = data.get("template")
     if not isinstance(t, dict):
@@ -119,6 +170,11 @@ def _coerce(raw: str, base: ClipTemplate) -> dict:
 
     subtitles = SubtitleSpec(**t["subtitles"]) if t.get("subtitles") else base.subtitles
     layout = LayoutSpec(**t["layout"]) if t.get("layout") else base.layout
+
+    # Optional v2 specs: present-and-dict → set, explicit null → disable,
+    # key absent → keep what the draft already had.
+    def field(key, cls):
+        return _opt(cls, t[key], getattr(base, key)) if key in t else getattr(base, key)
 
     # id / is_builtin / created_at are authoritative from the base, never the model.
     from datetime import datetime
@@ -129,10 +185,30 @@ def _coerce(raw: str, base: ClipTemplate) -> dict:
             "description": t.get("description", base.description),
             "subtitles": subtitles,
             "layout": layout,
+            "intro_title": field("intro_title", IntroTitleSpec),
+            "branding": field("branding", BrandingSpec),
+            "progress_bar": field("progress_bar", ProgressBarSpec),
+            "bumpers": field("bumpers", BumpersSpec),
             "updated_at": datetime.now().isoformat(),
         }
     )
-    return {"explanation": str(data.get("explanation", "")), "template": updated}
+
+    # Field-level diff (ignore the always-changing updated_at).
+    old_dump, new_dump = base.model_dump(), updated.model_dump()
+    old_dump.pop("updated_at", None)
+    new_dump.pop("updated_at", None)
+    changes = _diff(old_dump, new_dump)
+
+    unsupported = data.get("unsupported") or []
+    if not isinstance(unsupported, list):
+        unsupported = []
+
+    return {
+        "explanation": str(data.get("explanation", "")),
+        "template": updated,
+        "changes": changes,
+        "unsupported": [str(u) for u in unsupported],
+    }
 
 
 def edit(
