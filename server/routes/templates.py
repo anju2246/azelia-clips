@@ -115,6 +115,7 @@ async def create_template(req: CreateTemplateRequest, user: User = Depends(requi
         layout=req.layout or LayoutSpec(),
         intro_title=req.intro_title,
         branding=req.branding,
+        progress_bar=req.progress_bar,
     )
     return _store().create(template)
 
@@ -146,6 +147,11 @@ async def update_template(id: str, req: UpdateTemplateRequest, user: User = Depe
                 req.branding
                 if "branding" in req.model_fields_set
                 else existing.branding
+            ),
+            "progress_bar": (
+                req.progress_bar
+                if "progress_bar" in req.model_fields_set
+                else existing.progress_bar
             ),
             "updated_at": datetime.now().isoformat(),
         }

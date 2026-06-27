@@ -19,11 +19,13 @@ import {
   TemplatesApi,
   DEFAULT_INTRO_TITLE,
   DEFAULT_BRANDING,
+  DEFAULT_PROGRESS_BAR,
   type ClipTemplate,
   type SubtitleSpec,
   type LayoutSpec,
   type IntroTitleSpec,
   type BrandingSpec,
+  type ProgressBarSpec,
 } from "../../lib/api";
 import { TemplatePreview } from "./TemplatePreview";
 import { TemplateChat } from "./TemplateChat";
@@ -187,6 +189,13 @@ export const TemplateEditorModal: React.FC<Props> = ({
       branding: { ...(d.branding ?? DEFAULT_BRANDING), ...p },
     }));
   };
+  const pbar = (p: Partial<ProgressBarSpec>) => {
+    setSavedAt(false);
+    setDraft((d) => ({
+      ...d,
+      progress_bar: { ...(d.progress_bar ?? DEFAULT_PROGRESS_BAR), ...p },
+    }));
+  };
   const logoInputRef = useRef<HTMLInputElement>(null);
   const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -212,6 +221,7 @@ export const TemplateEditorModal: React.FC<Props> = ({
         layout: draft.layout,
         intro_title: draft.intro_title ?? null,
         branding: draft.branding ?? null,
+        progress_bar: draft.progress_bar ?? null,
       });
       setDraft(saved);
       setSavedAt(true);
@@ -387,6 +397,52 @@ export const TemplateEditorModal: React.FC<Props> = ({
                     </p>
                   </Row>
                 )}
+
+                <div className="mt-2 border-t border-slate-800 pt-4">
+                  <Row label="Barra de progreso">
+                    <Toggle
+                      options={[
+                        { value: "off", label: "Off" },
+                        { value: "on", label: "On" },
+                      ]}
+                      value={draft.progress_bar?.enabled ? "on" : "off"}
+                      disabled={!editable}
+                      onChange={(v) => pbar({ enabled: v === "on" })}
+                    />
+                  </Row>
+                  {draft.progress_bar?.enabled && (
+                    <div className="mt-4 flex flex-col gap-4">
+                      <Row label="Color">
+                        <Swatch
+                          label="Barra"
+                          ass={draft.progress_bar.color}
+                          disabled={!editable}
+                          onChange={(c) => pbar({ color: c })}
+                        />
+                      </Row>
+                      <Row label="Alto" value={`${draft.progress_bar.height}px`}>
+                        <Slider
+                          min={2}
+                          max={40}
+                          value={draft.progress_bar.height}
+                          disabled={!editable}
+                          onChange={(v) => pbar({ height: v })}
+                        />
+                      </Row>
+                      <Row label="Borde">
+                        <Toggle
+                          options={[
+                            { value: "bottom", label: "Abajo" },
+                            { value: "top", label: "Arriba" },
+                          ]}
+                          value={draft.progress_bar.position}
+                          disabled={!editable}
+                          onChange={(v) => pbar({ position: v as ProgressBarSpec["position"] })}
+                        />
+                      </Row>
+                    </div>
+                  )}
+                </div>
               </div>
             )}
 

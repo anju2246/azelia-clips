@@ -91,6 +91,15 @@ class BrandingSpec(BaseModel):
         return v
 
 
+class ProgressBarSpec(BaseModel):
+    """A bar that grows 0→100% across the clip (drawn with FFmpeg drawbox)."""
+
+    enabled: bool = False
+    color: str = Field(default="&H0000FFFF", pattern=r"^&H[0-9A-Fa-f]{8}$")
+    height: int = Field(default=12, ge=2, le=40)
+    position: Literal["top", "bottom"] = "bottom"
+
+
 class ClipTemplate(BaseModel):
     """A visual template for clip rendering."""
 
@@ -107,6 +116,7 @@ class ClipTemplate(BaseModel):
     # v2 optional render extensions (default-off → no-regression).
     intro_title: Optional[IntroTitleSpec] = None
     branding: Optional[BrandingSpec] = None
+    progress_bar: Optional[ProgressBarSpec] = None
 
     def to_azt_bytes(self) -> bytes:
         """Serialize to .azt JSON bytes."""

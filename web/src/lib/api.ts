@@ -594,6 +594,20 @@ export const DEFAULT_BRANDING: BrandingSpec = {
   margin: 40,
 };
 
+export interface ProgressBarSpec {
+  enabled: boolean;
+  color: string;
+  height: number;
+  position: "top" | "bottom";
+}
+
+export const DEFAULT_PROGRESS_BAR: ProgressBarSpec = {
+  enabled: true,
+  color: "&H0000FFFF",
+  height: 12,
+  position: "bottom",
+};
+
 export interface ClipTemplate {
   schema_version: number;
   id: string;
@@ -607,6 +621,7 @@ export interface ClipTemplate {
   layout: LayoutSpec;
   intro_title?: IntroTitleSpec | null;
   branding?: BrandingSpec | null;
+  progress_bar?: ProgressBarSpec | null;
 }
 
 export interface CreateTemplateBody {
@@ -617,6 +632,7 @@ export interface CreateTemplateBody {
   layout?: LayoutSpec;
   intro_title?: IntroTitleSpec | null;
   branding?: BrandingSpec | null;
+  progress_bar?: ProgressBarSpec | null;
 }
 
 export const TemplatesApi = {

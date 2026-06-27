@@ -414,7 +414,7 @@ dentro del `data_dir` del perfil (anti path-traversal).
 ---
 
 ## Task T11: Barra de progreso (drawbox time-based)  — **scope nuevo (firma)**
-**Status:** [ ]
+**Status:** [x]  — modelo + drawbox temporal + color ASS→FFmpeg + API + editor + tests. **Verificación visual pendiente**.
 **Complexity:** M
 **Dependencies:** T1, T3
 **Parallelizable with:** T10
