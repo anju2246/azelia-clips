@@ -379,7 +379,7 @@ qué fuentes están instaladas para no prometer lo que el render no honra.
 ---
 
 ## Task T10: Logo / marca de agua (branding overlay FFmpeg)  — **scope nuevo (firma)**
-**Status:** [ ]
+**Status:** [x]  — modelo + builder FFmpeg puro + API + upload de logo + editor + tests. **Verificación visual pendiente** (clip real).
 **Complexity:** M
 **Dependencies:** T1 (modelo), T3 (pipeline)
 **Parallelizable with:** T9, T11

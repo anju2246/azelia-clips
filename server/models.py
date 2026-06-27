@@ -10,6 +10,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field
 
 from packages.clips.templates.models import (
+    BrandingSpec,
     ClipTemplate,
     IntroTitleSpec,
     LayoutSpec,
@@ -151,6 +152,7 @@ class CreateTemplateRequest(BaseModel):
     subtitles: Optional[SubtitleSpec] = None
     layout: Optional[LayoutSpec] = None
     intro_title: Optional[IntroTitleSpec] = None
+    branding: Optional[BrandingSpec] = None
 
 
 class UpdateTemplateRequest(BaseModel):
@@ -164,6 +166,7 @@ class UpdateTemplateRequest(BaseModel):
     # Omitted → keep existing; sent as null → disable. (Handler checks
     # model_fields_set to tell "not sent" from "sent as null".)
     intro_title: Optional[IntroTitleSpec] = None
+    branding: Optional[BrandingSpec] = None
 
 
 class CloneTemplateRequest(BaseModel):

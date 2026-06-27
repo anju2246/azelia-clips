@@ -703,9 +703,15 @@ class BatchProcessor:
                     intro_title=plan.intro_title, clip_title=getattr(clip, "title", ""),
                 )
 
-                # 3e. Burn subtitles and save to the appropriate folder
+                # 3e. Burn subtitles (+ optional logo / progress bar) and save
                 final_path = target_folder / f"{clip_name}.mp4"
-                self._burn_subtitles(split_clip, subs_path, final_path)
+                self._burn_subtitles(
+                    split_clip, subs_path, final_path,
+                    branding=plan.branding,
+                    progress_bar=getattr(plan, "progress_bar", None),
+                    data_dir=settings.data_dir,
+                    duration=clip.end_time - clip.start_time,
+                )
 
                 # 3f. Save caption to text file
                 caption_path = target_folder / f"{clip_name}_caption.txt"
@@ -759,14 +765,19 @@ class BatchProcessor:
         except ImportError:
             return "ffmpeg"
 
-    def _burn_subtitles(self, video: Path, subs: Path, output: Path) -> None:
+    def _burn_subtitles(
+        self, video: Path, subs: Path, output: Path,
+        branding=None, progress_bar=None, data_dir=None, duration=None,
+    ) -> None:
         """Burn subtitles into video using FFmpeg with libass.
-        
+
         Uses the imageio-ffmpeg bundled binary from the venv (compiled with
         libass) to avoid issues with the default Homebrew FFmpeg which lacks
-        the ass/subtitles filters.
+        the ass/subtitles filters. Optionally overlays a branding logo (T10)
+        and a progress bar (T11) via the pure command builder.
         """
         import shutil, os, tempfile
+        from packages.clips.templates.ffmpeg_filters import build_burn_command
 
         ffmpeg_exe = self._get_ffmpeg_exe()
 
@@ -775,14 +786,11 @@ class BatchProcessor:
         os.close(fd)
         shutil.copy2(str(subs), safe_subs_str)
         try:
-            cmd = [
-                ffmpeg_exe, "-y",
-                "-i", str(video),
-                "-vf", f"ass={safe_subs_str}",
-                "-c:v", "libx264", "-preset", "fast", "-crf", "23",
-                "-c:a", "aac", "-b:a", "128k",
-                str(output)
-            ]
+            cmd = build_burn_command(
+                ffmpeg_exe, str(video), safe_subs_str, str(output),
+                branding=branding, progress_bar=progress_bar,
+                data_dir=data_dir, duration=duration,
+            )
             run_ffmpeg(cmd, timeout=300)
         finally:
             try:

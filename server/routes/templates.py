@@ -6,6 +6,7 @@ synthesized read-only presets. Domain exceptions map to the spec's HTTP codes.
 
 import json
 from datetime import datetime
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import Response
@@ -113,6 +114,7 @@ async def create_template(req: CreateTemplateRequest, user: User = Depends(requi
         subtitles=req.subtitles or SubtitleSpec(),
         layout=req.layout or LayoutSpec(),
         intro_title=req.intro_title,
+        branding=req.branding,
     )
     return _store().create(template)
 
@@ -139,6 +141,11 @@ async def update_template(id: str, req: UpdateTemplateRequest, user: User = Depe
                 req.intro_title
                 if "intro_title" in req.model_fields_set
                 else existing.intro_title
+            ),
+            "branding": (
+                req.branding
+                if "branding" in req.model_fields_set
+                else existing.branding
             ),
             "updated_at": datetime.now().isoformat(),
         }
@@ -182,6 +189,35 @@ async def export_template(id: str, user: User = Depends(require_auth)):
         media_type="application/json",
         headers={"Content-Disposition": f'attachment; filename="{id}.azt"'},
     )
+
+
+_LOGO_TYPES = {"image/png": ".png", "image/webp": ".webp", "image/jpeg": ".jpg"}
+
+
+@router.post("/templates/branding/logo")
+async def upload_branding_logo(file: UploadFile = File(...), user: User = Depends(require_auth)):
+    """Store a branding logo under <data_dir>/branding and return its path
+    relative to the profile data dir (what BrandingSpec.logo_path expects)."""
+    import re as _re
+
+    ext = _LOGO_TYPES.get(file.content_type or "")
+    if ext is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "IMAGE_INVALID", "message": "Logo no soportado (png/webp/jpeg)"},
+        )
+    raw = await file.read()
+    if len(raw) > 5 * 1024 * 1024:
+        raise HTTPException(
+            status_code=422,
+            detail={"error_code": "IMAGE_INVALID", "message": "Logo demasiado grande (≤ 5MB)"},
+        )
+    stem = _re.sub(r"[^a-zA-Z0-9_-]+", "-", Path(file.filename or "logo").stem)[:48] or "logo"
+    rel = Path("branding") / f"{stem}{ext}"
+    dest = settings.data_dir / rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_bytes(raw)
+    return {"logo_path": str(rel)}
 
 
 @router.post("/templates/import", response_model=ImportTemplateResponse, status_code=201)
