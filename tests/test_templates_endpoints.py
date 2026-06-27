@@ -35,6 +35,14 @@ def test_get_templates_includes_builtins_and_custom(client):
         assert by_id[slug]["is_builtin"] is True
 
 
+def test_get_installed_fonts_returns_list(client):
+    r = client.get("/api/templates/fonts")
+    assert r.status_code == 200
+    installed = r.json()["installed"]
+    assert isinstance(installed, list)
+    assert all(isinstance(f, str) for f in installed)
+
+
 # ── create ─────────────────────────────────────────────────────────────────
 
 

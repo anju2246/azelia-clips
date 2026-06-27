@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import toast from "react-hot-toast";
 import {
   Type,
@@ -134,6 +134,20 @@ export const TemplateEditorModal: React.FC<Props> = ({
   const [section, setSection] = useState<Section>("texto");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState(false);
+  // Lowercased set of fonts the machine actually has. The preview loads web
+  // fonts so it looks right, but the ASS render can only use installed fonts —
+  // so we flag a chosen font that isn't installed (it would be substituted).
+  const [installedFonts, setInstalledFonts] = useState<Set<string> | null>(null);
+
+  useEffect(() => {
+    TemplatesApi.fonts()
+      .then((r) => setInstalledFonts(new Set(r.installed.map((f) => f.toLowerCase()))))
+      .catch(() => setInstalledFonts(null));
+  }, []);
+
+  // null = unknown (fetch failed) → don't warn; otherwise exact membership.
+  const fontInstalled = (name: string) =>
+    installedFonts === null || installedFonts.has(name.trim().toLowerCase());
 
   const editable = !draft.is_builtin;
   const s = draft.subtitles;
@@ -163,6 +177,12 @@ export const TemplateEditorModal: React.FC<Props> = ({
       setDraft(saved);
       setSavedAt(true);
       onSaved(saved);
+      if (!fontInstalled(saved.subtitles.font_name)) {
+        toast(
+          `Guardado. Ojo: la fuente "${saved.subtitles.font_name}" no está instalada en esta máquina; el render usará una de reemplazo.`,
+          { icon: "⚠️", duration: 6000 },
+        );
+      }
     } catch (e) {
       toast.error((e as Error).message);
     } finally {
@@ -252,9 +272,15 @@ export const TemplateEditorModal: React.FC<Props> = ({
                     {[...new Set([s.font_name, ...FONTS])].map((f) => (
                       <option key={f} value={f}>
                         {f}
+                        {fontInstalled(f) ? "" : " — no instalada"}
                       </option>
                     ))}
                   </select>
+                  {!fontInstalled(s.font_name) && (
+                    <p className="text-xs text-amber-400/90">
+                      No instalada en esta máquina; el render usará una de reemplazo.
+                    </p>
+                  )}
                 </Row>
                 <Row label="Tamaño" value={`${s.font_size}px`}>
                   <Slider min={12} max={200} value={s.font_size} disabled={!editable} onChange={(v) => subs({ font_size: v })} />

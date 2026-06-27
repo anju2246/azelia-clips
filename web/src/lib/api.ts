@@ -628,6 +628,10 @@ export const TemplatesApi = {
       { method: "POST", body: form },
     );
   },
+
+  /** Font families installed on this machine (the ASS render can only honor
+   *  these). Lets the editor flag a chosen font the render would substitute. */
+  fonts: () => fetchApi<{ installed: string[] }>("/templates/fonts"),
 };
 
 // --- INTELLIGENCE & ANALYTICS API ---

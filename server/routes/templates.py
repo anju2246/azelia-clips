@@ -5,8 +5,6 @@ synthesized read-only presets. Domain exceptions map to the spec's HTTP codes.
 """
 
 import json
-import shutil
-import subprocess
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -67,23 +65,29 @@ def _read_only(id: str) -> HTTPException:
 def _font_installed(name: str) -> bool:
     """Best-effort: True if a font matching `name` is installed.
 
-    Uses fontconfig (`fc-list`) when available; if we can't determine it, assume
-    installed so we don't warn spuriously. Non-fatal either way.
+    Delegates to the canonical detector (fontconfig + font-dir fallback). If the
+    machine yields no font list at all, assume installed so we don't warn
+    spuriously. Non-fatal either way.
     """
-    fc = shutil.which("fc-list")
-    if not fc:
+    from packages.clips.templates.fonts import is_font_installed, list_installed_fonts
+
+    if not list_installed_fonts():
         return True  # can't tell → don't cry wolf
-    try:
-        out = subprocess.run([fc, ":family"], capture_output=True, text=True, timeout=5)
-        families = out.stdout.lower()
-        return name.split()[0].lower() in families
-    except (subprocess.SubprocessError, OSError):
-        return True
+    return is_font_installed(name)
 
 
 @router.get("/templates", response_model=TemplateListResponse)
 async def list_templates(user: User = Depends(require_auth)):
     return TemplateListResponse(templates=_store().list_all())
+
+
+@router.get("/templates/fonts")
+async def installed_fonts(user: User = Depends(require_auth)):
+    """Font families installed on this machine, so the editor can flag a chosen
+    font the ASS render won't actually honor (it would silently substitute)."""
+    from packages.clips.templates.fonts import list_installed_fonts
+
+    return {"installed": list(list_installed_fonts())}
 
 
 @router.get("/templates/{id}", response_model=ClipTemplate)
