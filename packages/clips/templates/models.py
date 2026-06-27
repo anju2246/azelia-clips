@@ -1,7 +1,8 @@
 """Domain models for clip templates."""
 
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal, Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # v2 adds optional, default-off render extensions (intro title, branding,
@@ -60,6 +61,36 @@ class IntroTitleSpec(BaseModel):
     delay_captions: bool = True
 
 
+class BrandingSpec(BaseModel):
+    """A logo / watermark overlaid on the clip via FFmpeg.
+
+    ``logo_path`` is stored RELATIVE to the profile data dir so a template stays
+    portable and can never reference a file outside the profile. Absolute or
+    parent-traversing paths are rejected at validation.
+    """
+
+    logo_path: Optional[str] = None
+    position: Literal["top-left", "top-right", "bottom-left", "bottom-right"] = "top-right"
+    # Logo width as a fraction of the 1080px output width.
+    scale: float = Field(default=0.10, ge=0.02, le=0.30)
+    opacity: float = Field(default=1.0, ge=0.0, le=1.0)
+    margin: int = Field(default=40, ge=0, le=200)
+
+    @field_validator("logo_path")
+    @classmethod
+    def _relative_inside_profile(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return None
+        v = v.strip()
+        if not v:
+            return None
+        if PurePosixPath(v).is_absolute() or PureWindowsPath(v).is_absolute():
+            raise ValueError("logo_path must be relative to the profile data dir")
+        if ".." in PurePosixPath(v).parts:
+            raise ValueError("logo_path must not traverse outside the profile data dir")
+        return v
+
+
 class ClipTemplate(BaseModel):
     """A visual template for clip rendering."""
 
@@ -75,6 +106,7 @@ class ClipTemplate(BaseModel):
     layout: LayoutSpec
     # v2 optional render extensions (default-off → no-regression).
     intro_title: Optional[IntroTitleSpec] = None
+    branding: Optional[BrandingSpec] = None
 
     def to_azt_bytes(self) -> bytes:
         """Serialize to .azt JSON bytes."""

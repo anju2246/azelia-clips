@@ -578,6 +578,22 @@ export const DEFAULT_INTRO_TITLE: IntroTitleSpec = {
   delay_captions: true,
 };
 
+export interface BrandingSpec {
+  logo_path?: string | null;
+  position: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  scale: number;
+  opacity: number;
+  margin: number;
+}
+
+export const DEFAULT_BRANDING: BrandingSpec = {
+  logo_path: null,
+  position: "top-right",
+  scale: 0.1,
+  opacity: 1,
+  margin: 40,
+};
+
 export interface ClipTemplate {
   schema_version: number;
   id: string;
@@ -590,6 +606,7 @@ export interface ClipTemplate {
   subtitles: SubtitleSpec;
   layout: LayoutSpec;
   intro_title?: IntroTitleSpec | null;
+  branding?: BrandingSpec | null;
 }
 
 export interface CreateTemplateBody {
@@ -599,6 +616,7 @@ export interface CreateTemplateBody {
   subtitles?: SubtitleSpec;
   layout?: LayoutSpec;
   intro_title?: IntroTitleSpec | null;
+  branding?: BrandingSpec | null;
 }
 
 export const TemplatesApi = {
@@ -658,6 +676,17 @@ export const TemplatesApi = {
   /** Font families installed on this machine (the ASS render can only honor
    *  these). Lets the editor flag a chosen font the render would substitute. */
   fonts: () => fetchApi<{ installed: string[] }>("/templates/fonts"),
+
+  /** Upload a branding logo; returns its path relative to the profile data dir
+   *  (what BrandingSpec.logo_path expects). */
+  uploadLogo: (file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return fetchApi<{ logo_path: string }>("/templates/branding/logo", {
+      method: "POST",
+      body: form,
+    });
+  },
 };
 
 // --- INTELLIGENCE & ANALYTICS API ---

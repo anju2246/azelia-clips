@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import toast from "react-hot-toast";
 import {
   Type,
@@ -13,20 +13,23 @@ import {
   Minus,
   Plus,
   Megaphone,
+  Image as ImageIcon,
 } from "lucide-react";
 import {
   TemplatesApi,
   DEFAULT_INTRO_TITLE,
+  DEFAULT_BRANDING,
   type ClipTemplate,
   type SubtitleSpec,
   type LayoutSpec,
   type IntroTitleSpec,
+  type BrandingSpec,
 } from "../../lib/api";
 import { TemplatePreview } from "./TemplatePreview";
 import { TemplateChat } from "./TemplateChat";
 import { assToHex, cssToAss } from "./colors";
 
-type Section = "texto" | "encuadre" | "animacion" | "hook" | "presets";
+type Section = "texto" | "encuadre" | "animacion" | "hook" | "marca" | "presets";
 const ANIMATIONS = ["highlight", "karaoke", "box", "cumulative"] as const;
 const FONTS = ["Montserrat", "Anton", "Bebas Neue", "Impact", "Inter", "Poppins", "Oswald"];
 
@@ -43,6 +46,7 @@ const NAV: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "encuadre", label: "Encuadre", icon: Frame },
   { id: "animacion", label: "Animación", icon: Wand2 },
   { id: "hook", label: "Hook", icon: Megaphone },
+  { id: "marca", label: "Marca", icon: ImageIcon },
   { id: "presets", label: "Presets", icon: LayoutGrid },
 ];
 
@@ -176,6 +180,26 @@ export const TemplateEditorModal: React.FC<Props> = ({
       intro_title: { ...(d.intro_title ?? DEFAULT_INTRO_TITLE), ...p },
     }));
   };
+  const brand = (p: Partial<BrandingSpec>) => {
+    setSavedAt(false);
+    setDraft((d) => ({
+      ...d,
+      branding: { ...(d.branding ?? DEFAULT_BRANDING), ...p },
+    }));
+  };
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    try {
+      const { logo_path } = await TemplatesApi.uploadLogo(file);
+      brand({ logo_path });
+      toast.success("Logo subido");
+    } catch (err) {
+      toast.error((err as Error).message);
+    }
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -187,6 +211,7 @@ export const TemplateEditorModal: React.FC<Props> = ({
         subtitles: draft.subtitles,
         layout: draft.layout,
         intro_title: draft.intro_title ?? null,
+        branding: draft.branding ?? null,
       });
       setDraft(saved);
       setSavedAt(true);
@@ -484,6 +509,116 @@ export const TemplateEditorModal: React.FC<Props> = ({
                         Si está activo, los subtítulos no aparecen hasta que
                         termina el título.
                       </p>
+                    </Row>
+                  </>
+                )}
+              </div>
+            )}
+
+            {section === "marca" && (
+              <div className="flex flex-col gap-5">
+                <h3 className="text-sm font-semibold text-slate-200">
+                  Logo / marca de agua
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Superpone tu logo en una esquina del clip. PNG con transparencia
+                  recomendado.
+                </p>
+                <input
+                  ref={logoInputRef}
+                  type="file"
+                  accept="image/png,image/webp,image/jpeg"
+                  className="hidden"
+                  onChange={handleLogoUpload}
+                />
+                <Row label="Logo">
+                  <div className="flex items-center gap-2">
+                    <button
+                      disabled={!editable}
+                      onClick={() => logoInputRef.current?.click()}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 px-3 py-2 text-sm hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      <ImageIcon size={14} />
+                      {draft.branding?.logo_path ? "Cambiar logo" : "Subir logo"}
+                    </button>
+                    {draft.branding?.logo_path && (
+                      <>
+                        <span className="truncate font-mono text-[11px] text-slate-400">
+                          {draft.branding.logo_path}
+                        </span>
+                        <button
+                          disabled={!editable}
+                          onClick={() => brand({ logo_path: null })}
+                          className="rounded p-1 text-slate-400 hover:bg-slate-800 disabled:opacity-50"
+                          title="Quitar logo"
+                        >
+                          <X size={14} />
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </Row>
+                {draft.branding?.logo_path && (
+                  <>
+                    <Row label="Posición">
+                      <div className="grid grid-cols-2 gap-1 rounded-lg bg-slate-800/70 p-1">
+                        {(
+                          [
+                            ["top-left", "Arriba izq."],
+                            ["top-right", "Arriba der."],
+                            ["bottom-left", "Abajo izq."],
+                            ["bottom-right", "Abajo der."],
+                          ] as const
+                        ).map(([pos, label]) => (
+                          <button
+                            key={pos}
+                            disabled={!editable}
+                            onClick={() => brand({ position: pos })}
+                            className={`rounded-md py-1.5 text-xs font-medium transition ${
+                              draft.branding?.position === pos
+                                ? "bg-emerald-500 text-white"
+                                : "text-slate-300 hover:bg-slate-700/60"
+                            } disabled:opacity-50`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </Row>
+                    <Row
+                      label="Tamaño"
+                      value={`${Math.round((draft.branding.scale ?? 0.1) * 100)}% del ancho`}
+                    >
+                      <Slider
+                        min={0.02}
+                        max={0.3}
+                        step={0.01}
+                        value={draft.branding.scale}
+                        disabled={!editable}
+                        onChange={(v) => brand({ scale: v })}
+                      />
+                    </Row>
+                    <Row
+                      label="Opacidad"
+                      value={`${Math.round((draft.branding.opacity ?? 1) * 100)}%`}
+                    >
+                      <Slider
+                        min={0}
+                        max={1}
+                        step={0.05}
+                        value={draft.branding.opacity}
+                        disabled={!editable}
+                        onChange={(v) => brand({ opacity: v })}
+                      />
+                    </Row>
+                    <Row label="Margen" value={`${draft.branding.margin}px`}>
+                      <Slider
+                        min={0}
+                        max={200}
+                        value={draft.branding.margin}
+                        disabled={!editable}
+                        onChange={(v) => brand({ margin: v })}
+                      />
                     </Row>
                   </>
                 )}

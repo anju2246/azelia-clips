@@ -20,6 +20,7 @@ class RenderPlan:
     layout_type: str
     wide_height_ratio: float
     intro_title: object | None = None  # IntroTitleSpec | None (hook title, T13)
+    branding: object | None = None  # BrandingSpec | None (logo overlay, T10)
 
 
 def template_to_style(template: ClipTemplate) -> SubtitleStyle:
@@ -55,4 +56,5 @@ def template_to_render_plan(template: ClipTemplate) -> RenderPlan:
         layout_type=template.layout.type,
         wide_height_ratio=template.layout.wide_height_ratio,
         intro_title=getattr(template, "intro_title", None),
+        branding=getattr(template, "branding", None),
     )

@@ -235,3 +235,42 @@ def test_import_v1_azt_endpoint_migrates_to_current(client):
     assert t["schema_version"] == 2
     assert t["is_builtin"] is False
     assert t["intro_title"] is None
+
+
+def test_branding_roundtrip_and_logo_upload(client):
+    """T10 — upload a logo, then create a template referencing it; it persists."""
+    # 1×1 PNG (smallest valid-ish header is enough; endpoint checks type/size)
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    up = client.post(
+        "/api/templates/branding/logo",
+        files={"file": ("My Brand!.png", io.BytesIO(png), "image/png")},
+    )
+    assert up.status_code == 200, up.text
+    rel = up.json()["logo_path"]
+    assert rel.startswith("branding/") and rel.endswith(".png")
+
+    created = client.post(
+        "/api/templates",
+        json={"name": "Branded", "branding": {"logo_path": rel, "position": "bottom-right", "scale": 0.12}},
+    )
+    assert created.status_code == 201, created.text
+    got = client.get(f"/api/templates/{created.json()['id']}").json()
+    assert got["branding"]["logo_path"] == rel
+    assert got["branding"]["position"] == "bottom-right"
+
+
+def test_branding_logo_rejects_non_image(client):
+    r = client.post(
+        "/api/templates/branding/logo",
+        files={"file": ("x.txt", io.BytesIO(b"nope"), "text/plain")},
+    )
+    assert r.status_code == 422
+    assert r.json()["detail"]["error_code"] == "IMAGE_INVALID"
+
+
+def test_create_branding_rejects_absolute_path(client):
+    r = client.post(
+        "/api/templates",
+        json={"name": "Bad Brand", "branding": {"logo_path": "/etc/passwd"}},
+    )
+    assert r.status_code == 422
