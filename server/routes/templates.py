@@ -18,6 +18,7 @@ from packages.clips.templates.models import (
     SubtitleSpec,
 )
 from packages.clips.templates.store import (
+    SUPPORTED_SCHEMA_VERSIONS,
     TemplateNotFound,
     TemplateReadOnly,
     TemplateStore,
@@ -195,7 +196,7 @@ async def import_template(file: UploadFile = File(...), user: User = Depends(req
             detail={"error_code": "IMPORT_PARSE_ERROR", "message": "El archivo no es un .azt válido"},
         )
 
-    if not isinstance(data, dict) or data.get("schema_version") != SCHEMA_VERSION:
+    if not isinstance(data, dict) or data.get("schema_version") not in SUPPORTED_SCHEMA_VERSIONS:
         raise HTTPException(
             status_code=422,
             detail={"error_code": "IMPORT_VERSION_UNSUPPORTED", "message": "Versión de formato no soportada"},
@@ -209,8 +210,11 @@ async def import_template(file: UploadFile = File(...), user: User = Depends(req
             detail={"error_code": "IMPORT_PARSE_ERROR", "message": "El .azt no respeta el esquema"},
         )
 
-    # Never trust the file's id/is_builtin; create() reassigns/disambiguates the slug.
-    created = _store().create(template.model_copy(update={"is_builtin": False}))
+    # Never trust the file's id/is_builtin; create() reassigns/disambiguates the
+    # slug. Re-stamp the schema so an imported v1 file is migrated forward.
+    created = _store().create(
+        template.model_copy(update={"is_builtin": False, "schema_version": SCHEMA_VERSION})
+    )
 
     warnings: list[str] = []
     if not _font_installed(created.subtitles.font_name):
