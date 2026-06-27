@@ -239,6 +239,8 @@ Extiende la capa LLM con capacidad de visión, usada por F3 cuando `image_b64 !=
 
 # v2 Extensions — Conectar + Ampliar el techo (T8–T13)
 
+> **Status: Approved** (firmado por JuanPa 2026-06-27). Orden de build: T9 → T13 → T10 → T11 → T12.
+>
 > **schema_version pasa de 1 → 2.** Todos los campos nuevos son **opcionales** y su default
 > equivale a **desactivado** (`None`/`enabled=false`), de modo que: (a) un `.azt` v1 se carga sin
 > cambios (los campos nuevos toman su default), (b) la **no-regresión** se mantiene — sin tocar nada,

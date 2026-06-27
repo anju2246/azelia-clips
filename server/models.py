@@ -9,7 +9,12 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
-from packages.clips.templates.models import ClipTemplate, LayoutSpec, SubtitleSpec
+from packages.clips.templates.models import (
+    ClipTemplate,
+    IntroTitleSpec,
+    LayoutSpec,
+    SubtitleSpec,
+)
 
 
 class JobStatus(str, Enum):
@@ -145,6 +150,7 @@ class CreateTemplateRequest(BaseModel):
     author: str = Field(default="", max_length=60)
     subtitles: Optional[SubtitleSpec] = None
     layout: Optional[LayoutSpec] = None
+    intro_title: Optional[IntroTitleSpec] = None
 
 
 class UpdateTemplateRequest(BaseModel):
@@ -155,6 +161,9 @@ class UpdateTemplateRequest(BaseModel):
     author: str = Field(default="", max_length=60)
     subtitles: Optional[SubtitleSpec] = None
     layout: Optional[LayoutSpec] = None
+    # Omitted → keep existing; sent as null → disable. (Handler checks
+    # model_fields_set to tell "not sent" from "sent as null".)
+    intro_title: Optional[IntroTitleSpec] = None
 
 
 class CloneTemplateRequest(BaseModel):

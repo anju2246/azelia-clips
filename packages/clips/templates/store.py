@@ -13,6 +13,9 @@ from pydantic import ValidationError
 from packages.clips.templates.builtins import get_builtin, list_builtins
 from packages.clips.templates.models import SCHEMA_VERSION, ClipTemplate
 
+# Versions we can load/import and migrate forward to SCHEMA_VERSION.
+_SUPPORTED_SCHEMA_VERSIONS = {1, 2}
+
 
 class TemplateNotFound(Exception):
     """Template does not exist."""
@@ -158,9 +161,14 @@ class TemplateStore:
             template = ClipTemplate.from_azt_bytes(data)
         except ValidationError as e:
             raise TemplateInvalid(str(e)) from e
-        if template.schema_version != SCHEMA_VERSION:
+        # Accept the current version and any prior we can migrate forward. A v1
+        # file just gets re-stamped to the current version — its missing v2
+        # fields already took their (default-off) defaults during validation.
+        if template.schema_version not in _SUPPORTED_SCHEMA_VERSIONS:
             raise TemplateInvalid(
                 f"Unsupported schema_version {template.schema_version}"
             )
-        forced = template.model_copy(update={"is_builtin": False})
+        forced = template.model_copy(
+            update={"is_builtin": False, "schema_version": SCHEMA_VERSION}
+        )
         return self.create(forced)

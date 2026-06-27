@@ -203,3 +203,30 @@ def test_store_slug_disambiguation_stays_within_48_chars(tmp_path):
     assert first.id == max_id
     assert len(second.id) <= 48
     assert second.id != first.id
+
+
+# ── v1 → v2 schema migration (T13 backward-compat) ───────────────────────────
+
+
+def test_import_v1_azt_migrates_to_current_schema(tmp_path):
+    """A v1 .azt (no intro_title) imports fine and is re-stamped to v2."""
+    import json as _json
+    from packages.clips.templates.models import SCHEMA_VERSION
+
+    store = TemplateStore(tmp_path)
+    v1 = {
+        "schema_version": 1,
+        "id": "legacy",
+        "name": "Legacy",
+        "description": "",
+        "author": "",
+        "is_builtin": False,
+        "created_at": "2025-01-01T00:00:00",
+        "updated_at": "2025-01-01T00:00:00",
+        "subtitles": SubtitleSpec().model_dump(),
+        "layout": LayoutSpec().model_dump(),
+    }
+    imported = store.import_bytes(_json.dumps(v1).encode())
+    assert imported.schema_version == SCHEMA_VERSION
+    assert imported.intro_title is None
+    assert imported.is_builtin is False

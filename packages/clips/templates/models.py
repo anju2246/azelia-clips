@@ -1,10 +1,13 @@
 """Domain models for clip templates."""
 
-from typing import Literal
+from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-SCHEMA_VERSION = 1
+# v2 adds optional, default-off render extensions (intro title, branding,
+# progress bar, bumpers). A v1 .azt still loads: the new fields take their
+# defaults, so behavior is unchanged unless explicitly enabled.
+SCHEMA_VERSION = 2
 
 
 class SubtitleSpec(BaseModel):
@@ -36,6 +39,27 @@ class LayoutSpec(BaseModel):
     wide_height_ratio: float = Field(default=608 / 1920, ge=0.20, le=0.50)
 
 
+class IntroTitleSpec(BaseModel):
+    """A title card shown on screen for the first N seconds of the clip.
+
+    The text is NOT stored here — it comes from the clip's curated title at
+    render time. This spec only controls how/where/how long it shows.
+    """
+
+    enabled: bool = False
+    duration_s: float = Field(default=4.0, ge=1.0, le=8.0)
+    # Empty font_name inherits the subtitle font at render time.
+    font_name: str = Field(default="", max_length=60)
+    font_size: int = Field(default=72, ge=12, le=200)
+    color: str = Field(default="&H00FFFFFF", pattern=r"^&H[0-9A-Fa-f]{8}$")
+    outline_color: str = Field(default="&H00000000", pattern=r"^&H[0-9A-Fa-f]{8}$")
+    position: Literal["top", "center", "bottom"] = "center"
+    box: bool = True
+    # When true, word captions are held until the title finishes (the title
+    # shows BEFORE the captions). When false, captions run under the title.
+    delay_captions: bool = True
+
+
 class ClipTemplate(BaseModel):
     """A visual template for clip rendering."""
 
@@ -49,6 +73,8 @@ class ClipTemplate(BaseModel):
     updated_at: str
     subtitles: SubtitleSpec
     layout: LayoutSpec
+    # v2 optional render extensions (default-off → no-regression).
+    intro_title: Optional[IntroTitleSpec] = None
 
     def to_azt_bytes(self) -> bytes:
         """Serialize to .azt JSON bytes."""

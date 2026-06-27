@@ -700,6 +700,7 @@ class BatchProcessor:
                 generator.generate_word_by_word(
                     clip_transcript, str(subs_path),
                     words_per_line=plan.words_per_line, animation=plan.animation,
+                    intro_title=plan.intro_title, clip_title=getattr(clip, "title", ""),
                 )
 
                 # 3e. Burn subtitles and save to the appropriate folder

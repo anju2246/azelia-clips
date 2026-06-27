@@ -168,3 +168,35 @@ def test_import_missing_font_returns_warning_not_error(client, monkeypatch):
     )
     assert r.status_code == 201
     assert "FONT_NOT_INSTALLED" in r.json()["warnings"]
+
+
+def test_create_and_get_roundtrips_intro_title(client):
+    """T13 — intro_title persists through create and reads back."""
+    body = {
+        "name": "Hook Tmpl",
+        "intro_title": {
+            "enabled": True,
+            "duration_s": 4.0,
+            "font_name": "",
+            "font_size": 90,
+            "color": "&H00FFFFFF",
+            "outline_color": "&H00000000",
+            "position": "top",
+            "box": True,
+            "delay_captions": True,
+        },
+    }
+    created = client.post("/api/templates", json=body)
+    assert created.status_code == 201, created.text
+    tid = created.json()["id"]
+    got = client.get(f"/api/templates/{tid}").json()
+    assert got["intro_title"]["enabled"] is True
+    assert got["intro_title"]["font_size"] == 90
+    assert got["intro_title"]["position"] == "top"
+    # And it can be disabled via PUT (null).
+    put = client.put(
+        f"/api/templates/{tid}",
+        json={"name": "Hook Tmpl", "intro_title": None},
+    )
+    assert put.status_code == 200
+    assert put.json()["intro_title"] is None

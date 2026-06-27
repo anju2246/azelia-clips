@@ -111,6 +111,7 @@ async def create_template(req: CreateTemplateRequest, user: User = Depends(requi
         updated_at=now,
         subtitles=req.subtitles or SubtitleSpec(),
         layout=req.layout or LayoutSpec(),
+        intro_title=req.intro_title,
     )
     return _store().create(template)
 
@@ -132,6 +133,12 @@ async def update_template(id: str, req: UpdateTemplateRequest, user: User = Depe
             "author": req.author,
             "subtitles": req.subtitles or existing.subtitles,
             "layout": req.layout or existing.layout,
+            # Omitted preserves; explicit null disables.
+            "intro_title": (
+                req.intro_title
+                if "intro_title" in req.model_fields_set
+                else existing.intro_title
+            ),
             "updated_at": datetime.now().isoformat(),
         }
     )

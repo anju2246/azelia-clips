@@ -554,6 +554,30 @@ export interface LayoutSpec {
   wide_height_ratio: number;
 }
 
+export interface IntroTitleSpec {
+  enabled: boolean;
+  duration_s: number;
+  font_name: string;
+  font_size: number;
+  color: string;
+  outline_color: string;
+  position: "top" | "center" | "bottom";
+  box: boolean;
+  delay_captions: boolean;
+}
+
+export const DEFAULT_INTRO_TITLE: IntroTitleSpec = {
+  enabled: true,
+  duration_s: 4,
+  font_name: "",
+  font_size: 72,
+  color: "&H00FFFFFF",
+  outline_color: "&H00000000",
+  position: "center",
+  box: true,
+  delay_captions: true,
+};
+
 export interface ClipTemplate {
   schema_version: number;
   id: string;
@@ -565,6 +589,7 @@ export interface ClipTemplate {
   updated_at: string;
   subtitles: SubtitleSpec;
   layout: LayoutSpec;
+  intro_title?: IntroTitleSpec | null;
 }
 
 export interface CreateTemplateBody {
@@ -573,6 +598,7 @@ export interface CreateTemplateBody {
   author?: string;
   subtitles?: SubtitleSpec;
   layout?: LayoutSpec;
+  intro_title?: IntroTitleSpec | null;
 }
 
 export const TemplatesApi = {
