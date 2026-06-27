@@ -734,6 +734,10 @@ export const TemplatesApi = {
    *  these). Lets the editor flag a chosen font the render would substitute. */
   fonts: () => fetchApi<{ installed: string[] }>("/templates/fonts"),
 
+  /** URL to a stored profile asset (logo/bumper) so the preview shows the real
+   *  image instead of a placeholder. */
+  assetUrl: (path: string) => `${API_BASE}/templates/asset?path=${encodeURIComponent(path)}`,
+
   /** Upload a branding logo; returns its path relative to the profile data dir
    *  (what BrandingSpec.logo_path expects). */
   uploadLogo: (file: File) => {

@@ -844,7 +844,14 @@ export const TemplateEditorModal: React.FC<Props> = ({
 
         {/* Center: preview + floating toolbar */}
         <div className="flex min-h-0 flex-col items-center justify-center gap-4 bg-slate-900/40 p-6">
-          <TemplatePreview template={draft} editable={editable} onChange={patch} />
+          <TemplatePreview
+            template={draft}
+            editable={editable}
+            onChange={(p) => {
+              if (p.subtitles || p.layout) patch({ subtitles: p.subtitles, layout: p.layout });
+              if (p.branding) brand(p.branding);
+            }}
+          />
 
           <div className="flex items-center gap-2 rounded-xl border border-slate-700 bg-slate-900/90 px-2 py-1.5 shadow-lg">
             <span className="px-1 text-slate-400">
