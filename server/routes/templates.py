@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from pydantic import ValidationError
 
 from packages.clips.templates.models import (
@@ -90,6 +90,25 @@ async def installed_fonts(user: User = Depends(require_auth)):
     from packages.clips.templates.fonts import list_installed_fonts
 
     return {"installed": list(list_installed_fonts())}
+
+
+@router.get("/templates/asset")
+async def template_asset(path: str, user: User = Depends(require_auth)):
+    """Serve a profile asset (logo/bumper) so the editor preview shows the real
+    image. Restricted to files under the profile data dir's branding/ or
+    bumpers/ folders (no traversal, no absolute paths)."""
+    rel = Path(path)
+    if (
+        rel.is_absolute()
+        or ".." in rel.parts
+        or not rel.parts
+        or rel.parts[0] not in ("branding", "bumpers")
+    ):
+        raise HTTPException(status_code=404, detail="not found")
+    full = settings.data_dir / rel
+    if not full.is_file():
+        raise HTTPException(status_code=404, detail="not found")
+    return FileResponse(str(full))
 
 
 @router.get("/templates/{id}", response_model=ClipTemplate)

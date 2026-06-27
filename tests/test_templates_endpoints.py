@@ -310,3 +310,19 @@ def test_create_bumpers_rejects_absolute_path(client):
         json={"name": "Bad Bump", "bumpers": {"intro_path": "/etc/passwd"}},
     )
     assert r.status_code == 422
+
+
+def test_asset_endpoint_serves_logo_and_blocks_traversal(client):
+    """Editor preview fetches the real logo; only branding/bumpers files served."""
+    png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 16
+    rel = client.post(
+        "/api/templates/branding/logo",
+        files={"file": ("l.png", io.BytesIO(png), "image/png")},
+    ).json()["logo_path"]
+    ok = client.get(f"/api/templates/asset?path={rel}")
+    assert ok.status_code == 200
+    assert ok.content.startswith(b"\x89PNG")
+    # traversal / arbitrary paths are rejected
+    assert client.get("/api/templates/asset?path=../secrets.env").status_code == 404
+    assert client.get("/api/templates/asset?path=/etc/passwd").status_code == 404
+    assert client.get("/api/templates/asset?path=templates/foo.azt").status_code == 404

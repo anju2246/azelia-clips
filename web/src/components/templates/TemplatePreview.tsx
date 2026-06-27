@@ -1,5 +1,5 @@
-import React, { useRef, useState } from "react";
-import type { ClipTemplate, SubtitleSpec, LayoutSpec } from "../../lib/api";
+import React, { useRef, useState, useEffect } from "react";
+import { TemplatesApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec, type BrandingSpec } from "../../lib/api";
 import { pointToAlignment, ratioFromDivider } from "./snap";
 import { assToCss } from "./colors";
 
@@ -12,6 +12,7 @@ interface Props {
   onChange: (patch: {
     subtitles?: Partial<SubtitleSpec>;
     layout?: Partial<LayoutSpec>;
+    branding?: Partial<BrandingSpec>;
   }) => void;
 }
 
@@ -29,9 +30,10 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
   const pbar = template.progress_bar;
 
   const frameRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<null | "subs" | "divider">(null);
+  const [dragging, setDragging] = useState<null | "subs" | "divider" | "logo">(null);
   const [livePos, setLivePos] = useState<null | { xPct: number; yPct: number }>(null);
   const [sample, setSample] = useState("Y ESO LO CAMBIA TODO");
+  const [activeIdx, setActiveIdx] = useState(0); // live animation cursor
   const introOn = !!intro?.enabled;
   const [view, setView] = useState<"captions" | "hook">("captions");
   const showHook = introOn && view === "hook";
@@ -47,7 +49,16 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
   const wpl = subtitles.words_per_line;
   const lines: string[][] = [];
   for (let i = 0; i < words.length; i += wpl) lines.push(words.slice(i, i + wpl));
-  const highlightWord = words.length - 1; // last word shown in the accent color
+
+  // Live animation: a cursor walks the words so highlight/karaoke/box/cumulative
+  // actually move in the preview instead of a frozen frame.
+  useEffect(() => {
+    if (showHook || dragging || words.length === 0) return;
+    const id = setInterval(() => setActiveIdx((i) => (i + 1) % words.length), 600);
+    return () => clearInterval(id);
+  }, [showHook, dragging, words.length, subtitles.animation]);
+  const highlightWord = words.length ? activeIdx % words.length : -1;
+  const anim = subtitles.animation;
 
   // ── subtitle CSS position from alignment + margin_v ──────────────────────
   const a = subtitles.alignment;
@@ -87,6 +98,10 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
       onChange({ subtitles: pointToAlignment(tx, ty, { width: TARGET_W, height: TARGET_H }) });
     } else if (dragging === "divider") {
       onChange({ layout: { wide_height_ratio: ratioFromDivider(ty, TARGET_H) } });
+    } else if (dragging === "logo") {
+      const vert = yPx / rect.height < 0.5 ? "top" : "bottom";
+      const side = xPx / rect.width < 0.5 ? "left" : "right";
+      onChange({ branding: { position: `${vert}-${side}` as BrandingSpec["position"] } });
     }
     setDragging(null);
     setLivePos(null);
@@ -244,14 +259,20 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
           </div>
         )}
 
-        {/* logo placeholder */}
+        {/* real logo — draggable to a corner */}
         {branding?.logo_path && (
-          <div
-            className="absolute z-30 flex items-center justify-center rounded border border-white/40 bg-white/10 text-[7px] font-bold tracking-wider text-white/80"
-            style={{ ...logoCorner, aspectRatio: "2 / 1" }}
-          >
-            LOGO
-          </div>
+          <img
+            src={TemplatesApi.assetUrl(branding.logo_path)}
+            alt="logo"
+            draggable={false}
+            onPointerDown={() => editable && setDragging("logo")}
+            className={`absolute z-30 object-contain ${editable ? "cursor-grab active:cursor-grabbing" : ""}`}
+            style={
+              dragging === "logo" && livePos
+                ? { left: `${livePos.xPct}%`, top: `${livePos.yPct}%`, transform: "translate(-50%,-50%)", width: `${(branding.scale ?? 0.1) * 100}%`, opacity: branding.opacity ?? 1 }
+                : logoCorner
+            }
+          />
         )}
 
         {/* HOOK view: the title card shown during the first seconds */}
@@ -296,8 +317,19 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
               <span key={li} className="whitespace-nowrap">
                 {line.map((w, wi) => {
                   const idx = li * wpl + wi;
+                  const active = idx === highlightWord;
+                  let st: React.CSSProperties = { color: active ? hiColor : lineColor };
+                  if (anim === "karaoke") st = { color: idx <= highlightWord ? hiColor : lineColor };
+                  else if (anim === "box")
+                    st = active
+                      ? { color: lineColor, background: hiColor, borderRadius: 4, padding: "0 0.15em" }
+                      : { color: lineColor };
+                  else if (anim === "cumulative")
+                    st = { color: active ? hiColor : lineColor, opacity: idx <= highlightWord ? 1 : 0.12 };
+                  else // highlight
+                    st = { color: active ? hiColor : lineColor, display: "inline-block", transform: active ? "scale(1.12)" : "none" };
                   return (
-                    <span key={wi} style={{ color: idx === highlightWord ? hiColor : lineColor }}>
+                    <span key={wi} style={{ transition: "transform .12s, opacity .12s", ...st }}>
                       {w}{" "}
                     </span>
                   );
