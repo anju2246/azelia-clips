@@ -1,6 +1,13 @@
 import React, { useRef, useState, useEffect } from "react";
 import { Minus, Plus, Trash2, Type as TypeIcon } from "lucide-react";
-import { TemplatesApi, type ClipTemplate, type SubtitleSpec, type LayoutSpec, type BrandingSpec } from "../../lib/api";
+import {
+  TemplatesApi,
+  type ClipTemplate,
+  type SubtitleSpec,
+  type LayoutSpec,
+  type BrandingSpec,
+  type IntroTitleSpec,
+} from "../../lib/api";
 import { pointToAlignment, ratioFromDivider } from "./snap";
 import { assToCss, assToHex, cssToAss } from "./colors";
 
@@ -14,6 +21,7 @@ interface Props {
     subtitles?: Partial<SubtitleSpec>;
     layout?: Partial<LayoutSpec>;
     branding?: Partial<BrandingSpec>;
+    introTitle?: Partial<IntroTitleSpec>;
   }) => void;
 }
 
@@ -31,11 +39,13 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
   const pbar = template.progress_bar;
 
   const frameRef = useRef<HTMLDivElement>(null);
-  const [dragging, setDragging] = useState<null | "subs" | "divider" | "logo">(null);
+  const [dragging, setDragging] = useState<
+    null | "subs" | "divider" | "logo" | "logo-resize" | "hook"
+  >(null);
   const [livePos, setLivePos] = useState<null | { xPct: number; yPct: number }>(null);
   const [sample, setSample] = useState("Y ESO LO CAMBIA TODO");
   const [activeIdx, setActiveIdx] = useState(0); // live animation cursor
-  const [selected, setSelected] = useState<null | "subs" | "logo">(null);
+  const [selected, setSelected] = useState<null | "subs" | "logo" | "hook">(null);
   const introOn = !!intro?.enabled;
   const [view, setView] = useState<"captions" | "hook">("captions");
   const showHook = introOn && view === "hook";
@@ -88,6 +98,14 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
   const onPointerMove = (e: React.PointerEvent) => {
     if (!dragging) return;
     const { rect, xPx, yPx } = relFromEvent(e);
+    if (dragging === "logo-resize" && branding) {
+      const side = (branding.position ?? "top-right").endsWith("left") ? "left" : "right";
+      const marginFrac = (branding.margin ?? 40) / TARGET_W;
+      const xFrac = xPx / rect.width;
+      const w = side === "left" ? xFrac - marginFrac : 1 - marginFrac - xFrac;
+      onChange({ branding: { scale: Math.min(0.3, Math.max(0.02, w)) } });
+      return;
+    }
     setLivePos({ xPct: (xPx / rect.width) * 100, yPct: (yPx / rect.height) * 100 });
   };
 
@@ -104,6 +122,10 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
       const vert = yPx / rect.height < 0.5 ? "top" : "bottom";
       const side = xPx / rect.width < 0.5 ? "left" : "right";
       onChange({ branding: { position: `${vert}-${side}` as BrandingSpec["position"] } });
+    } else if (dragging === "hook") {
+      const f = yPx / rect.height;
+      const position = f < 0.34 ? "top" : f > 0.66 ? "bottom" : "center";
+      onChange({ introTitle: { position } });
     }
     setDragging(null);
     setLivePos(null);
@@ -240,9 +262,40 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
               </button>
             </>
           )}
+          {selected === "hook" && intro && (
+            <>
+              <span className="px-1 text-[10px] uppercase tracking-wide text-slate-400">Hook</span>
+              <button
+                onClick={() => onChange({ introTitle: { font_size: Math.max(12, (intro.font_size ?? 72) - 4) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Minus size={13} />
+              </button>
+              <span className="w-7 text-center text-xs tabular-nums">{intro.font_size ?? 72}</span>
+              <button
+                onClick={() => onChange({ introTitle: { font_size: Math.min(200, (intro.font_size ?? 72) + 4) } })}
+                className="rounded p-1 hover:bg-slate-800"
+              >
+                <Plus size={13} />
+              </button>
+              <div className="mx-1 h-5 w-px bg-slate-700" />
+              <label
+                className="relative h-6 w-6 cursor-pointer overflow-hidden rounded border border-slate-600"
+                title="Color del título"
+                style={{ background: assToCss(intro.color ?? "&H00FFFFFF") }}
+              >
+                <input
+                  type="color"
+                  value={assToHex(intro.color ?? "&H00FFFFFF")}
+                  onChange={(e) => onChange({ introTitle: { color: cssToAss(e.target.value) } })}
+                  className="absolute -inset-2 h-[200%] w-[200%] cursor-pointer opacity-0"
+                />
+              </label>
+            </>
+          )}
           {!selected && (
             <span className="px-1 text-[11px] text-slate-500">
-              Toca el subtítulo o el logo para editarlo aquí · arrástralo para moverlo
+              Toca el subtítulo, el logo o el título para editarlo aquí · arrástralo para moverlo
             </span>
           )}
         </div>
@@ -360,19 +413,16 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
           </div>
         )}
 
-        {/* real logo — draggable to a corner */}
+        {/* real logo — draggable to a corner, resize handle when selected */}
         {branding?.logo_path && (
-          <img
-            src={TemplatesApi.assetUrl(branding.logo_path)}
-            alt="logo"
-            draggable={false}
+          <div
             onPointerDown={(e) => {
               if (!editable) return;
               e.stopPropagation();
               setSelected("logo");
               setDragging("logo");
             }}
-            className={`absolute z-30 object-contain ${editable ? "cursor-grab active:cursor-grabbing" : ""} ${
+            className={`absolute z-30 ${editable ? "cursor-grab active:cursor-grabbing" : ""} ${
               selected === "logo" ? "outline outline-2 outline-emerald-400/80 outline-offset-2" : ""
             }`}
             style={
@@ -380,7 +430,26 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
                 ? { left: `${livePos.xPct}%`, top: `${livePos.yPct}%`, transform: "translate(-50%,-50%)", width: `${(branding.scale ?? 0.1) * 100}%`, opacity: branding.opacity ?? 1 }
                 : logoCorner
             }
-          />
+          >
+            <img
+              src={TemplatesApi.assetUrl(branding.logo_path)}
+              alt="logo"
+              draggable={false}
+              className="pointer-events-none w-full object-contain"
+            />
+            {selected === "logo" && editable && (
+              <div
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  setDragging("logo-resize");
+                }}
+                title="Redimensionar"
+                className={`absolute h-3 w-3 cursor-nwse-resize rounded-sm border border-slate-900 bg-emerald-400 ${
+                  (branding.position ?? "top-right").startsWith("top") ? "-bottom-1.5" : "-top-1.5"
+                } ${(branding.position ?? "top-right").endsWith("left") ? "-right-1.5" : "-left-1.5"}`}
+              />
+            )}
+          </div>
         )}
 
         {/* HOOK view: the title card shown during the first seconds */}
@@ -390,7 +459,15 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
             style={{ alignItems: hookVAlign, paddingTop: "8%", paddingBottom: "8%" }}
           >
             <div
-              className="w-full text-center font-extrabold leading-tight text-white"
+              onPointerDown={(e) => {
+                if (!editable) return;
+                e.stopPropagation();
+                setSelected("hook");
+                setDragging("hook");
+              }}
+              className={`w-full text-center font-extrabold leading-tight text-white ${
+                editable ? "cursor-grab active:cursor-grabbing" : ""
+              } ${selected === "hook" ? "outline outline-2 outline-emerald-400/80 outline-offset-4" : ""}`}
               style={{
                 fontFamily: `"${intro?.font_name || subtitles.font_name}", sans-serif`,
                 fontSize: `${hookFontPx}px`,
