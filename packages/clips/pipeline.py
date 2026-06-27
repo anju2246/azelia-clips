@@ -713,6 +713,11 @@ class BatchProcessor:
                     duration=clip.end_time - clip.start_time,
                 )
 
+                # 3e-bis. Concatenate intro/outro bumpers around the clip (T12).
+                self._apply_bumpers(
+                    final_path, getattr(plan, "bumpers", None), settings.data_dir, tmp_path
+                )
+
                 # 3f. Save caption to text file
                 caption_path = target_folder / f"{clip_name}_caption.txt"
                 caption_content = f"{clip.social_caption}\n\n{' '.join(clip.caption_hashtags)}"
@@ -798,6 +803,36 @@ class BatchProcessor:
             except Exception:
                 pass
 
+
+    def _apply_bumpers(self, clip_path: Path, bumpers, data_dir, tmp_path: Path) -> None:
+        """Concatenate intro/outro bumpers around the rendered clip in place.
+
+        No-op when there are no bumpers. Missing bumper files are skipped with a
+        console warning (non-fatal). On any concat failure the original clip is
+        kept untouched.
+        """
+        if bumpers is None:
+            return
+        import shutil
+        from packages.clips.templates.bumpers import (
+            build_concat_command,
+            build_concat_plan,
+            needs_concat,
+        )
+
+        inputs, warnings = build_concat_plan(bumpers, str(clip_path), data_dir)
+        for which in warnings:
+            console.print(f"[yellow]   ⚠ bumper {which} no encontrado; se omite[/yellow]")
+        if not needs_concat(inputs):
+            return
+
+        stitched = tmp_path / "with_bumpers.mp4"
+        cmd = build_concat_command(self._get_ffmpeg_exe(), inputs, str(stitched))
+        try:
+            run_ffmpeg(cmd, timeout=300)
+            shutil.move(str(stitched), str(clip_path))
+        except Exception as e:
+            console.print(f"[yellow]   ⚠ no se pudieron añadir bumpers ({e}); se deja el clip sin ellos[/yellow]")
 
     def _transcribe_video(self, video_path: Path, job_id: str = None, episode_id: str = None) -> "Transcript":
         """Transcribe the full episode video using the configured driver.

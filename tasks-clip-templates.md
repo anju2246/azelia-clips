@@ -444,7 +444,7 @@ vía `drawbox` con expresión temporal (`w*t/dur`) en el burn. Color/alto/posici
 ---
 
 ## Task T12: Intro / Outro (bumpers, concat)  — **scope nuevo (firma)**
-**Status:** [ ]
+**Status:** [x]  — modelo + plan de concat puro + builder FFmpeg + pipeline + API + uploads + editor + tests. **Verificación visual pendiente**.
 **Complexity:** L
 **Dependencies:** T1, T3
 **Parallelizable with:** none (toca el final del render)

@@ -11,6 +11,24 @@ from pydantic import BaseModel, Field, field_validator
 SCHEMA_VERSION = 2
 
 
+def _relative_profile_path(v: Optional[str]) -> Optional[str]:
+    """Validate an asset path stays inside the profile data dir.
+
+    Stored relative (so templates are portable); absolute or parent-traversing
+    paths are rejected. Empty → None.
+    """
+    if v is None:
+        return None
+    v = v.strip()
+    if not v:
+        return None
+    if PurePosixPath(v).is_absolute() or PureWindowsPath(v).is_absolute():
+        raise ValueError("path must be relative to the profile data dir")
+    if ".." in PurePosixPath(v).parts:
+        raise ValueError("path must not traverse outside the profile data dir")
+    return v
+
+
 class SubtitleSpec(BaseModel):
     """Subtitle styling specification."""
 
@@ -78,17 +96,24 @@ class BrandingSpec(BaseModel):
 
     @field_validator("logo_path")
     @classmethod
-    def _relative_inside_profile(cls, v: Optional[str]) -> Optional[str]:
-        if v is None:
-            return None
-        v = v.strip()
-        if not v:
-            return None
-        if PurePosixPath(v).is_absolute() or PureWindowsPath(v).is_absolute():
-            raise ValueError("logo_path must be relative to the profile data dir")
-        if ".." in PurePosixPath(v).parts:
-            raise ValueError("logo_path must not traverse outside the profile data dir")
-        return v
+    def _check_logo_path(cls, v: Optional[str]) -> Optional[str]:
+        return _relative_profile_path(v)
+
+
+class BumpersSpec(BaseModel):
+    """Intro / outro video clips concatenated around the rendered clip.
+
+    Paths are relative to the profile data dir (portable, sandboxed). A path
+    that doesn't exist at render time is skipped with a non-fatal warning.
+    """
+
+    intro_path: Optional[str] = None
+    outro_path: Optional[str] = None
+
+    @field_validator("intro_path", "outro_path")
+    @classmethod
+    def _check_paths(cls, v: Optional[str]) -> Optional[str]:
+        return _relative_profile_path(v)
 
 
 class ProgressBarSpec(BaseModel):
@@ -117,6 +142,7 @@ class ClipTemplate(BaseModel):
     intro_title: Optional[IntroTitleSpec] = None
     branding: Optional[BrandingSpec] = None
     progress_bar: Optional[ProgressBarSpec] = None
+    bumpers: Optional[BumpersSpec] = None
 
     def to_azt_bytes(self) -> bytes:
         """Serialize to .azt JSON bytes."""

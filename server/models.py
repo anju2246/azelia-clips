@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from packages.clips.templates.models import (
     BrandingSpec,
+    BumpersSpec,
     ClipTemplate,
     IntroTitleSpec,
     LayoutSpec,
@@ -155,6 +156,7 @@ class CreateTemplateRequest(BaseModel):
     intro_title: Optional[IntroTitleSpec] = None
     branding: Optional[BrandingSpec] = None
     progress_bar: Optional[ProgressBarSpec] = None
+    bumpers: Optional[BumpersSpec] = None
 
 
 class UpdateTemplateRequest(BaseModel):
@@ -170,6 +172,7 @@ class UpdateTemplateRequest(BaseModel):
     intro_title: Optional[IntroTitleSpec] = None
     branding: Optional[BrandingSpec] = None
     progress_bar: Optional[ProgressBarSpec] = None
+    bumpers: Optional[BumpersSpec] = None
 
 
 class CloneTemplateRequest(BaseModel):
