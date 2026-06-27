@@ -88,6 +88,8 @@ export interface ProcessRequest {
   assemblyai_key?: string;
   supabase_url?: string;
   supabase_key?: string;
+  /** Clip template to apply to this job. Omit to use the profile default. */
+  template_id?: string;
 }
 
 export interface ProcessLocalRequest extends ProcessRequest {
@@ -132,6 +134,7 @@ export interface UpdateSettingsRequest {
   vertex_model?: string;
   transcript_supabase_url?: string;
   transcript_supabase_key?: string;
+  default_template_id?: string;
 }
 
 export interface CriticDecision {

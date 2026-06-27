@@ -22,8 +22,10 @@ import {
 } from "lucide-react";
 import {
   SettingsApi,
+  TemplatesApi,
   type SettingsResponse,
   type UpdateSettingsRequest,
+  type ClipTemplate,
 } from "../../lib/api";
 import { DirectoryPicker } from "./DirectoryPicker";
 import { useAIModels } from "../../hooks/useAIModels";
@@ -36,6 +38,15 @@ const API_BASE = (import.meta.env?.PUBLIC_API_URL as string) || "/api";
 export const SettingsForm: React.FC = () => {
   const [settings, setSettings] = useState<SettingsResponse | null>(null);
   const [formData, setFormData] = useState<UpdateSettingsRequest>({});
+  // Templates for the profile's default-template selector (Workspace tab).
+  const [templates, setTemplates] = useState<ClipTemplate[]>([]);
+  useEffect(() => {
+    TemplatesApi.list()
+      .then((r) => setTemplates(r.templates))
+      .catch(() => {
+        /* selector is optional — never block settings on a fetch error */
+      });
+  }, []);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<
@@ -478,6 +489,39 @@ export const SettingsForm: React.FC = () => {
                       <ToggleLeft className="w-9 h-9 text-zinc-600" />
                     )}
                   </button>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-300 mb-2">
+                    Template por defecto
+                  </label>
+                  <p className="text-xs text-zinc-500 mb-2 max-w-md">
+                    Estilo (subtítulos + layout) que se aplica a los clips de
+                    este perfil cuando no eliges otro al procesar.
+                  </p>
+                  <select
+                    value={
+                      formData.default_template_id ??
+                      settings?.default_template_id ??
+                      ""
+                    }
+                    onChange={(e) =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        default_template_id: e.target.value,
+                      }))
+                    }
+                    className="w-full px-4 py-2.5 bg-black border border-zinc-800 rounded-xl focus:outline-none focus:border-brand-500 text-white cursor-pointer"
+                  >
+                    {templates.length === 0 && (
+                      <option value="">Cargando…</option>
+                    )}
+                    {templates.map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.name}
+                        {t.is_builtin ? " (preset)" : ""}
+                      </option>
+                    ))}
+                  </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-zinc-300 mb-2">
