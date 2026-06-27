@@ -297,6 +297,223 @@ Warning no-fatal si la fuente no está instalada.
 
 ---
 
+---
+
+# v2 — Conectar + Ampliar el techo (T8–T13)
+
+> Deriva de las secciones "v2 Extensions" de `spec-clip-templates.md`. T8 y T9 **completan** spec ya
+> aprobado (sin nueva firma). T10–T13 son **scope nuevo** (schema_version 2) y requieren la firma de
+> JuanPa antes de implementar.
+
+## Task T8: Conectar template_id al flujo de proceso (frontend) + verificación E2E
+**Status:** [ ]
+**Complexity:** M
+**Dependencies:** T2, T3 (backend ya listo)
+**Parallelizable with:** none (crítico — desbloquea el valor de todo el feature)
+
+### Description
+El backend ya acepta `template_id` por job y `default_template_id` por perfil. Falta el **frontend**:
+exponer `template_id` en `ProcessRequest` (TS), un **selector de Template** en el flujo de upload/proceso
+(default = el del perfil) y un control de `default_template_id` en `SettingsForm`. Cierra el hueco que
+hacía el feature "inútil": diseñas un template y por fin se aplica al clip.
+
+### Files to Modify
+- `web/src/lib/api.ts`: `ProcessRequest.template_id?: string`; asegurar que `processVideo`/`processLocalVideo`
+  lo envían (ya forwardea `req`, pero verificar y tipar). `UpdateSettingsRequest.default_template_id?: string`.
+- Componente real de upload/proceso (`web/src/components/dashboard/UploadWidget.tsx` y/o
+  `web/src/components/workflow/DashboardController.tsx`): selector "Template" poblado con `TemplatesApi.list()`,
+  default = `settings.default_template_id`.
+- `web/src/components/settings/SettingsForm.tsx`: selector `default_template_id` (lista de templates del perfil).
+
+### Files to Create
+- `web/tests/e2e/templates-apply.spec.ts` *(o)* un test de integración del flujo de selección si Playwright
+  no es viable hoy; mínimo: un test que confirme que `processVideo(file, {template_id})` mete `template_id`
+  en el `FormData`.
+
+### Acceptance Criteria
+- [ ] `ProcessRequest` incluye `template_id`; al procesar con un template elegido, el `FormData` lo envía.
+- [ ] El formulario de upload muestra el selector de Template con el default del perfil preseleccionado.
+- [ ] `SettingsForm` permite ver/guardar `default_template_id`; persiste vía `POST /api/settings`.
+- [ ] **Verificación E2E manual** (`/run` o `/verify`): procesar un clip real con un template custom (p.ej.
+      `wide_height_ratio` distinto o `fullscreen`) produce un clip visiblemente distinto al default.
+- [ ] Build del front verde (`npm run build`).
+
+### TDD Anchors
+- `test_process_request_serializes_template_id` (FormData incluye template_id)
+- `test_settings_form_roundtrips_default_template_id`
+
+---
+
+## Task T9: Fidelidad de fuentes (web fonts reales + fuentes instaladas)
+**Status:** [ ]
+**Complexity:** M
+**Dependencies:** T8
+**Parallelizable with:** T10
+
+### Description
+El editor ofrece fuentes que el preview no carga (muestra una sans genérica) y que la máquina puede no
+tener instaladas (el render ASS también cae a fallback). Cargar web fonts reales en el editor y reportar
+qué fuentes están instaladas para no prometer lo que el render no honra.
+
+### Files to Modify
+- `web/src/layouts/DashboardLayout.astro` (y/o un `@font-face` dedicado): cargar Anton, Bebas Neue, Oswald,
+  Montserrat, Poppins, etc. usadas en `FONTS` del editor.
+- `web/src/components/templates/TemplateEditorModal.tsx`: marcar fuentes no instaladas (badge) usando la
+  capability del backend; warning al guardar si `font_name` no instalada.
+- `server/routes/templates.py` *(o `settings.py`)*: exponer `installed_fonts` (o un check por nombre).
+
+### Files to Create
+- `packages/clips/templates/fonts.py`: `is_font_installed(name)` / `list_installed_fonts()` (vía `fc-list`
+  en Linux/mac o fallback por carpetas de fuentes); `tests/test_template_fonts.py`.
+
+### Acceptance Criteria
+- [ ] El preview del editor renderiza con la fuente seleccionada (web font cargada), no una fallback.
+- [ ] `list_installed_fonts()` detecta fuentes del sistema; `is_font_installed("Arial")` razonable por OS.
+- [ ] El editor marca visualmente fuentes no instaladas y emite `FONT_NOT_INSTALLED` al guardar (no bloquea).
+- [ ] `tests/test_template_fonts.py` pasa.
+
+### TDD Anchors
+- `test_list_installed_fonts_returns_known_system_font`
+- `test_is_font_installed_false_for_made_up_name`
+
+---
+
+## Task T10: Logo / marca de agua (branding overlay FFmpeg)  — **scope nuevo (firma)**
+**Status:** [ ]
+**Complexity:** M
+**Dependencies:** T1 (modelo), T3 (pipeline)
+**Parallelizable with:** T9, T11
+
+### Description
+Añadir `BrandingSpec` al modelo (opcional, default None → no-regresión) y aplicar el logo como overlay
+FFmpeg en el compose/burn, en la esquina/escala/opacidad/margen indicados. Validar que `logo_path` está
+dentro del `data_dir` del perfil (anti path-traversal).
+
+### Files to Modify
+- `packages/clips/templates/models.py`: `BrandingSpec` + `branding` opcional; `SCHEMA_VERSION=2`.
+- `packages/clips/templates/render.py`: incluir branding en el `RenderPlan`.
+- `packages/clips/pipeline.py`: aplicar overlay del logo en el burn (o paso de compose) si hay branding.
+- `packages/clips/templates/builtins.py`: builtins con `branding=None` (sin cambios visuales).
+
+### Files to Create
+- `tests/test_template_branding.py`.
+
+### Acceptance Criteria
+- [ ] `BrandingSpec` valida posición/escala/opacidad/margen; `logo_path` fuera del data_dir → ValidationError.
+- [ ] El `RenderPlan` traslada branding; el comando FFmpeg incluye un `overlay` cuando hay logo.
+- [ ] Sin branding → comando/render idéntico al actual (no-regresión, test).
+- [ ] `schema_version=2` y un `.azt` v1 (sin branding) se carga con `branding=None`.
+- [ ] `tests/test_template_branding.py` pasa.
+
+### TDD Anchors
+- `test_branding_rejects_path_outside_profile`
+- `test_render_plan_includes_overlay_when_logo_present`
+- `test_no_branding_keeps_render_command_unchanged`
+- `test_v1_azt_loads_with_branding_none`
+
+---
+
+## Task T11: Barra de progreso (drawbox time-based)  — **scope nuevo (firma)**
+**Status:** [ ]
+**Complexity:** M
+**Dependencies:** T1, T3
+**Parallelizable with:** T10
+
+### Description
+`ProgressBarSpec` (opcional, `enabled=false` por defecto) y una barra que crece 0→100% a lo largo del clip
+vía `drawbox` con expresión temporal (`w*t/dur`) en el burn. Color/alto/posición configurables.
+
+### Files to Modify
+- `packages/clips/templates/models.py`: `ProgressBarSpec` + `progress_bar` opcional.
+- `packages/clips/templates/render.py` + `pipeline.py`: inyectar el `drawbox` cuando `enabled`.
+
+### Files to Create
+- `tests/test_template_progressbar.py`.
+
+### Acceptance Criteria
+- [ ] `ProgressBarSpec` valida color ASS/alto/posición.
+- [ ] Con `enabled`, el filtro incluye un `drawbox` con ancho dependiente del tiempo; sin él, no se añade.
+- [ ] Color ASS → BGR/hex correcto para FFmpeg (no confundir orden de bytes).
+- [ ] `tests/test_template_progressbar.py` pasa.
+
+### TDD Anchors
+- `test_progress_bar_disabled_adds_no_filter`
+- `test_progress_bar_filter_width_is_time_dependent`
+- `test_ass_color_to_ffmpeg_hex_byte_order`
+
+---
+
+## Task T12: Intro / Outro (bumpers, concat)  — **scope nuevo (firma)**
+**Status:** [ ]
+**Complexity:** L
+**Dependencies:** T1, T3
+**Parallelizable with:** none (toca el final del render)
+
+### Description
+`BumpersSpec` (opcional) con `intro_path`/`outro_path`; concatenar normalizando a 1080×1920 + codec/fps del
+clip (concat por re-encode). Rutas ausentes → warning, se omiten (no aborta).
+
+### Files to Modify
+- `packages/clips/templates/models.py`: `BumpersSpec` + `bumpers` opcional (rutas validadas dentro del data_dir).
+- `packages/clips/pipeline.py`: tras el burn, si hay bumpers válidos, normalizar y concatenar.
+
+### Files to Create
+- `packages/clips/templates/bumpers.py`: helper puro que arma el plan de concat (lista ordenada de inputs +
+  flag de re-encode) — testeable sin ejecutar FFmpeg.
+- `tests/test_template_bumpers.py`.
+
+### Acceptance Criteria
+- [ ] Sin bumpers → no hay paso de concat (no-regresión).
+- [ ] Con intro+outro válidos, el plan de concat es `[intro, clip, outro]` normalizados.
+- [ ] Ruta inexistente → se omite con warning, no aborta; el plan conserva los presentes.
+- [ ] `bumpers` con ruta fuera del data_dir → ValidationError.
+- [ ] `tests/test_template_bumpers.py` pasa.
+
+### TDD Anchors
+- `test_no_bumpers_no_concat_step`
+- `test_concat_plan_orders_intro_clip_outro`
+- `test_missing_bumper_path_skipped_with_warning`
+
+---
+
+## Task T13: Hook title (título los primeros N segundos antes de los captions)  — **scope nuevo (firma)**
+**Status:** [ ]
+**Complexity:** L
+**Dependencies:** T1, T3
+**Parallelizable with:** T10, T11
+
+### Description
+`IntroTitleSpec` (opcional, `enabled=false`). Dibuja `clip.title` (de la curación) centrado/top/bottom
+durante `duration_s` (default 4s) como evento ASS temporizado con caja opcional. Si `delay_captions=true`,
+desplazar los eventos de subtítulos para que **empiecen después** del título (el título sale antes que los
+captions). `clip.title` vacío → no se dibuja aunque esté `enabled`.
+
+### Files to Modify
+- `packages/clips/templates/models.py`: `IntroTitleSpec` + `intro_title` opcional.
+- `packages/clips/subtitles/generator.py`: (a) método para emitir el evento de título temporizado;
+  (b) opción de **offset** de los subtítulos (`start_at`) cuando `delay_captions`.
+- `packages/clips/pipeline.py`: pasar `clip.title` + `intro_title` al generador.
+
+### Files to Create
+- `tests/test_template_intro_title.py`.
+
+### Acceptance Criteria
+- [ ] Con `enabled` y `clip.title` no vacío, el `.ass` contiene un `Dialogue` del título con fin = `duration_s`.
+- [ ] Con `delay_captions=true`, el primer subtítulo de palabras empieza ≥ `duration_s`.
+- [ ] `clip.title` vacío → no se emite evento de título (aunque `enabled`).
+- [ ] Desactivado → `.ass` idéntico al actual (no-regresión).
+- [ ] `tests/test_template_intro_title.py` pasa.
+
+### TDD Anchors
+- `test_intro_title_emitted_with_duration`
+- `test_empty_clip_title_emits_no_intro`
+- `test_delay_captions_offsets_first_subtitle`
+- `test_intro_title_disabled_keeps_ass_unchanged`
+
+---
+
 ## Critical path
-`T1 → T3` (template afecta el render) es el camino crítico mínimo. `T2` habilita la UI. `T4/T5/T6/T7` son
-incrementos de valor. Paralelizables: (T2 ∥ T3) tras T1; (T4 ∥ T7) tras T2; (T7 ∥ T5).
+v1: `T1 → T3` (template afecta el render). v2: **`T8` es el nuevo crítico** — sin el frontend, todo el
+feature es inútil; va primero. Luego `T9` (fidelidad). Expansiones (scope nuevo, tras firma):
+`T10 ∥ T11 ∥ T13` (independientes), `T12` al final (toca el cierre del render). Orden por valor:
+T8 → T9 → T13 (hook title) → T10 (logo) → T11 (barra) → T12 (bumpers).
