@@ -306,7 +306,7 @@ Warning no-fatal si la fuente no está instalada.
 > JuanPa antes de implementar.
 
 ## Task T8: Conectar template_id al flujo de proceso (frontend) + verificación E2E
-**Status:** [ ]
+**Status:** [x]  — frontend + backend hardening + tests. **Verificación E2E manual pendiente** (clip real).
 **Complexity:** M
 **Dependencies:** T2, T3 (backend ya listo)
 **Parallelizable with:** none (crítico — desbloquea el valor de todo el feature)
@@ -345,7 +345,7 @@ hacía el feature "inútil": diseñas un template y por fin se aplica al clip.
 ---
 
 ## Task T9: Fidelidad de fuentes (web fonts reales + fuentes instaladas)
-**Status:** [ ]
+**Status:** [x]
 **Complexity:** M
 **Dependencies:** T8
 **Parallelizable with:** T10
