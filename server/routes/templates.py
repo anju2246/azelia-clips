@@ -363,6 +363,8 @@ async def chat_template(req: TemplateChatRequest, user: User = Depends(require_a
             explanation=result["explanation"],
             template=result["template"],
             provider_used=result.get("provider_used", ""),
+            changes=result.get("changes", []),
+            unsupported=result.get("unsupported", []),
         )
     finally:
         if tmp_handle and os.path.exists(tmp_handle):
