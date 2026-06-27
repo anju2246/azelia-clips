@@ -37,8 +37,11 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
   const showHook = introOn && view === "hook";
 
   const isSplit = layout.type === "split";
+  const isRegions = layout.type === "regions";
   const dividerPct = (1 - layout.wide_height_ratio) * 100;
   const widePct = Math.round(layout.wide_height_ratio * 100);
+  const regionLabel = (src: { mode: string; speaker_ref?: string | null }) =>
+    src.mode === "wide" ? "PLANO ABIERTO" : src.mode === "speaker" ? src.speaker_ref || "INVITADO" : "ACTIVE";
 
   const words = sample.trim().split(/\s+/).filter(Boolean);
   const wpl = subtitles.words_per_line;
@@ -166,6 +169,25 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
             <span className="h-1.5 w-1.5 rounded-full bg-red-500" /> CLOSE-UP
           </div>
         )}
+
+        {/* region layout (2-guest stacked, grid, …) */}
+        {isRegions &&
+          (layout.regions ?? []).map((r, i) => (
+            <div
+              key={i}
+              className="absolute z-10 flex items-end justify-start border border-dashed border-emerald-400/40 bg-emerald-400/5"
+              style={{
+                left: `${r.x * 100}%`,
+                top: `${r.y * 100}%`,
+                width: `${r.w * 100}%`,
+                height: `${r.h * 100}%`,
+              }}
+            >
+              <span className="m-1 rounded bg-black/60 px-1.5 py-0.5 text-[8px] font-bold tracking-wider text-white/90">
+                {regionLabel(r.source)}
+              </span>
+            </div>
+          ))}
 
         {/* split divider + WIDE label */}
         {isSplit && (

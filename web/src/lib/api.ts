@@ -547,11 +547,42 @@ export interface SubtitleSpec {
   words_per_line: number;
 }
 
+export interface RegionSource {
+  mode: "active_speaker" | "speaker" | "wide";
+  speaker_ref?: string | null;
+  zoom?: number | null;
+}
+
+export interface Region {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  source: RegionSource;
+}
+
 export interface LayoutSpec {
-  type: "split" | "fullscreen";
+  type: "split" | "fullscreen" | "regions";
   output_width: number;
   output_height: number;
   wide_height_ratio: number;
+  regions?: Region[];
+  fallback?: "fullscreen" | "split";
+}
+
+/** Mirror of layout.two_guest_split — a 2-guest stacked split. */
+export function twoGuestSplitLayout(topRef = "Invitado 1", bottomRef = "Invitado 2"): LayoutSpec {
+  return {
+    type: "regions",
+    output_width: 1080,
+    output_height: 1920,
+    wide_height_ratio: 608 / 1920,
+    fallback: "fullscreen",
+    regions: [
+      { x: 0, y: 0, w: 1, h: 0.5, source: { mode: "speaker", speaker_ref: topRef } },
+      { x: 0, y: 0.5, w: 1, h: 0.5, source: { mode: "speaker", speaker_ref: bottomRef } },
+    ],
+  };
 }
 
 export interface IntroTitleSpec {

@@ -83,3 +83,21 @@ def test_v1_azt_loads_with_default_split_regions():
     assert t.layout.regions == []
     regions = resolve_regions(t.layout)
     assert len(regions) == 2 and regions[1].source.mode == "wide"
+
+
+def test_render_plan_carries_regions_only_for_regions_type():
+    """T18 — the pipeline gets resolved regions for 'regions', None otherwise."""
+    from datetime import datetime
+    from packages.clips.templates.render import template_to_render_plan
+
+    def _mk(layout):
+        now = datetime(2026, 1, 1).isoformat()
+        from packages.clips.templates.models import SubtitleSpec
+        return ClipTemplate(id="t", name="T", created_at=now, updated_at=now,
+                            subtitles=SubtitleSpec(), layout=layout)
+
+    assert template_to_render_plan(_mk(LayoutSpec(type="split"))).regions is None
+    assert template_to_render_plan(_mk(LayoutSpec(type="fullscreen"))).regions is None
+    plan = template_to_render_plan(_mk(two_guest_split("host", "guest")))
+    assert plan.regions is not None and len(plan.regions) == 2
+    assert plan.regions[0].source.mode == "speaker"

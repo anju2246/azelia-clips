@@ -692,6 +692,7 @@ class BatchProcessor:
                     episode_folder=episode.episode_folder,
                     layout_type=plan.layout_type,
                     wide_height_ratio=plan.wide_height_ratio,
+                    regions=getattr(plan, "regions", None),
                 )
 
                 # 3d. Generate subtitles from the template's style

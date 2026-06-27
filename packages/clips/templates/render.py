@@ -7,6 +7,7 @@ with the pre-template ``splitscreen`` style — is unit-testable.
 from dataclasses import dataclass
 
 from packages.clips.subtitles.generator import SubtitleStyle
+from packages.clips.templates.layout import resolve_regions
 from packages.clips.templates.models import ClipTemplate
 
 
@@ -19,6 +20,7 @@ class RenderPlan:
     words_per_line: int
     layout_type: str
     wide_height_ratio: float
+    regions: list | None = None  # resolved Region list when layout.type == "regions" (T18)
     intro_title: object | None = None  # IntroTitleSpec | None (hook title, T13)
     branding: object | None = None  # BrandingSpec | None (logo overlay, T10)
     progress_bar: object | None = None  # ProgressBarSpec | None (T11)
@@ -57,6 +59,9 @@ def template_to_render_plan(template: ClipTemplate) -> RenderPlan:
         words_per_line=template.subtitles.words_per_line,
         layout_type=template.layout.type,
         wide_height_ratio=template.layout.wide_height_ratio,
+        regions=(
+            resolve_regions(template.layout) if template.layout.type == "regions" else None
+        ),
         intro_title=getattr(template, "intro_title", None),
         branding=getattr(template, "branding", None),
         progress_bar=getattr(template, "progress_bar", None),
