@@ -141,15 +141,19 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
         className="relative mx-auto overflow-hidden rounded-2xl border border-slate-700/70 bg-gradient-to-b from-slate-800 to-slate-900 shadow-2xl select-none"
         style={{ aspectRatio: "9 / 16", width: 300, touchAction: "none" }}
       >
-        {/* faux subject silhouette */}
-        <div
-          className="absolute left-1/2 -translate-x-1/2 rounded-full bg-amber-200/80"
-          style={{ top: "22%", width: "42%", aspectRatio: "1" }}
-        />
-        <div
-          className="absolute left-1/2 -translate-x-1/2 rounded-t-full bg-amber-950/40"
-          style={{ top: "52%", width: "78%", height: "48%" }}
-        />
+        {/* faux subject silhouette (single-source layouts only) */}
+        {!isRegions && (
+          <>
+            <div
+              className="absolute left-1/2 -translate-x-1/2 rounded-full bg-amber-200/80"
+              style={{ top: "22%", width: "42%", aspectRatio: "1" }}
+            />
+            <div
+              className="absolute left-1/2 -translate-x-1/2 rounded-t-full bg-amber-950/40"
+              style={{ top: "52%", width: "78%", height: "48%" }}
+            />
+          </>
+        )}
 
         {/* anchor guide dots (3×3) when editing the caption position */}
         {editable &&
@@ -170,24 +174,40 @@ export const TemplatePreview: React.FC<Props> = ({ template, editable, onChange 
           </div>
         )}
 
-        {/* region layout (2-guest stacked, grid, …) */}
+        {/* region layout (2-guest stacked, grid, …) — each region a DISTINCT
+            source tile so two people read as two people, not one repeated. */}
         {isRegions &&
-          (layout.regions ?? []).map((r, i) => (
-            <div
-              key={i}
-              className="absolute z-10 flex items-end justify-start border border-dashed border-emerald-400/40 bg-emerald-400/5"
-              style={{
-                left: `${r.x * 100}%`,
-                top: `${r.y * 100}%`,
-                width: `${r.w * 100}%`,
-                height: `${r.h * 100}%`,
-              }}
-            >
-              <span className="m-1 rounded bg-black/60 px-1.5 py-0.5 text-[8px] font-bold tracking-wider text-white/90">
-                {regionLabel(r.source)}
-              </span>
-            </div>
-          ))}
+          (layout.regions ?? []).map((r, i) => {
+            const tints = [
+              { bg: "from-sky-500/25 to-sky-900/40", dot: "bg-sky-300/80" },
+              { bg: "from-amber-400/25 to-amber-900/40", dot: "bg-amber-200/80" },
+              { bg: "from-violet-500/25 to-violet-900/40", dot: "bg-violet-300/80" },
+              { bg: "from-rose-500/25 to-rose-900/40", dot: "bg-rose-300/80" },
+            ];
+            const t = tints[i % tints.length];
+            const isWide = r.source.mode === "wide";
+            return (
+              <div
+                key={i}
+                className={`absolute z-10 flex flex-col items-center justify-center gap-1 overflow-hidden border border-white/10 bg-gradient-to-b ${t.bg}`}
+                style={{
+                  left: `${r.x * 100}%`,
+                  top: `${r.y * 100}%`,
+                  width: `${r.w * 100}%`,
+                  height: `${r.h * 100}%`,
+                }}
+              >
+                {isWide ? (
+                  <div className="h-1/3 w-2/3 rounded-md border border-white/30 bg-white/10" />
+                ) : (
+                  <div className={`h-8 w-8 rounded-full ${t.dot}`} />
+                )}
+                <span className="rounded bg-black/55 px-1.5 py-0.5 text-[8px] font-bold tracking-wider text-white/90">
+                  {regionLabel(r.source)}
+                </span>
+              </div>
+            );
+          })}
 
         {/* split divider + WIDE label */}
         {isSplit && (

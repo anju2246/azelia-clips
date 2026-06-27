@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import toast from "react-hot-toast";
 import {
   Type,
@@ -286,8 +287,11 @@ export const TemplateEditorModal: React.FC<Props> = ({
     URL.revokeObjectURL(url);
   };
 
-  return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-slate-950 text-slate-100">
+  if (typeof document === "undefined") return null;
+  // Portal to <body> so the full-screen editor sits above the app sidebar
+  // (otherwise the section nav rail gets occluded by it).
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex flex-col bg-slate-950 text-slate-100">
       {/* Header */}
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-slate-800 px-4">
         <div className="flex items-center gap-2 text-sm">
@@ -879,7 +883,8 @@ export const TemplateEditorModal: React.FC<Props> = ({
           />
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };
 
