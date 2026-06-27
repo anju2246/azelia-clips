@@ -20,6 +20,7 @@ import {
   DEFAULT_INTRO_TITLE,
   DEFAULT_BRANDING,
   DEFAULT_PROGRESS_BAR,
+  twoGuestSplitLayout,
   type ClipTemplate,
   type SubtitleSpec,
   type LayoutSpec,
@@ -390,21 +391,66 @@ export const TemplateEditorModal: React.FC<Props> = ({
               <div className="flex flex-col gap-5">
                 <h3 className="text-sm font-semibold text-slate-200">Encuadre</h3>
                 <Row label="Composición">
-                  <Toggle
-                    options={[
-                      { value: "split", label: "Split" },
-                      { value: "fullscreen", label: "Full-screen" },
-                    ]}
-                    value={l.type}
-                    disabled={!editable}
-                    onChange={(v) => lay({ type: v as LayoutSpec["type"] })}
-                  />
+                  <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-800/70 p-1">
+                    {(
+                      [
+                        ["split", "1 invitado"],
+                        ["regions", "2 invitados"],
+                        ["fullscreen", "Full-screen"],
+                      ] as const
+                    ).map(([t, label]) => (
+                      <button
+                        key={t}
+                        disabled={!editable}
+                        onClick={() =>
+                          t === "regions" ? lay(twoGuestSplitLayout()) : lay({ type: t })
+                        }
+                        className={`rounded-md py-1.5 text-xs font-medium transition ${
+                          l.type === t
+                            ? "bg-emerald-500 text-white"
+                            : "text-slate-300 hover:bg-slate-700/60"
+                        } disabled:opacity-50`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <p className="mt-1 text-xs text-slate-500">
                     {l.type === "split"
                       ? "Close-up arriba + plano abierto 16:9 abajo."
-                      : "Un solo plano a pantalla completa 9:16."}
+                      : l.type === "regions"
+                        ? "Dos invitados apilados (cada cara fija en su mitad)."
+                        : "Un solo plano a pantalla completa 9:16."}
                   </p>
                 </Row>
+
+                {l.type === "regions" && (
+                  <Row label="Invitados (arriba / abajo)">
+                    <div className="flex flex-col gap-2">
+                      {(l.regions ?? []).slice(0, 2).map((r, i) => (
+                        <input
+                          key={i}
+                          value={r.source.speaker_ref ?? ""}
+                          disabled={!editable}
+                          onChange={(e) => {
+                            const regions = (l.regions ?? []).map((rg, j) =>
+                              j === i
+                                ? { ...rg, source: { ...rg.source, speaker_ref: e.target.value } }
+                                : rg,
+                            );
+                            lay({ regions });
+                          }}
+                          placeholder={i === 0 ? "Invitado de arriba" : "Invitado de abajo"}
+                          className="rounded-lg border border-slate-700 bg-slate-800/60 px-3 py-2 text-sm disabled:opacity-50"
+                        />
+                      ))}
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Asignación automática por cara (izquierda→arriba). El render fija cada cara
+                      en su mitad.
+                    </p>
+                  </Row>
+                )}
                 {l.type === "split" && (
                   <Row label="Proporción wide" value={`${Math.round(l.wide_height_ratio * 100)}%`}>
                     <Slider

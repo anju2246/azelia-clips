@@ -236,6 +236,135 @@ def compute_split_heights(
     return wide, closeup
 
 
+def _all_active(regions) -> bool:
+    """True when every region follows the active speaker (≈ a fullscreen)."""
+    return all(getattr(r.source, "mode", "active_speaker") == "active_speaker" for r in regions)
+
+
+def _identity_positions(detections) -> dict:
+    """Average (cx, cy, count) per detected face identity."""
+    from collections import defaultdict
+
+    acc = defaultdict(lambda: [0, 0, 0])
+    for d in detections:
+        if d.identity_id:
+            acc[d.identity_id][0] += d.center_x
+            acc[d.identity_id][1] += d.center_y
+            acc[d.identity_id][2] += 1
+    return {k: (v[0] // v[2], v[1] // v[2], v[2]) for k, v in acc.items() if v[2]}
+
+
+def _assign_speakers(regions, detections) -> tuple[dict, dict]:
+    """Map each distinct speaker_ref → a face identity.
+
+    Without saved labels we assign the most-seen faces, ordered left→right, to
+    the refs in order — so a 2-guest stacked split puts the left person on top,
+    the right person below. Returns (ref→identity, identity→avg-position).
+    """
+    refs: list[str] = []
+    for r in regions:
+        ref = getattr(r.source, "speaker_ref", None)
+        if getattr(r.source, "mode", "") == "speaker" and ref and ref not in refs:
+            refs.append(ref)
+    pos = _identity_positions(detections)
+    dominant = sorted(pos.keys(), key=lambda i: -pos[i][2])[: len(refs)]
+    dominant = sorted(dominant, key=lambda i: pos[i][0])  # left → right
+    return {ref: dominant[i] for i, ref in enumerate(refs) if i < len(dominant)}, pos
+
+
+def _locked_trajectory(detections, identity_id, timestamps, fallback):
+    """A trajectory that stays on one face (for stacked multi-guest regions)."""
+    from collections import defaultdict
+
+    by_ts = defaultdict(list)
+    for d in detections:
+        by_ts[round(d.timestamp, 1)].append(d)
+    pts, last = [], fallback
+    for t in timestamps:
+        face = next((d for d in by_ts.get(round(t, 1), []) if d.identity_id == identity_id), None)
+        if face:
+            last = (face.center_x, face.center_y)
+        pts.append((t, last[0], last[1]))
+    return pts
+
+
+def _reframe_regions(
+    video_path, output_path, regions, start_time, duration,
+    src_w, src_h, out_w, out_h, speaker_segments, episode_folder,
+) -> Path:
+    """Render each region (active-speaker / locked-speaker / wide) then composite.
+
+    Assumes a pre-cut clip (start at 0). Each region becomes a sub-clip at its
+    pixel size; the pure compositor stacks them and muxes normalized audio.
+    """
+    from packages.clips.vision.face_tracker import FaceTracker
+    from packages.clips.templates.compositor import build_composite_command
+    from packages.core.process_registry import run_tracked
+
+    console.print(f"[blue]📐[/blue] Layout multi-región ({len(regions)} regiones)")
+    tracker = FaceTracker(sample_fps=2.0)
+    detections = tracker.detect_faces(video_path, 0, duration)
+
+    active_traj = []
+    try:
+        active_traj = tracker.get_speaker_trajectory(
+            video_path=video_path, detections=detections, start_time=0, end_time=duration,
+            video_width=src_w, video_height=src_h,
+            speaker_segments=speaker_segments, episode_folder=episode_folder,
+        )
+    except Exception:
+        pass
+    if not active_traj:
+        active_traj = [(0.0, src_w // 2, src_h // 2)]
+
+    assign, pos = _assign_speakers(regions, detections)
+    step = 0.5
+    timestamps = [round(i * step, 1) for i in range(int((duration or 1) / step) + 1)] or [0.0]
+    try:
+        zoom = FaceTracker.compute_safe_zoom(detections, src_h)
+    except Exception:
+        zoom = 0.7
+
+    ffmpeg = shutil.which("ffmpeg") or "ffmpeg"
+    with TempFileManager(prefix="regions_") as tmp:
+        clips = []
+        for r in regions:
+            rw = (int(round(r.w * out_w)) // 2) * 2
+            rh = (int(round(r.h * out_h)) // 2) * 2
+            sub = tmp.create(".mp4")
+            mode = getattr(r.source, "mode", "active_speaker")
+            if mode == "wide":
+                from packages.core.process_registry import run_tracked as _rt
+                res = _rt([
+                    ffmpeg, "-y", "-i", str(video_path), "-t", str(duration),
+                    "-vf", f"scale={rw}:{rh}", "-c:v", "libx264", "-preset", "fast",
+                    "-crf", "23", "-an", str(sub),
+                ], capture_output=True, text=True)
+                if res.returncode != 0:
+                    raise RuntimeError(f"wide region failed: {res.stderr[-200:]}")
+            else:
+                if mode == "speaker" and assign.get(getattr(r.source, "speaker_ref", None)):
+                    idn = assign[r.source.speaker_ref]
+                    fb = (pos[idn][0], pos[idn][1]) if idn in pos else (src_w // 2, src_h // 2)
+                    traj = _locked_trajectory(detections, idn, timestamps, fb)
+                else:
+                    traj = active_traj
+                VideoReframer(output_width=rw, output_height=rh).reframe_dynamic(
+                    video_path, sub, traj, 0, duration, zoom_factor=zoom,
+                )
+            clips.append(str(sub))
+
+        cmd = build_composite_command(
+            ffmpeg, clips, regions, audio_source=str(video_path),
+            output=str(output_path), out_w=out_w, out_h=out_h,
+        )
+        res = run_tracked(cmd, capture_output=True, text=True)
+        if res.returncode != 0:
+            raise RuntimeError(f"composite failed: {res.stderr[-300:]}")
+    console.print(f"[green]✓[/green] Saved to {output_path}")
+    return output_path
+
+
 def reframe_video(
     video_path: Path | str,
     output_path: Path | str,
@@ -246,6 +375,7 @@ def reframe_video(
     speaker_segments: list[dict] | None = None,
     episode_folder: Path | str | None = None,
     layout_type: str = "split",  # "split" (close-up + wide) or "fullscreen" (face-tracked full crop)
+    regions: list | None = None,  # multi-region layout (T18); overrides layout_type when set
 ) -> Path:
     """
     Create split screen with:
@@ -285,6 +415,21 @@ def reframe_video(
     # Target dimensions (9:16 vertical)
     target_width = 1080
     target_height = 1920
+
+    # Multi-region layout (2-guest split, grid, …) — generic compositor path.
+    if regions:
+        try:
+            return _reframe_regions(
+                video_path, output_path, regions, start_time, duration,
+                src_width, src_height, target_width, target_height,
+                speaker_segments, episode_folder,
+            )
+        except Exception as e:  # noqa: BLE001 — never let a new layout break a render
+            console.print(
+                f"[yellow]⚠ Layout multi-región falló ({e}); uso "
+                f"{'split' if not _all_active(regions) else 'fullscreen'} como respaldo.[/yellow]"
+            )
+            layout_type = "fullscreen" if _all_active(regions) else "split"
 
     fullscreen = layout_type == "fullscreen"
     if fullscreen:
