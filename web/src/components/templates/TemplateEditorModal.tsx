@@ -12,18 +12,21 @@ import {
   Lock,
   Minus,
   Plus,
+  Megaphone,
 } from "lucide-react";
 import {
   TemplatesApi,
+  DEFAULT_INTRO_TITLE,
   type ClipTemplate,
   type SubtitleSpec,
   type LayoutSpec,
+  type IntroTitleSpec,
 } from "../../lib/api";
 import { TemplatePreview } from "./TemplatePreview";
 import { TemplateChat } from "./TemplateChat";
 import { assToHex, cssToAss } from "./colors";
 
-type Section = "texto" | "encuadre" | "animacion" | "presets";
+type Section = "texto" | "encuadre" | "animacion" | "hook" | "presets";
 const ANIMATIONS = ["highlight", "karaoke", "box", "cumulative"] as const;
 const FONTS = ["Montserrat", "Anton", "Bebas Neue", "Impact", "Inter", "Poppins", "Oswald"];
 
@@ -39,6 +42,7 @@ const NAV: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: "texto", label: "Texto", icon: Type },
   { id: "encuadre", label: "Encuadre", icon: Frame },
   { id: "animacion", label: "Animación", icon: Wand2 },
+  { id: "hook", label: "Hook", icon: Megaphone },
   { id: "presets", label: "Presets", icon: LayoutGrid },
 ];
 
@@ -163,6 +167,15 @@ export const TemplateEditorModal: React.FC<Props> = ({
   };
   const subs = (p: Partial<SubtitleSpec>) => patch({ subtitles: p });
   const lay = (p: Partial<LayoutSpec>) => patch({ layout: p });
+  // Hook title lives at the template root (nullable). Editing any field while
+  // it's off implicitly turns it on from the default.
+  const intro = (p: Partial<IntroTitleSpec>) => {
+    setSavedAt(false);
+    setDraft((d) => ({
+      ...d,
+      intro_title: { ...(d.intro_title ?? DEFAULT_INTRO_TITLE), ...p },
+    }));
+  };
 
   const handleSave = async () => {
     setSaving(true);
@@ -173,6 +186,7 @@ export const TemplateEditorModal: React.FC<Props> = ({
         author: draft.author,
         subtitles: draft.subtitles,
         layout: draft.layout,
+        intro_title: draft.intro_title ?? null,
       });
       setDraft(saved);
       setSavedAt(true);
@@ -371,6 +385,108 @@ export const TemplateEditorModal: React.FC<Props> = ({
                     </button>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {section === "hook" && (
+              <div className="flex flex-col gap-5">
+                <h3 className="text-sm font-semibold text-slate-200">
+                  Título inicial (hook)
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Muestra el título del clip en pantalla los primeros segundos,
+                  antes de que salgan los subtítulos. El texto sale del título
+                  que genera la curación; aquí solo defines el estilo.
+                </p>
+                <Row label="Activar">
+                  <Toggle
+                    options={[
+                      { value: "off", label: "Off" },
+                      { value: "on", label: "On" },
+                    ]}
+                    value={draft.intro_title?.enabled ? "on" : "off"}
+                    disabled={!editable}
+                    onChange={(v) => intro({ enabled: v === "on" })}
+                  />
+                </Row>
+                {draft.intro_title?.enabled && (
+                  <>
+                    <Row
+                      label="Duración"
+                      value={`${draft.intro_title.duration_s.toFixed(1)}s`}
+                    >
+                      <Slider
+                        min={1}
+                        max={8}
+                        step={0.5}
+                        value={draft.intro_title.duration_s}
+                        disabled={!editable}
+                        onChange={(v) => intro({ duration_s: v })}
+                      />
+                    </Row>
+                    <Row label="Tamaño" value={`${draft.intro_title.font_size}px`}>
+                      <Slider
+                        min={24}
+                        max={160}
+                        value={draft.intro_title.font_size}
+                        disabled={!editable}
+                        onChange={(v) => intro({ font_size: v })}
+                      />
+                    </Row>
+                    <Row label="Posición">
+                      <div className="grid grid-cols-3 gap-1 rounded-lg bg-slate-800/70 p-1">
+                        {(["top", "center", "bottom"] as const).map((pos) => (
+                          <button
+                            key={pos}
+                            disabled={!editable}
+                            onClick={() => intro({ position: pos })}
+                            className={`rounded-md py-1.5 text-sm font-medium capitalize transition ${
+                              draft.intro_title?.position === pos
+                                ? "bg-emerald-500 text-white"
+                                : "text-slate-300 hover:bg-slate-700/60"
+                            } disabled:opacity-50`}
+                          >
+                            {pos === "top" ? "Arriba" : pos === "center" ? "Centro" : "Abajo"}
+                          </button>
+                        ))}
+                      </div>
+                    </Row>
+                    <Row label="Color">
+                      <Swatch
+                        label="Texto"
+                        ass={draft.intro_title.color}
+                        disabled={!editable}
+                        onChange={(c) => intro({ color: c })}
+                      />
+                    </Row>
+                    <Row label="Caja de fondo">
+                      <Toggle
+                        options={[
+                          { value: "off", label: "No" },
+                          { value: "on", label: "Sí" },
+                        ]}
+                        value={draft.intro_title.box ? "on" : "off"}
+                        disabled={!editable}
+                        onChange={(v) => intro({ box: v === "on" })}
+                      />
+                    </Row>
+                    <Row label="Retrasar subtítulos">
+                      <Toggle
+                        options={[
+                          { value: "off", label: "No" },
+                          { value: "on", label: "Sí" },
+                        ]}
+                        value={draft.intro_title.delay_captions ? "on" : "off"}
+                        disabled={!editable}
+                        onChange={(v) => intro({ delay_captions: v === "on" })}
+                      />
+                      <p className="mt-1 text-xs text-slate-500">
+                        Si está activo, los subtítulos no aparecen hasta que
+                        termina el título.
+                      </p>
+                    </Row>
+                  </>
+                )}
               </div>
             )}
 

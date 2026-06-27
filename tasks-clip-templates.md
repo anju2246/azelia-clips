@@ -477,7 +477,7 @@ clip (concat por re-encode). Rutas ausentes → warning, se omiten (no aborta).
 ---
 
 ## Task T13: Hook title (título los primeros N segundos antes de los captions)  — **scope nuevo (firma)**
-**Status:** [ ]
+**Status:** [x]  — render + API + editor + tests. **Verificación visual pendiente** (clip real).
 **Complexity:** L
 **Dependencies:** T1, T3
 **Parallelizable with:** T10, T11

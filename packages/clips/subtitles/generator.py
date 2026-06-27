@@ -115,12 +115,33 @@ Style: Highlight,{s.font_name},{s.font_size},{s.secondary_color},{s.primary_colo
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 """
 
+    def _intro_title_event(self, text: str, spec) -> str:
+        """An ASS Dialogue drawing the hook title for the first `duration_s`.
+
+        Uses inline override tags on the existing style (so the header — and
+        thus a clip without a title — is byte-for-byte unchanged). The box is
+        approximated with a thick outline since BorderStyle can't be set inline.
+        """
+        end = self._format_time(float(getattr(spec, "duration_s", 4.0)))
+        an = {"top": 8, "center": 5, "bottom": 2}.get(getattr(spec, "position", "center"), 5)
+        font = getattr(spec, "font_name", "") or self.style.font_name
+        size = int(getattr(spec, "font_size", 72))
+        color = getattr(spec, "color", "&H00FFFFFF")
+        ocolor = getattr(spec, "outline_color", "&H00000000")
+        bord = 8 if getattr(spec, "box", True) else 4
+        # Neutralize any ASS override braces in user-derived text.
+        safe = text.replace("{", "(").replace("}", ")").replace("\n", " ").strip()
+        tags = f"\\an{an}\\fn{font}\\fs{size}\\c{color}\\3c{ocolor}\\bord{bord}\\shad0"
+        return f"Dialogue: 0,0:00:00.00,{end},{self.style.name},,0,0,0,,{{{tags}}}{safe}"
+
     def generate_word_by_word(
         self,
         transcript: Transcript,
         output_path: Path | str,
         words_per_line: int = 3,
         animation: str = "highlight",  # highlight, karaoke, or box
+        intro_title=None,  # IntroTitleSpec | None — hook title card (T13)
+        clip_title: str = "",  # curated title text for the hook card
     ) -> Path:
         """
         Generate ASS subtitles with word-by-word animation.
@@ -130,12 +151,28 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
             output_path: Output .ass file path
             words_per_line: Max words to show per subtitle line
             animation: Animation style (highlight, karaoke, box)
+            intro_title: Optional hook-title spec (enabled/duration/style/…).
+            clip_title: Title text for the hook card (from curation). When the
+                spec is enabled and this is non-empty, a title is drawn for the
+                first `duration_s`; if `delay_captions`, captions starting inside
+                that window are suppressed so the title shows first.
 
         Returns:
             Path to generated .ass file
         """
         output_path = Path(output_path)
         lines = [self._generate_header()]
+
+        # Hook title (T13): drawn before captions; controls a suppression window.
+        title_on = bool(
+            intro_title
+            and getattr(intro_title, "enabled", False)
+            and clip_title.strip()
+        )
+        title_end = float(getattr(intro_title, "duration_s", 0.0)) if title_on else 0.0
+        delay_captions = title_on and bool(getattr(intro_title, "delay_captions", False))
+        if title_on:
+            lines.append(self._intro_title_event(clip_title, intro_title))
 
         # Collect all words with timing
         all_words = []
@@ -155,6 +192,11 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 
             group_start = group[0].start
             group_end = group[-1].end
+
+            # Hold captions until the hook title finishes (keeps A/V sync by
+            # dropping the covered words rather than time-shifting them).
+            if delay_captions and group_start < title_end:
+                continue
 
             if animation == "highlight":
                 # Show each word individually with highlight color
