@@ -372,14 +372,18 @@ async def import_niche(body: dict = Body(default={}), user: User = Depends(requi
     path = (body or {}).get("path") or getattr(_settings, "podfinder_signals_path", "") or ""
     if not path:
         raise HTTPException(status_code=422, detail={"code": "NO_PATH", "message": "No signals JSON path provided"})
+    # Solo archivos .json (defensa contra lectura de archivos arbitrarios).
+    if not str(path).lower().endswith(".json"):
+        raise HTTPException(status_code=422, detail={"code": "INVALID_PATH", "message": "Path must be a .json file"})
 
     conn = _get_yt_db()
     try:
         result = import_niche_signals(conn, path)
     except FileNotFoundError:
-        raise HTTPException(status_code=404, detail={"code": "FILE_NOT_FOUND", "message": "Signals JSON not found"})
+        raise HTTPException(status_code=404, detail={"code": "FILE_NOT_FOUND", "message": "Signals file not found"})
     except ValueError as e:
-        raise HTTPException(status_code=422, detail={"code": "INVALID_JSON", "message": str(e)})
+        logger.warning("Niche import failed: %s", e)  # detalle solo en logs internos
+        raise HTTPException(status_code=422, detail={"code": "INVALID_JSON", "message": "Invalid signals file format"})
     finally:
         conn.close()
     return result

@@ -11,11 +11,14 @@ métrica primaria y el engagement como respaldo cuando no hay retención.
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 # Buckets de duración (mismos cortes que usa el resto del sistema).
 _DURATION_BUCKETS = [("0-15s", 0, 15), ("15-30s", 15, 30), ("30-45s", 30, 45), ("45-60s", 45, 60)]
@@ -62,7 +65,8 @@ def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local
     ).fetchall():
         try:
             attr_by_video[vid] = json.loads(aj or "{}")
-        except Exception:
+        except Exception as e:
+            logger.warning("clip_attrs parse failed for video %s: %s", vid, e)
             attr_by_video[vid] = {}
 
     recs = []

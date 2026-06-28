@@ -13,12 +13,25 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Union
 
 logger = logging.getLogger(__name__)
+
+# Identificador SQL seguro. Las columnas vienen SOLO de las constantes de abajo,
+# pero validamos defensivamente para que ningún cambio futuro abra inyección por
+# nombre de columna (las queries se construyen con f-string sobre estos nombres).
+_SAFE_IDENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _safe_cols(cols: list) -> list:
+    bad = [c for c in cols if not _SAFE_IDENT.match(c)]
+    if bad:
+        raise ValueError(f"Unsafe column identifier(s): {bad}")
+    return cols
 
 # Columnas de niche_signals que se mapean 1:1 desde el JSON (excepto pattern→pattern_json).
 _SIGNAL_FIELDS = (
@@ -53,7 +66,7 @@ def _insert_signal(conn: sqlite3.Connection, rec: dict, now: str) -> bool:
     values = [rec.get(f) for f in _SIGNAL_FIELDS]
     pattern = rec.get("pattern")
     pattern_json = json.dumps(pattern, ensure_ascii=False, sort_keys=True) if pattern else None
-    cols = list(_SIGNAL_FIELDS) + ["pattern_json", "imported_at"]
+    cols = _safe_cols(list(_SIGNAL_FIELDS) + ["pattern_json", "imported_at"])
     placeholders = ",".join(["?"] * len(cols))
     conn.execute(
         f"INSERT OR REPLACE INTO niche_signals ({','.join(cols)}) VALUES ({placeholders})",
@@ -66,7 +79,7 @@ def _insert_baseline(conn: sqlite3.Connection, rec: dict, now: str) -> bool:
     if not isinstance(rec, dict) or not rec.get("metric_type"):
         return False
     values = [rec.get(f) for f in _BASELINE_FIELDS]
-    cols = list(_BASELINE_FIELDS) + ["imported_at"]
+    cols = _safe_cols(list(_BASELINE_FIELDS) + ["imported_at"])
     placeholders = ",".join(["?"] * len(cols))
     conn.execute(
         f"INSERT OR REPLACE INTO niche_baselines ({','.join(cols)}) VALUES ({placeholders})",
