@@ -476,6 +476,55 @@ async def update_clip_link(link_id: int, body: dict = Body(...), user: User = De
         conn.close()
 
 
+@router.post("/analytics/intelligence/refresh")
+async def refresh_intelligence(body: dict = Body(default={}), user: User = Depends(require_auth)):
+    """Refresca la inteligencia de curación: recomputa CREATOR SELF (retención)
+    y devuelve un resumen. Bloquea si hay un job de curación activo.
+
+    El sync de YouTube (red) se dispara aparte (auto-sync); aquí consolidamos
+    las señales locales para que los agentes las usen en la próxima corrida.
+    """
+    from server.services.jobs_guard import has_active_jobs
+    from packages.core.services.creator_self import compute_creator_self_signals
+
+    active, ids = has_active_jobs()
+    if active:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "ACTIVE_JOBS", "message": "A curation job is running", "job_ids": ids},
+        )
+
+    conn = _get_yt_db()
+    try:
+        creator_self = compute_creator_self_signals(conn, user.id).get("written", 0)
+        shorts = conn.execute(
+            "SELECT COUNT(*) FROM youtube_shorts WHERE user_id=?", (user.id,)
+        ).fetchone()[0]
+        with_retention = conn.execute(
+            "SELECT COUNT(*) FROM youtube_shorts WHERE user_id=? AND average_view_percentage IS NOT NULL",
+            (user.id,),
+        ).fetchone()[0]
+        niche = conn.execute("SELECT COUNT(*) FROM niche_signals").fetchone()[0]
+        creator_total = conn.execute(
+            "SELECT COUNT(*) FROM creator_signals WHERE user_id=?", (user.id,)
+        ).fetchone()[0]
+        links = conn.execute(
+            "SELECT COUNT(*) FROM clip_links WHERE user_id=? AND status='suggested'", (user.id,)
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    return {
+        "status": "refreshed",
+        "shorts": shorts,
+        "with_retention": with_retention,
+        "creator_signals": creator_total,
+        "creator_self_written": creator_self,
+        "niche_signals": niche,
+        "links_suggested": links,
+    }
+
+
 def _get_user_id_from_auth(authorization: str) -> str | None:
     """Extract user_id from a Supabase JWT Authorization header.
     Uses server-side JWT verification via Supabase API (no manual decode).

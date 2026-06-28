@@ -224,6 +224,67 @@ async function fetchApi<T>(
   return response.json() as Promise<T>;
 }
 
+// --- CLIP PERFORMANCE INTELLIGENCE (CPI) API ---
+
+export interface ClipLink {
+  id: number;
+  episode_id: string;
+  clip_title: string | null;
+  video_id: string | null;
+  match_confidence: number;
+  match_method?: string;
+  status: string;
+}
+
+export const CpiApi = {
+  /** Importa señales niche (resultados de PodFinder) a la DB local. */
+  importNiche: (path?: string) =>
+    fetchApi<{ signals_imported: number; baselines_imported: number; skipped: number }>(
+      "/analytics/niche/import",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(path ? { path } : {}),
+      },
+    ),
+
+  /** Genera candidatos de vínculo clip↔video (auto-match). */
+  suggestLinks: (episodeId?: string) =>
+    fetchApi<{ suggested: ClipLink[]; count: number }>("/analytics/clip-links/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(episodeId ? { episode_id: episodeId } : {}),
+    }),
+
+  /** Lista vínculos por estado (suggested|confirmed|rejected). */
+  listLinks: (status: string = "suggested") =>
+    fetchApi<{ links: ClipLink[] }>(`/analytics/clip-links?status=${encodeURIComponent(status)}`),
+
+  /** Confirma o rechaza un vínculo. */
+  updateLink: (id: number, action: "confirm" | "reject", videoId?: string) =>
+    fetchApi<ClipLink>(`/analytics/clip-links/${id}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action, ...(videoId ? { video_id: videoId } : {}) }),
+    }),
+
+  /** Recomputa la inteligencia de curación (CREATOR SELF) y devuelve resumen. */
+  refresh: () =>
+    fetchApi<{
+      status: string;
+      shorts: number;
+      with_retention: number;
+      creator_signals: number;
+      creator_self_written: number;
+      niche_signals: number;
+      links_suggested: number;
+    }>("/analytics/intelligence/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirmed: true }),
+    }),
+};
+
 // --- CLIPS & EPISODES API ---
 
 export const ClipsApi = {
