@@ -247,6 +247,113 @@ def _get_yt_db():
     """)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_creator_signals_user ON creator_signals(user_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_creator_signals_premium ON creator_signals(user_id, performance_premium DESC)")
+    # CREATOR SELF señales ahora pueden ponderarse por retención real.
+    try:
+        conn.execute("ALTER TABLE creator_signals ADD COLUMN avg_retention_pct REAL")
+    except Exception:
+        pass  # columna ya existe
+
+    # ── Clip Performance Intelligence (CPI) ──────────────────────────────
+    # Local-first, sin Supabase. Dos capas de inteligencia para los agentes:
+    #   NICHE        = señales ya computadas por PodFinder, importadas tal cual.
+    #   CREATOR SELF = desempeño real del propio creador (creator_signals + retención).
+
+    # NICHE: espejo de ic_signals_ready.json (source_type='podintel_public').
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS niche_signals (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            signal_type TEXT,
+            region TEXT,
+            language TEXT,
+            category TEXT,
+            episode_format TEXT,
+            period TEXT,
+            duration_bucket TEXT,
+            pattern_json TEXT,
+            metric_type TEXT,
+            metric_value REAL,
+            performance_premium REAL,
+            adoption_rate REAL,
+            saturation TEXT,
+            trend_direction TEXT,
+            trend_velocity REAL,
+            sample_size INTEGER,
+            confidence REAL,
+            source_type TEXT,
+            imported_at TEXT
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_niche_segment "
+        "ON niche_signals(language, region, category)"
+    )
+    # Dedupe de re-imports. Usamos COALESCE porque SQLite trata NULL como
+    # distinto en UNIQUE — y muchas señales tienen columnas de segmento NULL.
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_niche_unique ON niche_signals(
+            signal_type,
+            COALESCE(region, ''), COALESCE(language, ''), COALESCE(category, ''),
+            COALESCE(episode_format, ''), COALESCE(duration_bucket, ''),
+            COALESCE(metric_type, ''), COALESCE(pattern_json, ''),
+            COALESCE(period, '')
+        )
+    """)
+
+    # NICHE baselines: espejo de ic_baselines_ready.json (percentiles por segmento).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS niche_baselines (
+            region TEXT,
+            language TEXT,
+            category TEXT,
+            platform TEXT,
+            metric_type TEXT,
+            p25 REAL,
+            p50 REAL,
+            p75 REAL,
+            p90 REAL,
+            sample_size INTEGER,
+            imported_at TEXT,
+            PRIMARY KEY (region, language, category, platform, metric_type)
+        )
+    """)
+
+    # Curva de retención por video (dónde se va la gente).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS retention_curves (
+            video_id TEXT NOT NULL,
+            user_id TEXT NOT NULL DEFAULT 'local',
+            curve_json TEXT,
+            drop_off_ratio REAL,
+            fetched_at TEXT,
+            PRIMARY KEY (video_id, user_id)
+        )
+    """)
+
+    # Vínculo clip generado ↔ video subido a YouTube (auto-match + confirmación).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS clip_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT 'local',
+            episode_id TEXT NOT NULL,
+            clip_title TEXT,
+            clip_caption TEXT,
+            clip_start REAL,
+            clip_end REAL,
+            clip_duration REAL,
+            clip_attrs_json TEXT,
+            video_id TEXT,
+            match_confidence REAL DEFAULT 0.0,
+            match_method TEXT,
+            status TEXT DEFAULT 'suggested',
+            created_at TEXT,
+            updated_at TEXT,
+            UNIQUE (user_id, episode_id, clip_start, clip_end)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_clip_links_status "
+        "ON clip_links(user_id, status)"
+    )
     conn.commit()
     return conn
 
