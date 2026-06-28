@@ -385,6 +385,97 @@ async def import_niche(body: dict = Body(default={}), user: User = Depends(requi
     return result
 
 
+def _load_curation_for_episode(jobs_dir: Path, episode_dir_name: str) -> list:
+    """Carga curation.json del job/episodio. Devuelve [] si no existe."""
+    import json as _json
+    cur = jobs_dir / episode_dir_name / "curation.json"
+    if not cur.exists():
+        return []
+    try:
+        data = _json.loads(cur.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+@router.post("/analytics/clip-links/suggest")
+async def suggest_clip_links(body: dict = Body(default={}), user: User = Depends(require_auth)):
+    """Genera candidatos de vínculo clip↔video (auto-match, status 'suggested')."""
+    from packages.core.services.clip_match import suggest_links
+    from packages.core.config import settings as _settings
+
+    episode_id = (body or {}).get("episode_id")
+    jobs_dir = Path(_settings.data_dir) / "jobs"
+
+    if episode_id:
+        if "/" in episode_id or "\\" in episode_id or ".." in episode_id:
+            raise HTTPException(status_code=422, detail={"code": "INVALID_EPISODE", "message": "Invalid episode id"})
+        if not (jobs_dir / episode_id).exists():
+            raise HTTPException(status_code=404, detail={"code": "EPISODE_NOT_FOUND", "message": "Episode not found"})
+        targets = [episode_id]
+    else:
+        targets = (
+            [d.name for d in jobs_dir.glob("*") if (d / "curation.json").exists()]
+            if jobs_dir.exists() else []
+        )
+
+    conn = _get_yt_db()
+    try:
+        shorts = [
+            {"video_id": r[0], "title": r[1], "duration_seconds": r[2]}
+            for r in conn.execute(
+                "SELECT video_id, title, duration_seconds FROM youtube_shorts WHERE user_id=?",
+                (user.id,),
+            ).fetchall()
+        ]
+        all_out = []
+        for ep in targets:
+            clips = _load_curation_for_episode(jobs_dir, ep)
+            if clips:
+                all_out += suggest_links(conn, clips, shorts, episode_id=ep, user_id=user.id)
+    finally:
+        conn.close()
+    return {"suggested": all_out, "count": len(all_out)}
+
+
+@router.get("/analytics/clip-links")
+async def list_clip_links(status: str = "suggested", user: User = Depends(require_auth)):
+    conn = _get_yt_db()
+    try:
+        rows = conn.execute(
+            "SELECT id, episode_id, clip_title, video_id, match_confidence, "
+            "match_method, status FROM clip_links WHERE user_id=? AND status=? "
+            "ORDER BY match_confidence DESC",
+            (user.id, status),
+        ).fetchall()
+    finally:
+        conn.close()
+    cols = ["id", "episode_id", "clip_title", "video_id", "match_confidence", "match_method", "status"]
+    return {"links": [dict(zip(cols, r)) for r in rows]}
+
+
+@router.post("/analytics/clip-links/{link_id}")
+async def update_clip_link(link_id: int, body: dict = Body(...), user: User = Depends(require_auth)):
+    """Confirma o rechaza un candidato de vínculo."""
+    from packages.core.services.clip_match import confirm_link, reject_link
+
+    action = (body or {}).get("action")
+    conn = _get_yt_db()
+    try:
+        if action == "confirm":
+            res = confirm_link(conn, link_id, (body or {}).get("video_id"), user.id)
+            if res is None:
+                raise HTTPException(status_code=404, detail={"code": "LINK_NOT_FOUND", "message": "Link not found"})
+            return res
+        if action == "reject":
+            if not reject_link(conn, link_id, user.id):
+                raise HTTPException(status_code=404, detail={"code": "LINK_NOT_FOUND", "message": "Link not found"})
+            return {"id": link_id, "status": "rejected"}
+        raise HTTPException(status_code=422, detail={"code": "INVALID_ACTION", "message": "action must be confirm|reject"})
+    finally:
+        conn.close()
+
+
 def _get_user_id_from_auth(authorization: str) -> str | None:
     """Extract user_id from a Supabase JWT Authorization header.
     Uses server-side JWT verification via Supabase API (no manual decode).
