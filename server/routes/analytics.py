@@ -194,6 +194,14 @@ def _get_yt_db():
             )
         """)
 
+    # Privacidad del video (public|unlisted|private). Los unlisted/private son
+    # archivos de trabajo (cortes en bruto, episodios completos) que NO deben
+    # contaminar las señales de "qué le funciona al creador".
+    try:
+        conn.execute("ALTER TABLE youtube_shorts ADD COLUMN privacy_status TEXT")
+    except Exception:
+        pass  # columna ya existe
+
     # ── Multi-user connection store (replaces old youtube_sync_meta) ──
     conn.execute("""
         CREATE TABLE IF NOT EXISTS youtube_connections (
@@ -1763,7 +1771,7 @@ async def _sync_channel(
         batch = all_video_ids[i : i + 50]
         vid_res = http_requests.get(
             f"{YT_API}/videos",
-            params={"part": "snippet,contentDetails,statistics", "id": ",".join(batch)},
+            params={"part": "snippet,contentDetails,statistics,status", "id": ",".join(batch)},
             headers=headers,
         )
 
@@ -1789,6 +1797,7 @@ async def _sync_channel(
                     "channel_name": channel_name,
                     "channel_id": channel_id,
                     "thumbnail_url": thumb_url,
+                    "privacy_status": video.get("status", {}).get("privacyStatus"),
                 }
             )
 
@@ -1806,8 +1815,8 @@ async def _sync_channel(
         conn.execute(
             """
             INSERT OR REPLACE INTO youtube_shorts
-            (video_id, user_id, title, published_at, duration_seconds, view_count, like_count, comment_count, channel_name, channel_id, thumbnail_url, synced_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (video_id, user_id, title, published_at, duration_seconds, view_count, like_count, comment_count, channel_name, channel_id, thumbnail_url, synced_at, privacy_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 s["video_id"],
@@ -1822,6 +1831,7 @@ async def _sync_channel(
                 s["channel_id"],
                 s["thumbnail_url"],
                 now,
+                s.get("privacy_status"),
             ),
         )
 

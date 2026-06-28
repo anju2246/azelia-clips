@@ -80,6 +80,49 @@ def test_confirmed_clip_attribution(conn):
     assert topic[1] == pytest.approx(75.0, abs=0.1)
 
 
+def _short_priv(conn, vid, hook, retention, privacy, views=100, likes=10, comments=2):
+    conn.execute(
+        "INSERT INTO youtube_shorts (video_id, user_id, hook_type, duration_seconds, "
+        "average_view_percentage, view_count, like_count, comment_count, privacy_status) "
+        "VALUES (?, 'local', ?, 20, ?, ?, ?, ?, ?)",
+        (vid, hook, retention, views, likes, comments, privacy),
+    )
+    conn.commit()
+
+
+def test_excludes_private_and_unlisted(conn):
+    c, _ = conn
+    # 2 públicos con hook 'question' + 1 privado + 1 unlisted con el MISMO hook
+    _short_priv(c, "p1", "question", 80.0, "public")
+    _short_priv(c, "p2", "question", 80.0, "public")
+    _short_priv(c, "x1", "question", 95.0, "private")
+    _short_priv(c, "x2", "question", 95.0, "unlisted")
+    compute_creator_self_signals(c)
+    sig = c.execute(
+        "SELECT sample_size, avg_retention_pct FROM creator_signals "
+        "WHERE signal_type='creator_self' AND hook_type='question'"
+    ).fetchone()
+    assert sig is not None
+    assert sig[0] == 2          # solo los 2 públicos cuentan, no los 4
+    assert sig[1] == pytest.approx(80.0, abs=0.1)  # retención del privado (95) NO contamina
+
+
+def test_null_privacy_still_included(conn):
+    """Videos sin privacy_status (no backfilleados) siguen contando (sin regresión)."""
+    c, _ = conn
+    c.execute(
+        "INSERT INTO youtube_shorts (video_id, user_id, hook_type, duration_seconds, "
+        "average_view_percentage, view_count, like_count, comment_count) "
+        "VALUES ('n1','local','story',20,50.0,100,5,1)"
+    )
+    c.commit()
+    res = compute_creator_self_signals(c)
+    assert res["written"] >= 1
+    assert c.execute(
+        "SELECT COUNT(*) FROM creator_signals WHERE signal_type='creator_self' AND hook_type='story'"
+    ).fetchone()[0] == 1
+
+
 def test_creator_hints_mention_retention(conn):
     c, db_path = conn
     _short(c, "v1", "question", 20, 82.0)

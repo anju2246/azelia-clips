@@ -49,10 +49,15 @@ def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local
     los shorts + clips confirmados. Idempotente: borra las previas del usuario
     y reescribe. Devuelve {written, median_retention}.
     """
+    # Solo contenido PÚBLICO. Los unlisted/private (cortes en bruto, episodios
+    # completos, archivos de trabajo) no representan lo que ve la audiencia, así
+    # que no deben sesgar las señales. NULL = privacidad aún no backfilleada ⇒
+    # se incluye para no regresionar instalaciones sin ese dato.
     rows = conn.execute(
         "SELECT video_id, hook_type, emotional_charge, duration_seconds, "
         "average_view_percentage, view_count, like_count, comment_count "
-        "FROM youtube_shorts WHERE user_id=?",
+        "FROM youtube_shorts WHERE user_id=? "
+        "AND (privacy_status IS NULL OR privacy_status='public')",
         (user_id,),
     ).fetchall()
 
