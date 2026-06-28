@@ -26,9 +26,21 @@ Catálogo de acciones (campo "type"):
 - drop        {"type":"drop","targets":[ids]}            → quita clips de la selección
 - rescue      {"type":"rescue","targets":[ids]}          → reactiva clips (incl. descartados/bajo umbral)
 - reorder     {"type":"reorder","order":[ids]}           → reordena por prioridad
-- adjust_times{"type":"adjust_times","id":N,"start_time":s,"end_time":e}
+- adjust_times{"type":"adjust_times","id":N,"start_time":s,"end_time":e}  → mueve el inicio/fin de #N
+- trim_to_text{"type":"trim_to_text","id":N,"keep_text":"<fragmento EXACTO a conservar>"}
+              → recorta #N para que contenga SOLO ese fragmento citado (resuelto a tiempos por el backend)
 - find_new    {"type":"find_new","window_start":s,"window_end":e,"hint":"qué buscar"}
 - noop        {"type":"noop","reason":"por qué no actuaste / qué aclaración necesitas"}
+
+FOCO INDIVIDUAL (CRÍTICO): el usuario revisa los clips de a UNO. El feedback es SIEMPRE sobre el
+clip en foco salvo que nombre OTRO clip por su número. NUNCA apliques un cambio global a todos los
+clips a partir de feedback de un clip. Solo usa `drop` cuando el usuario nombre explícitamente otros
+clips ("quita el 5 y el 8"); jamás para "limpiar el resto".
+
+RECORTE POR TEXTO: si sobre el clip en foco el usuario pega un fragmento del transcript y dice cosas
+como "déjalo solo con esto", "saca solo esta parte", "recórtalo a esto", "lo demás bórralo/quítalo/
+elimínalo" → usa trim_to_text con id = clip en foco y keep_text = el fragmento citado TAL CUAL.
+Aquí "lo demás" significa el resto DEL MISMO CLIP, NUNCA otros clips. No emitas drop en este caso.
 
 PRIORIZACIÓN: para CUALQUIER pedido de priorizar/ordenar por un enfoque — sea una dimensión
 ("los más polémicos", "los de más energía") o algo temático/semántico ("los que hablan de IA",
@@ -52,9 +64,14 @@ class BriefAgent:
         message: str,
         candidates: List[BriefCandidate],
         history: Optional[List[ChatMessage]] = None,
+        focus_id: Optional[int] = None,
     ) -> List[BriefAction]:
-        """Return the BriefActions the user's message implies (≥1; [noop] on failure)."""
-        user_message = self._build_user_message(message, candidates, history)
+        """Return the BriefActions the user's message implies (≥1; [noop] on failure).
+
+        ``focus_id`` is the candidate the user is reviewing on screen (one-by-one
+        flow); when set, ambiguous feedback resolves to that clip.
+        """
+        user_message = self._build_user_message(message, candidates, history, focus_id)
         try:
             raw = self._llm.chat(
                 system_prompt=_SYSTEM_PROMPT,
@@ -66,12 +83,21 @@ class BriefAgent:
             return [BriefAction(type="noop", reason=f"No pude interpretar el mensaje ({e}).")]
 
     def _build_user_message(
-        self, message, candidates, history: Optional[List[ChatMessage]]
+        self, message, candidates, history: Optional[List[ChatMessage]], focus_id=None
     ) -> str:
         lines = ["## Candidatos actuales"]
         for c in candidates:
             mark = "✓" if c.selected else "·"
-            lines.append(f"[{mark}] #{c.id} ({c.score:.0f}) {c.title}  [{c.start_time:.0f}s-{c.end_time:.0f}s]")
+            star = " ← EN FOCO" if focus_id is not None and c.id == focus_id else ""
+            lines.append(f"[{mark}] #{c.id} ({c.score:.0f}) {c.title}  [{c.start_time:.0f}s-{c.end_time:.0f}s]{star}")
+        if focus_id is not None:
+            lines.append(
+                f"\n## Clip en foco: #{focus_id}\n"
+                f"El usuario está revisando EXCLUSIVAMENTE el clip #{focus_id}. "
+                f"Cualquier referencia ambigua ('recórtalo', 'quítalo', 'más corto', "
+                f"'busca un mejor cierre/arranque', 'no me convence') aplica al #{focus_id}. "
+                f"No toques otros clips salvo que el usuario los nombre explícitamente."
+            )
         if history:
             lines.append("\n## Conversación previa")
             for m in history[-6:]:

@@ -32,6 +32,7 @@ export interface BriefChatMessage {
   role: "user" | "assistant";
   content: string;
   change_summary?: string | null;
+  clip_id?: number | null;
 }
 
 export interface BriefCounts {
@@ -405,11 +406,13 @@ export const ClipsApi = {
   getBrief: (jobId: string) =>
     fetchApi<BriefResponse>(`/jobs/${jobId}/brief`),
 
-  sendBriefMessage: (jobId: string, message: string) =>
+  sendBriefMessage: (jobId: string, message: string, focusId?: number) =>
     fetchApi<BriefMessageResponse>(`/jobs/${jobId}/brief/message`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(
+        focusId != null ? { message, focus_id: focusId } : { message },
+      ),
     }),
 
   approveBrief: (jobId: string, selectedIds?: number[]) =>

@@ -96,3 +96,50 @@ def test_prompt_steers_prioritization_to_reorder_and_drops_recurate():
     system = kwargs.get("system_prompt", "")
     assert "recurate_focus" not in system  # deterministic re-rank retired
     assert "reorder" in system and "prioriz" in system.lower()  # steer priorities to reorder
+
+
+def test_focus_id_scopes_prompt_to_current_clip():
+    # In the one-by-one flow the UI tells the agent which clip is on screen, so
+    # ambiguous feedback ("recórtalo", "quítalo") resolves to that clip.
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("recórtalo 5s", _candidates(), focus_id=2)
+    _, kwargs = fake_llm.chat.call_args
+    sent = kwargs.get("system_prompt", "") + " " + kwargs.get("user_message", "")
+    assert "#2" in sent  # the focused clip is named
+    assert "foco" in sent.lower()  # an explicit focus marker is present
+
+
+def test_trim_to_text_in_catalog_and_parses():
+    raw = json.dumps({"actions": [
+        {"type": "trim_to_text", "id": 1, "keep_text": "esto es la parte buena"},
+    ]})
+    agent, fake_llm = _agent_with_llm_returning(raw)
+    actions = agent.interpret("déjalo solo con esto: ...", _candidates(), focus_id=1)
+    assert actions[0].type == "trim_to_text"
+    assert actions[0].id == 1 and "parte buena" in actions[0].keep_text
+    # the catalog + steering must be in the prompt
+    _, kwargs = fake_llm.chat.call_args
+    system = kwargs.get("system_prompt", "")
+    assert "trim_to_text" in system
+    assert "lo demás" in system.lower() or "lo demas" in system.lower()
+
+
+def test_focus_steering_says_dont_touch_other_clips():
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("recórtalo y lo demás bórralo", _candidates(), focus_id=1)
+    _, kwargs = fake_llm.chat.call_args
+    sent = kwargs.get("system_prompt", "") + " " + kwargs.get("user_message", "")
+    # the focused clip is named and other clips are protected unless named
+    assert "#1" in sent
+    assert "drop" in sent.lower()
+
+
+def test_focus_id_absent_keeps_global_prompt():
+    # Without a focus the user message must not fabricate a specific focused clip
+    # (the system prompt still explains the concept; the dynamic block does not).
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("ordena por polémica", _candidates())
+    _, kwargs = fake_llm.chat.call_args
+    user_msg = kwargs.get("user_message", "")
+    assert "Clip en foco" not in user_msg
+    assert "EN FOCO" not in user_msg

@@ -1,5 +1,14 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Loader2, X, Send, Check, ChevronDown, ChevronRight } from "lucide-react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Loader2,
+  X,
+  Send,
+  Check,
+  Trash2,
+  ChevronRight,
+  ChevronLeft,
+  ChevronDown,
+} from "lucide-react";
 import toast from "react-hot-toast";
 import {
   ClipsApi,
@@ -13,11 +22,13 @@ interface BriefChatModalProps {
   onApproved: () => void;
 }
 
+type Decision = "approved" | "discarded" | "pending";
+
 function OriginBadge({ c }: { c: BriefCandidate }) {
   if (!c.critic_approved) {
     return (
       <span className="text-[10px] uppercase tracking-wide text-amber-400/80">
-        descartado
+        descartado por el crítico
       </span>
     );
   }
@@ -42,35 +53,29 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [approving, setApproving] = useState(false);
-  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
+  const [idx, setIdx] = useState(0); // current candidate (or === length → summary)
+  const [discarded, setDiscarded] = useState<Set<number>>(new Set());
+  const [showTranscript, setShowTranscript] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
 
-  const toggleExpand = (id: number) => {
-    setExpanded((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  };
+  const candidates = brief?.candidates ?? [];
+  const total = candidates.length;
+  const onSummary = idx >= total && total > 0;
+  const current: BriefCandidate | undefined = candidates[idx];
 
-  const toggleSelect = (id: number) => {
-    setBrief((prev) =>
-      prev
-        ? {
-            ...prev,
-            candidates: prev.candidates.map((c) =>
-              c.id === id ? { ...c, selected: !c.selected } : c,
-            ),
-          }
-        : prev,
-    );
-  };
-
+  // ── Load the brief ────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     ClipsApi.getBrief(jobId)
       .then((b) => {
-        if (!cancelled) setBrief(b);
+        if (cancelled) return;
+        setBrief(b);
+        // Seed discarded set: critic-rejected / below-threshold start unselected.
+        const seed = new Set(
+          b.candidates.filter((c) => !c.selected).map((c) => c.id),
+        );
+        setDiscarded(seed);
       })
       .catch((e: any) => {
         if (!cancelled) setError(e?.message || "No se pudo cargar el brief");
@@ -83,18 +88,73 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
     };
   }, [jobId]);
 
+  // Collapse transcript + scroll chat whenever we move to another clip.
+  useEffect(() => {
+    setShowTranscript(false);
+  }, [idx]);
+
+  const clipMessages = useMemo(
+    () =>
+      current
+        ? (brief?.messages ?? []).filter((m) => m.clip_id === current.id)
+        : [],
+    [brief?.messages, current?.id],
+  );
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [brief?.messages.length]);
+  }, [clipMessages.length]);
 
+  // ── Decisions ─────────────────────────────────────────────────────
+  const decisionFor = (c: BriefCandidate): Decision => {
+    if (discarded.has(c.id)) return "discarded";
+    if (c.selected) return "approved";
+    return "pending";
+  };
+
+  const setSelected = (id: number, selected: boolean) => {
+    setBrief((prev) =>
+      prev
+        ? {
+            ...prev,
+            candidates: prev.candidates.map((c) =>
+              c.id === id ? { ...c, selected } : c,
+            ),
+          }
+        : prev,
+    );
+  };
+
+  const advance = () => setIdx((i) => Math.min(i + 1, total));
+
+  const approveCurrent = () => {
+    if (!current) return;
+    setDiscarded((prev) => {
+      const next = new Set(prev);
+      next.delete(current.id);
+      return next;
+    });
+    setSelected(current.id, true);
+    advance();
+  };
+
+  const discardCurrent = () => {
+    if (!current) return;
+    setDiscarded((prev) => new Set(prev).add(current.id));
+    setSelected(current.id, false);
+    advance();
+  };
+
+  // ── Chat (scoped to the current clip) ─────────────────────────────
   const send = async () => {
     const message = input.trim();
-    if (!message || sending) return;
+    if (!message || sending || !current) return;
     setSending(true);
     try {
-      const res = await ClipsApi.sendBriefMessage(jobId, message);
+      const res = await ClipsApi.sendBriefMessage(jobId, message, current.id);
       setBrief(res);
       setInput("");
+      setShowTranscript(true); // reveal the (possibly re-cut) transcript so the change is visible
     } catch (e: any) {
       toast.error(e?.message || "No se pudo enviar el feedback");
     } finally {
@@ -102,17 +162,19 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
     }
   };
 
-  const approve = async () => {
-    if (!brief || approving) return;
-    const selectedIds = brief.candidates.filter((c) => c.selected).map((c) => c.id);
-    if (selectedIds.length === 0) {
-      toast.error("Selecciona al menos un clip para procesar");
+  // ── Approve & render the selected set ─────────────────────────────
+  const approvedIds = candidates.filter((c) => c.selected).map((c) => c.id);
+
+  const render = async () => {
+    if (approving) return;
+    if (approvedIds.length === 0) {
+      toast.error("Aprueba al menos un clip antes de renderizar");
       return;
     }
     setApproving(true);
     try {
-      await ClipsApi.approveBrief(jobId, selectedIds);
-      toast.success(`Procesando ${selectedIds.length} clips aprobados`);
+      await ClipsApi.approveBrief(jobId, approvedIds);
+      toast.success(`Procesando ${approvedIds.length} clips aprobados`);
       onApproved();
     } catch (e: any) {
       toast.error(e?.message || "No se pudo aprobar");
@@ -120,21 +182,20 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
     }
   };
 
-  const selectedCount = (brief?.candidates ?? []).filter((c) => c.selected).length;
-  const messages = brief?.messages ?? [];
-
   return (
     <div className="fixed inset-0 bg-black/75 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-5xl w-full max-h-[90vh] flex flex-col">
-        {/* Header */}
+      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-3xl w-full max-h-[92vh] flex flex-col">
+        {/* ── Header + progress ─────────────────────────────────────── */}
         <div className="flex justify-between items-start p-5 border-b border-zinc-800">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-lg font-semibold text-white">
-              Revisar brief antes de procesar
+              Revisar clips antes de procesar
             </h2>
             <p className="text-xs text-zinc-400 mt-0.5">
               {brief
-                ? `${brief.episode_id} · ${brief.counts.total} candidatos · ${selectedCount} listos`
+                ? onSummary
+                  ? `${brief.episode_id} · ${approvedIds.length} de ${total} aprobados`
+                  : `${brief.episode_id} · Clip ${idx + 1} de ${total}`
                 : "Cargando candidatos…"}
             </p>
           </div>
@@ -147,6 +208,33 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
           </button>
         </div>
 
+        {/* Progress dots */}
+        {brief && total > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 px-5 pt-4">
+            {candidates.map((c, i) => {
+              const d = decisionFor(c);
+              const active = i === idx && !onSummary;
+              const color =
+                d === "approved"
+                  ? "bg-brand-500"
+                  : d === "discarded"
+                    ? "bg-zinc-700"
+                    : "bg-zinc-600";
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setIdx(i)}
+                  aria-label={`Ir al clip ${i + 1}`}
+                  title={`#${c.id} ${c.title}`}
+                  className={`h-2.5 rounded-full transition-all ${color} ${
+                    active ? "w-6 ring-2 ring-brand-400/50" : "w-2.5"
+                  } ${d === "discarded" ? "opacity-50" : ""}`}
+                />
+              );
+            })}
+          </div>
+        )}
+
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3">
             <Loader2 className="w-6 h-6 text-brand-400 animate-spin" />
@@ -156,31 +244,141 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
           <div className="m-6 p-4 bg-red-950/30 border border-red-900/50 rounded-xl text-sm text-red-300">
             {error}
           </div>
-        ) : (
-          <div className="flex flex-1 min-h-0 divide-x divide-zinc-800">
-            {/* ── Chat (left) ─────────────────────────────────────────── */}
-            <div className="flex flex-col w-1/2 min-h-0">
-              <div className="flex-1 overflow-y-auto p-5 space-y-3">
-                <div className="text-sm text-zinc-300 bg-zinc-950/50 border border-zinc-800 rounded-xl p-3">
-                  Te dejé {brief?.counts.total} candidatos, {selectedCount} ya
-                  seleccionados. Dime qué ajustar: quitar, rescatar, reordenar,
-                  o buscar algo de un momento puntual.
+        ) : onSummary ? (
+          /* ── Summary / render screen ──────────────────────────────── */
+          <div className="flex-1 overflow-y-auto p-6 flex flex-col gap-4">
+            <div className="text-sm text-zinc-300 bg-zinc-950/50 border border-zinc-800 rounded-xl p-4">
+              Revisaste los {total} candidatos.{" "}
+              <span className="text-white font-medium">
+                {approvedIds.length} aprobados
+              </span>{" "}
+              se van a renderizar. Puedes volver a cualquier clip tocando su punto
+              arriba.
+            </div>
+            <div className="space-y-2">
+              {candidates.map((c, i) => {
+                const approved = c.selected;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => setIdx(i)}
+                    className={`w-full flex items-center gap-3 text-left rounded-xl border p-3 transition-colors ${
+                      approved
+                        ? "border-brand-600/40 bg-brand-600/10"
+                        : "border-zinc-800 bg-zinc-950/40"
+                    }`}
+                  >
+                    <span
+                      className={`flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0 ${
+                        approved
+                          ? "bg-brand-500 text-white"
+                          : "bg-zinc-800 text-zinc-600"
+                      }`}
+                    >
+                      {approved ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : (
+                        <Trash2 className="w-3 h-3" />
+                      )}
+                    </span>
+                    <span
+                      className={`text-sm truncate flex-1 ${approved ? "text-white" : "text-zinc-500 line-through"}`}
+                    >
+                      #{c.id} {c.title}
+                    </span>
+                    <span className="text-xs text-zinc-500 tabular-nums">
+                      {Math.round(c.end_time - c.start_time)}s
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ) : current ? (
+          /* ── Single-clip review ───────────────────────────────────── */
+          <div className="flex-1 flex flex-col min-h-0 p-5 gap-3">
+            {/* Candidate card */}
+            <div
+              data-testid="brief-candidate"
+              className="rounded-xl border border-zinc-800 bg-zinc-950/40 p-4"
+            >
+              <div className="flex items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-base font-semibold text-white">
+                      #{current.id} {current.title}
+                    </span>
+                    <OriginBadge c={current} />
+                  </div>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    {Math.round(current.start_time)}s–
+                    {Math.round(current.end_time)}s ·{" "}
+                    {Math.round(current.end_time - current.start_time)}s
+                  </p>
                 </div>
-                {messages.map((m, i) => (
+                <span className="text-lg font-semibold text-zinc-300 tabular-nums">
+                  {current.score > 0 ? Math.round(current.score) : "—"}
+                </span>
+              </div>
+
+              {current.summary && (
+                <p className="text-sm text-zinc-200 mt-3">{current.summary}</p>
+              )}
+              {current.reasoning && (
+                <p className="text-sm text-zinc-400 mt-2">
+                  <span className="text-zinc-500">Por qué: </span>
+                  {current.reasoning}
+                </p>
+              )}
+              {current.transcript && (
+                <div className="mt-3">
+                  <button
+                    onClick={() => setShowTranscript((v) => !v)}
+                    className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-zinc-500 hover:text-zinc-300"
+                  >
+                    {showTranscript ? (
+                      <ChevronDown className="w-3.5 h-3.5" />
+                    ) : (
+                      <ChevronRight className="w-3.5 h-3.5" />
+                    )}
+                    Transcript
+                  </button>
+                  {showTranscript && (
+                    <p className="text-xs text-zinc-400 leading-relaxed max-h-32 overflow-y-auto bg-black/30 rounded-lg p-2 mt-1">
+                      {current.transcript}
+                    </p>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Per-clip chat */}
+            <div className="flex-1 min-h-0 flex flex-col rounded-xl border border-zinc-800 bg-zinc-950/30">
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <div className="text-sm text-zinc-300">
+                  Dime qué ajustar de este clip: recortarlo, mover el arranque o
+                  el cierre, buscar un mejor momento, o descártalo si no va.
+                </div>
+                {clipMessages.map((m, i) => (
                   <div
                     key={i}
                     className={
                       m.role === "user"
-                        ? "text-sm text-white bg-brand-600/20 border border-brand-600/30 rounded-xl p-3 ml-6"
-                        : "text-sm text-zinc-200 bg-zinc-950/50 border border-zinc-800 rounded-xl p-3 mr-6"
+                        ? "text-sm text-white bg-brand-600/20 border border-brand-600/30 rounded-xl p-3 ml-8"
+                        : "text-sm text-zinc-200 bg-zinc-900/70 border border-zinc-800 rounded-xl p-3 mr-8"
                     }
                   >
                     {m.content}
                   </div>
                 ))}
+                {sending && (
+                  <div className="text-sm text-zinc-400 flex items-center gap-2 mr-8">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" /> Aplicando…
+                  </div>
+                )}
                 <div ref={chatEndRef} />
               </div>
-              <div className="p-4 border-t border-zinc-800 flex items-end gap-2">
+              <div className="p-3 border-t border-zinc-800 flex items-end gap-2">
                 <textarea
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
@@ -190,8 +388,8 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
                       send();
                     }
                   }}
-                  rows={2}
-                  placeholder="Escribe tu feedback…  (Enter envía)"
+                  rows={1}
+                  placeholder="Feedback de este clip…  (Enter envía)"
                   className="flex-1 resize-none bg-zinc-950 border border-zinc-800 rounded-xl px-3 py-2 text-sm text-white placeholder:text-zinc-600 focus:outline-none focus:border-brand-500"
                   data-testid="brief-input"
                 />
@@ -209,128 +407,59 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
                 </button>
               </div>
             </div>
+          </div>
+        ) : null}
 
-            {/* ── Candidates (right) ──────────────────────────────────── */}
-            <div className="flex flex-col w-1/2 min-h-0">
-              <div className="flex-1 overflow-y-auto p-5 space-y-2">
-                {(brief?.candidates ?? []).map((c) => {
-                  const isOpen = expanded.has(c.id);
-                  return (
-                    <div
-                      key={c.id}
-                      data-testid="brief-candidate"
-                      className={`rounded-xl border ${
-                        c.selected
-                          ? "border-brand-600/40 bg-brand-600/10"
-                          : "border-zinc-800 bg-zinc-950/40"
-                      }`}
-                    >
-                      {/* Header row */}
-                      <div className="flex items-center gap-3 p-3">
-                        <button
-                          type="button"
-                          aria-label={c.selected ? "Quitar" : "Seleccionar"}
-                          onClick={() => toggleSelect(c.id)}
-                          className={`flex items-center justify-center w-5 h-5 rounded-md flex-shrink-0 transition-colors ${
-                            c.selected
-                              ? "bg-brand-500 text-white"
-                              : "bg-zinc-800 text-zinc-600 hover:bg-zinc-700"
-                          }`}
-                        >
-                          {c.selected && <Check className="w-3.5 h-3.5" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => toggleExpand(c.id)}
-                          className="min-w-0 flex-1 text-left"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span
-                              className={`text-sm truncate ${c.selected ? "text-white" : "text-zinc-400"}`}
-                            >
-                              #{c.id} {c.title}
-                            </span>
-                            <OriginBadge c={c} />
-                          </div>
-                          <p className="text-xs text-zinc-500">
-                            {Math.round(c.start_time)}s–{Math.round(c.end_time)}s ·{" "}
-                            {Math.round(c.end_time - c.start_time)}s
-                          </p>
-                        </button>
-                        <span className="text-sm font-semibold text-zinc-300 tabular-nums">
-                          {c.score > 0 ? Math.round(c.score) : "—"}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => toggleExpand(c.id)}
-                          className="text-zinc-500 hover:text-white flex-shrink-0"
-                          aria-label={isOpen ? "Contraer" : "Expandir"}
-                        >
-                          {isOpen ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </button>
-                      </div>
+        {/* ── Footer actions ────────────────────────────────────────── */}
+        {!loading && !error && brief && (
+          <div className="p-4 border-t border-zinc-800 flex items-center gap-2">
+            <button
+              onClick={() => setIdx((i) => Math.max(i - 1, 0))}
+              disabled={idx === 0}
+              className="p-2.5 text-zinc-400 hover:text-white disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              aria-label="Anterior"
+            >
+              <ChevronLeft className="w-5 h-5" />
+            </button>
 
-                      {/* Expanded detail */}
-                      {isOpen && (
-                        <div className="px-3 pb-3 pt-0 space-y-2 border-t border-white/5">
-                          {c.summary && (
-                            <div className="pt-2">
-                              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-0.5">
-                                Tema
-                              </p>
-                              <p className="text-sm text-zinc-200">{c.summary}</p>
-                            </div>
-                          )}
-                          {c.reasoning && (
-                            <div>
-                              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-0.5">
-                                Por qué este clip
-                              </p>
-                              <p className="text-sm text-zinc-300">{c.reasoning}</p>
-                            </div>
-                          )}
-                          {c.transcript && (
-                            <div>
-                              <p className="text-[11px] uppercase tracking-wide text-zinc-500 mb-0.5">
-                                Transcript
-                              </p>
-                              <p className="text-xs text-zinc-400 leading-relaxed max-h-40 overflow-y-auto bg-black/30 rounded-lg p-2">
-                                {c.transcript}
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-              <div className="p-4 border-t border-zinc-800 flex items-center gap-2">
+            {onSummary ? (
+              <button
+                onClick={render}
+                disabled={approving || approvedIds.length === 0}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors"
+                data-testid="brief-approve"
+              >
+                {approving ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Check className="w-4 h-4" />
+                )}
+                Renderizar {approvedIds.length} aprobados
+              </button>
+            ) : (
+              <>
                 <button
-                  onClick={approve}
-                  disabled={approving || selectedCount === 0}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold rounded-xl transition-colors"
-                  data-testid="brief-approve"
+                  onClick={discardCurrent}
+                  className="flex items-center justify-center gap-1.5 px-4 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded-xl transition-colors"
+                  data-testid="brief-discard"
                 >
-                  {approving ? (
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                  ) : (
-                    <Check className="w-4 h-4" />
-                  )}
-                  Aprobar y procesar ({selectedCount})
+                  <Trash2 className="w-4 h-4" /> Descartar
                 </button>
                 <button
-                  onClick={onClose}
+                  onClick={advance}
                   className="px-4 py-2.5 text-sm text-zinc-400 hover:text-white transition-colors"
                 >
-                  Cerrar
+                  Saltar →
                 </button>
-              </div>
-            </div>
+                <button
+                  onClick={approveCurrent}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-brand-600 hover:bg-brand-500 text-white text-sm font-semibold rounded-xl transition-colors"
+                  data-testid="brief-approve"
+                >
+                  <Check className="w-4 h-4" /> Aprobar →
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>

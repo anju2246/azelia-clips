@@ -96,6 +96,24 @@ def test_post_message_applies_action_and_persists(client, brief_dir, monkeypatch
     assert any(m["role"] == "user" for m in saved["messages"])
 
 
+def test_post_message_passes_focus_and_tags_clip_id(client, brief_dir, monkeypatch):
+    _wire(monkeypatch, brief_dir)
+    fake_agent = MagicMock()
+    fake_agent.interpret.return_value = [BriefAction(type="drop", targets=[3])]
+    monkeypatch.setattr(clips, "BriefAgent", lambda *a, **k: fake_agent)
+
+    r = client.post("/api/jobs/job1/brief/message", json={"message": "quítalo", "focus_id": 3})
+    assert r.status_code == 200
+    # the focused clip id reached the agent
+    _, kwargs = fake_agent.interpret.call_args
+    assert kwargs.get("focus_id") == 3
+    # both the user message and the reply are tagged with the focused clip
+    saved = json.loads((brief_dir / "brief_session.json").read_text())
+    tagged = [m for m in saved["messages"] if m.get("clip_id") == 3]
+    assert any(m["role"] == "user" for m in tagged)
+    assert any(m["role"] == "assistant" for m in tagged)
+
+
 def test_post_message_empty_400(client, brief_dir, monkeypatch):
     _wire(monkeypatch, brief_dir)
     r = client.post("/api/jobs/job1/brief/message", json={"message": "   "})
@@ -142,6 +160,57 @@ def test_approve_zero_selected_returns_400(client, brief_dir, monkeypatch):
     r = client.post("/api/jobs/job1/brief/approve", json={"selected_ids": []})
     assert r.status_code == 400
     assert "NO_CLIPS_SELECTED" in r.text
+
+
+# ── _approved_curated_clips: edited clips keep their curation metadata ─────────
+
+def _session_with(candidates):
+    return types.SimpleNamespace(candidates=candidates)
+
+
+def _cand(id, start, end, title="", summary="", selected=True, origin="curation"):
+    return types.SimpleNamespace(
+        id=id, start_time=start, end_time=end, title=title, summary=summary,
+        selected=selected, origin=origin,
+    )
+
+
+def test_approved_clips_trimmed_clip_keeps_caption(monkeypatch):
+    # curation has a full clip 100–200 with a social caption + hashtags
+    curation = [{
+        "start_time": 100.0, "end_time": 200.0, "title": "Título", "summary": "Resumen",
+        "social_caption": "💔 Caption viral", "caption_hashtags": ["#a", "#b"],
+        "pending_review": False,
+    }]
+    monkeypatch.setattr(clips, "_load_curation", lambda d: curation)
+    # the user trimmed it to 120–180 in the brief
+    session = _session_with([_cand(1, 120.0, 180.0, title="Título", summary="Resumen")])
+    out = clips._approved_curated_clips(Path("/tmp/x"), session)
+    assert len(out) == 1
+    assert out[0].social_caption == "💔 Caption viral"      # metadata preserved
+    assert out[0].caption_hashtags == ["#a", "#b"]
+    assert out[0].start_time == 120.0 and out[0].end_time == 180.0  # edited times honored
+
+
+def test_approved_clips_unmatched_rescued_is_bare(monkeypatch):
+    monkeypatch.setattr(clips, "_load_curation", lambda d: [])
+    session = _session_with([_cand(9, 500.0, 560.0, title="T", summary="S", origin="rescued")])
+    out = clips._approved_curated_clips(Path("/tmp/x"), session)
+    assert len(out) == 1 and out[0].social_caption == "" and out[0].title == "T"
+
+
+def test_approved_clips_overlap_does_not_steal_neighbour(monkeypatch):
+    # two curation clips; a trimmed candidate inside the first must not grab the second
+    curation = [
+        {"start_time": 100.0, "end_time": 200.0, "title": "A", "summary": "sa",
+         "social_caption": "capA", "caption_hashtags": ["#a"]},
+        {"start_time": 300.0, "end_time": 400.0, "title": "B", "summary": "sb",
+         "social_caption": "capB", "caption_hashtags": ["#b"]},
+    ]
+    monkeypatch.setattr(clips, "_load_curation", lambda d: curation)
+    session = _session_with([_cand(1, 110.0, 150.0, title="A", summary="sa")])
+    out = clips._approved_curated_clips(Path("/tmp/x"), session)
+    assert out[0].social_caption == "capA"
 
 
 # ── regression: the run wrapper must not clobber awaiting_brief with completed ──

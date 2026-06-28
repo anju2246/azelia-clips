@@ -11,6 +11,7 @@ ACTION_TYPES = (
     "rescue",
     "reorder",
     "adjust_times",
+    "trim_to_text",
     "find_new",
     "noop",
 )
@@ -37,6 +38,7 @@ class ChatMessage(BaseModel):
     role: str
     content: str
     change_summary: Optional[str] = None
+    clip_id: Optional[int] = None  # which candidate this message refers to (one-by-one flow)
 
 
 class BriefAction(BaseModel):
@@ -55,6 +57,8 @@ class BriefAction(BaseModel):
     id: Optional[int] = None
     start_time: Optional[float] = None
     end_time: Optional[float] = None
+    # trim_to_text
+    keep_text: Optional[str] = None
     # find_new
     window_start: Optional[float] = None
     window_end: Optional[float] = None
