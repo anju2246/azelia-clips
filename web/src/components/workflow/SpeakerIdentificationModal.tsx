@@ -8,14 +8,20 @@ import {
   Minus,
   Plus,
   Users,
+  LayoutTemplate,
+  Check,
 } from "lucide-react";
-import { ClipsApi } from "../../lib/api";
+import { ClipsApi, TemplatesApi, SettingsApi, type ClipTemplate } from "../../lib/api";
 import toast from "react-hot-toast";
 
 interface SpeakerIdentificationModalProps {
   episodeNum: number;
-  onConfirm: () => void; // start processing
+  // Pass the chosen template to apply to this episode (profile default if unset).
+  onConfirm: (templateId?: string) => void; // start processing
   onClose: () => void;
+  // When the episode's speakers are already labeled, show a compact "ready to
+  // process" view (just pick the Template + Procesar) instead of the full flow.
+  alreadyLabeled?: boolean;
 }
 
 interface SpeakerLabel {
@@ -27,7 +33,47 @@ interface SpeakerLabel {
 
 export const SpeakerIdentificationModal: React.FC<
   SpeakerIdentificationModalProps
-> = ({ episodeNum, onConfirm, onClose }) => {
+> = ({ episodeNum, onConfirm, onClose, alreadyLabeled = false }) => {
+  // Template to apply to this episode (defaults to the profile default).
+  const [templates, setTemplates] = useState<ClipTemplate[]>([]);
+  const [templateId, setTemplateId] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    Promise.all([TemplatesApi.list(), SettingsApi.getSettings()])
+      .then(([list, s]) => {
+        setTemplates(list.templates);
+        setTemplateId(s.default_template_id);
+      })
+      .catch(() => {});
+  }, []);
+
+  const TemplatePicker = () => (
+    <div className="text-left">
+      <label className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
+        <LayoutTemplate className="h-4 w-4" /> Template (estilo + layout)
+      </label>
+      <select
+        value={templateId ?? ""}
+        onChange={(e) => setTemplateId(e.target.value)}
+        className="w-full rounded-xl border border-zinc-800 bg-black px-4 py-2.5 text-white focus:border-brand-500 focus:outline-none"
+      >
+        {templates.length === 0 && <option value="">Default del perfil</option>}
+        {templates.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.name}
+            {t.is_builtin ? " (preset)" : ""}
+          </option>
+        ))}
+      </select>
+      <p className="mt-1.5 text-xs text-zinc-500">
+        Se aplica a los clips de este episodio. Edítalos en{" "}
+        <a href="/dashboard/templates" className="text-brand-400 hover:underline">
+          Templates
+        </a>
+        .
+      </p>
+    </div>
+  );
+
   // Two-step flow:
   //   "count" — ask the user how many speakers their podcast has
   //             (single biggest accuracy lever; bypasses ECAPA auto-detect)
@@ -40,6 +86,45 @@ export const SpeakerIdentificationModal: React.FC<
   const [labels, setLabels] = useState<Record<string, SpeakerLabel>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Compact path: speakers already identified → just pick template + Procesar.
+  // (After all hooks are declared, to respect the Rules of Hooks.)
+  if (alreadyLabeled) {
+    return (
+      <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm">
+        <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900 p-6">
+          <div className="mb-4 flex items-start justify-between">
+            <div>
+              <h2 className="text-xl font-semibold text-white">
+                Procesar EP{String(episodeNum).padStart(3, "0")}
+              </h2>
+              <p className="mt-1 inline-flex items-center gap-1.5 text-sm text-emerald-400">
+                <Check className="h-4 w-4" /> Hablantes ya identificados
+              </p>
+            </div>
+            <button onClick={onClose} className="text-zinc-500 hover:text-white">
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+          {TemplatePicker()}
+          <div className="mt-6 flex justify-end gap-2">
+            <button
+              onClick={onClose}
+              className="rounded-xl border border-zinc-700 px-4 py-2.5 text-sm text-zinc-300 hover:bg-zinc-800"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => onConfirm(templateId)}
+              className="rounded-xl bg-brand-600 px-5 py-2.5 text-sm font-medium text-white hover:bg-brand-500"
+            >
+              Procesar
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // Fire the preflight only after the user confirms the speaker count.
   const startPreflight = async () => {
@@ -109,7 +194,7 @@ export const SpeakerIdentificationModal: React.FC<
       }
       await ClipsApi.identifySaveLabels(episodeNum, { labels: payload });
       toast.success("Speakers identified — starting processing");
-      onConfirm();
+      onConfirm(templateId);
     } catch (e: any) {
       toast.error(e?.message || "Could not save labels");
     } finally {
@@ -122,7 +207,7 @@ export const SpeakerIdentificationModal: React.FC<
     try {
       await ClipsApi.identifySaveLabels(episodeNum, { skipped: true });
       toast("Skipped — using auto detection", { icon: "⏭" });
-      onConfirm();
+      onConfirm(templateId);
     } catch (e: any) {
       toast.error(e?.message || "Could not skip");
     } finally {
@@ -199,6 +284,9 @@ export const SpeakerIdentificationModal: React.FC<
                 Capped at 8 — beyond that the per-clip matching gets noisy
                 anyway.
               </p>
+              <div className="w-full max-w-md border-t border-zinc-800 pt-6">
+                {TemplatePicker()}
+              </div>
             </div>
           ) : loading ? (
             <div className="flex flex-col items-center justify-center py-12 gap-3">
