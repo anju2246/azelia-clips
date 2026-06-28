@@ -53,6 +53,7 @@ export const DashboardController: React.FC = () => {
   const [identifyEp, setIdentifyEp] = useState<{
     episodeNum: number;
     forceReset: boolean;
+    alreadyLabeled: boolean;
   } | null>(null);
   // Brief gate — modal shown when a job parks at awaiting_brief (after
   // curation, before the heavy render). Set by LiveProcessingWidget.
@@ -214,11 +215,16 @@ export const DashboardController: React.FC = () => {
   // Actually trigger the backend processing. Called after the user
   // either labels speakers in the modal or skips it. force_reset wipes
   // cached curation/clips when the user came in via "Process Again".
-  const launchProcess = async (episodeNum: number, forceReset: boolean) => {
+  const launchProcess = async (
+    episodeNum: number,
+    forceReset: boolean,
+    templateId?: string,
+  ) => {
     const loadingToast = toast.loading("Starting episode processing...");
     try {
       const response = await ClipsApi.processEpisode(episodeNum, {
         ...getPipelineDefaults(),
+        ...(templateId ? { template_id: templateId } : {}),
         ...(forceReset ? { force_reset: true } : {}),
       });
       toast.success("Episode processing started!", { id: loadingToast });
@@ -240,11 +246,14 @@ export const DashboardController: React.FC = () => {
   ) => {
     try {
       const status = await ClipsApi.identifyStatus(episodeNum);
-      if (status.labeled || status.skipped) {
-        await launchProcess(episodeNum, forceReset);
-      } else {
-        setIdentifyEp({ episodeNum, forceReset });
-      }
+      // Always open the pre-process modal so the user can pick the Template.
+      // When speakers are already labeled, the modal shows a compact "ready"
+      // view (template + Procesar); otherwise the full identify flow.
+      setIdentifyEp({
+        episodeNum,
+        forceReset,
+        alreadyLabeled: !!(status.labeled || status.skipped),
+      });
     } catch (e: any) {
       // If status fails (network etc.), fall back to direct launch so
       // we never block the user on a broken pre-flight.
@@ -436,11 +445,12 @@ export const DashboardController: React.FC = () => {
       {identifyEp && (
         <SpeakerIdentificationModal
           episodeNum={identifyEp.episodeNum}
+          alreadyLabeled={identifyEp.alreadyLabeled}
           onClose={() => setIdentifyEp(null)}
-          onConfirm={() => {
+          onConfirm={(templateId) => {
             const ep = identifyEp;
             setIdentifyEp(null);
-            if (ep) launchProcess(ep.episodeNum, ep.forceReset);
+            if (ep) launchProcess(ep.episodeNum, ep.forceReset, templateId);
           }}
         />
       )}
