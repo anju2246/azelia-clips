@@ -358,6 +358,33 @@ def _get_yt_db():
     return conn
 
 
+@router.post("/analytics/niche/import")
+async def import_niche(body: dict = Body(default={}), user: User = Depends(require_auth)):
+    """Importa señales niche de PodFinder (resultados JSON) a la DB local.
+
+    Body: {"path": "<ruta al ic_signals_ready.json>"}. Si se omite, usa
+    `settings.podfinder_signals_path`. La data nunca se commitea: vive en la
+    SQLite local del perfil activo.
+    """
+    from packages.core.services.niche_import import import_niche_signals
+    from packages.core.config import settings as _settings
+
+    path = (body or {}).get("path") or getattr(_settings, "podfinder_signals_path", "") or ""
+    if not path:
+        raise HTTPException(status_code=422, detail={"code": "NO_PATH", "message": "No signals JSON path provided"})
+
+    conn = _get_yt_db()
+    try:
+        result = import_niche_signals(conn, path)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail={"code": "FILE_NOT_FOUND", "message": "Signals JSON not found"})
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail={"code": "INVALID_JSON", "message": str(e)})
+    finally:
+        conn.close()
+    return result
+
+
 def _get_user_id_from_auth(authorization: str) -> str | None:
     """Extract user_id from a Supabase JWT Authorization header.
     Uses server-side JWT verification via Supabase API (no manual decode).

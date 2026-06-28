@@ -1,0 +1,50 @@
+[
+  {
+    "region": "Colombia",
+    "language": "es",
+    "category": "business",
+    "platform": "youtube",
+    "metric_type": "views",
+    "p25": 1000,
+    "p50": 2000,
+    "p75": 4000,
+    "p90": 8000,
+    "sample_size": 30
+  },
+  {
+    "region": "Colombia",
+    "language": "es",
+    "category": "business",
+    "platform": "youtube",
+    "metric_type": "engagement_rate",
+    "p25": 0.01,
+    "p50": 0.02,
+    "p75": 0.03,
+    "p90": 0.04,
+    "sample_size": 30
+  },
+  {
+    "region": "Mexico",
+    "language": "es",
+    "category": "tech",
+    "platform": "youtube",
+    "metric_type": "views",
+    "p25": 2000,
+    "p50": 4000,
+    "p75": 6000,
+    "p90": 10000,
+    "sample_size": 40
+  },
+  {
+    "region": "Mexico",
+    "language": "es",
+    "category": "tech",
+    "platform": "youtube",
+    "metric_type": "engagement_rate",
+    "p25": 0.012,
+    "p50": 0.018,
+    "p75": 0.024,
+    "p90": 0.032,
+    "sample_size": 40
+  }
+]

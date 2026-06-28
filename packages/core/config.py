@@ -132,6 +132,16 @@ class Settings(BaseSettings):
         description="Slug of the clip template applied by default (per profile). Override per-job at upload.",
     )
 
+    # ── Clip Performance Intelligence (NICHE) ──────────────────────────
+    # Ruta opcional al JSON de resultados de señales niche (export de PodFinder,
+    # p.ej. ic_signals_ready.json). Si se define, es el default del importador.
+    # NUNCA se commitea el JSON: se importa a la SQLite local.
+    podfinder_signals_path: str = Field(
+        default="",
+        alias="PODFINDER_SIGNALS_PATH",
+        description="Ruta al JSON de señales niche de PodFinder para importar (opcional).",
+    )
+
     # ── Human-in-the-loop brief gate ───────────────────────────────────
     review_brief_before_processing: bool = Field(
         default=True,
