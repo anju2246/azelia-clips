@@ -24,6 +24,24 @@ class FinderAgent:
         self.audio_analyzer = AudioAnalyzer()
         self.structural_analyzer = StructuralAnalyzer()
 
+    def _build_system_prompt(self, config: CurationConfig, min_duration, max_duration) -> str:
+        """Construye el system prompt del Finder, inyectando las señales CPI
+        (CREATOR SELF + NICHE) además del addendum de identidad del podcast."""
+        from packages.core.taxonomy import language_label as _lang_label
+        from packages.clips.curation.signal_hints import build_signal_addendum
+
+        addendum = config.get_intelligence_prompt_addendum()
+        signals = build_signal_addendum(config)
+        if signals:
+            addendum = (addendum + "\n\n" + signals) if addendum else signals
+        return FINDER_SYSTEM.format(
+            podcast_name=config.podcast_name,
+            intelligence_addendum=addendum,
+            min_duration=min_duration,
+            max_duration=max_duration,
+            output_language=_lang_label(config.language),
+        )
+
     def _format_transcript(self, transcript: Transcript) -> str:
         """Format transcript with timestamps for LLM."""
         lines = []
@@ -176,14 +194,7 @@ class FinderAgent:
             signals_summary = self._extract_signals_summary(chunk)
             chunk_text = self._format_transcript(chunk)
             
-            from packages.core.taxonomy import language_label as _lang_label
-            system_prompt = FINDER_SYSTEM.format(
-                podcast_name=config.podcast_name,
-                intelligence_addendum=config.get_intelligence_prompt_addendum(),
-                min_duration=min_duration,
-                max_duration=max_duration,
-                output_language=_lang_label(config.language),
-            )
+            system_prompt = self._build_system_prompt(config, min_duration, max_duration)
             
             finder_template = self.prompt_manager.get_finder_prompt()
             finder_prompt = finder_template.format(

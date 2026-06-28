@@ -64,83 +64,22 @@ class RankerAgent:
                 text.append(seg.text)
         return " ".join(text)
 
-    def _fetch_ic_signals_for_config(self, config: CurationConfig) -> List[str]:
-        """Read creator_self signals from the user's LOCAL youtube_shorts.db
-        and convert them into prompt-ready hints for the Ranker.
-
-        These signals come from the user's own past YouTube Shorts, analyzed
-        with their own Anthropic key in the /api/analytics/youtube/extract-creator-signals
-        flow. Nothing leaves the machine.
-
-        Returns an empty list when:
-        - No YouTube was connected (no DB)
-        - Sync happened but extract-creator-signals never ran
-        - Patterns exist but for a different user_id
-        """
-        try:
-            import os
-            import sqlite3
-            import json as _json
-
-            # Same path as server/routes/analytics.py:_get_yt_db
-            db_path = os.path.join(
-                os.path.dirname(__file__), "..", "..", "..", "..",
-                "server", "data", "youtube_shorts.db",
-            )
-            if not os.path.exists(db_path):
-                return []
-            conn = sqlite3.connect(db_path)
-            # user_id = 'local' in single-user MVP. config.user_cohort_hash
-            # may carry a different identifier in future multi-user mode.
-            user_id = config.user_cohort_hash or "local"
-            cur = conn.execute(
-                """
-                SELECT hook_type, emotional_charge, duration_bucket, topic_tag,
-                       pattern_json, performance_premium, confidence
-                FROM creator_signals
-                WHERE user_id = ? AND performance_premium >= 1.0
-                ORDER BY performance_premium * confidence DESC
-                LIMIT 8
-                """,
-                (user_id,),
-            )
-            rows = cur.fetchall()
-            conn.close()
-        except Exception as e:
-            console.print(f"[dim]   creator_signals fetch skipped ({type(e).__name__}: {e})[/dim]")
-            return []
-
-        hints: List[str] = []
-        for hook, emotion, duration, topic, raw_pat, premium, conf in rows:
-            premium = float(premium or 1.0)
-            conf = float(conf or 0.5)
-            bits = []
-            if hook:
-                bits.append(f"hook '{hook}'")
-            if emotion:
-                bits.append(f"feel {emotion}")
-            if duration:
-                bits.append(f"~{duration}")
-            if topic:
-                bits.append(f"about {topic}")
-            if not bits:
-                continue
-            hints.append(
-                f"CREATOR SELF · {' / '.join(bits)} outperforms your median (×{premium:.2f}, conf={conf:.2f})"
-            )
-        return hints
-
     def _build_ranker_addendum(self, config: CurationConfig) -> str:
-        """Combine podcast context + IC signal hints into the system addendum."""
+        """Combine podcast context + señales CPI (CREATOR SELF + NICHE) en el addendum.
+
+        Las señales (creator_self + niche de PodFinder) las arma el builder
+        compartido `signal_hints.build_signal_addendum`, que también usan finder
+        y critic — un único punto de lectura de la DB local.
+        """
+        from packages.clips.curation.signal_hints import build_signal_addendum
+
         parts: List[str] = []
         ctx = config.get_podcast_context_block()
         if ctx:
             parts.append(ctx)
-        ic_hints = self._fetch_ic_signals_for_config(config)
-        if ic_hints:
-            parts.append("## IC Cascade signals")
-            parts.append("Patterns learned from this creator (CREATOR SELF) take precedence over niche signals (NICHE SIGNAL).")
-            parts.extend(f"- {h}" for h in ic_hints)
+        signals = build_signal_addendum(config)
+        if signals:
+            parts.append(signals)
         if config.high_retention_patterns:
             parts.append("## Proven high-retention patterns (local intelligence):")
             parts.extend(f"- {p}" for p in config.high_retention_patterns)

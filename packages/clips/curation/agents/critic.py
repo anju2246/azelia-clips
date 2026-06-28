@@ -187,6 +187,28 @@ class CriticAgent:
         # the UI and can give feedback on each rejection).
         self.last_response: Optional[CriticResponse] = None
 
+    def _build_system_prompt(
+        self, config: CurationConfig, min_duration, max_duration, memory_block: str
+    ) -> str:
+        """Construye el system prompt del Critic, inyectando las señales CPI
+        (CREATOR SELF + NICHE) junto al contexto del podcast."""
+        from packages.core.taxonomy import language_label as _lang_label
+        from packages.clips.curation.signal_hints import build_signal_addendum
+
+        podcast_context = config.get_podcast_context_block()
+        signals = build_signal_addendum(config)
+        if signals:
+            podcast_context = (
+                (podcast_context + "\n\n" + signals) if podcast_context else signals
+            )
+        return CRITIC_SYSTEM.format(
+            min_duration=min_duration,
+            max_duration=max_duration,
+            podcast_context=podcast_context,
+            output_language=_lang_label(config.language),
+            user_feedback_memory=memory_block,
+        )
+
     def _format_transcript(self, transcript: Transcript) -> str:
         lines = []
         for seg in transcript.segments:
@@ -235,12 +257,8 @@ class CriticAgent:
             feedback_memory, feedback_ids = _format_feedback_memory()
             memory_block = "\n\n".join(b for b in (learnings_block, feedback_memory) if b)
 
-            formatted_system_prompt = CRITIC_SYSTEM.format(
-                min_duration=min_duration,
-                max_duration=max_duration,
-                podcast_context=config.get_podcast_context_block(),
-                output_language=_lang_label(config.language),
-                user_feedback_memory=memory_block,
+            formatted_system_prompt = self._build_system_prompt(
+                config, min_duration, max_duration, memory_block
             )
             
             response_raw = self._llm.chat(
