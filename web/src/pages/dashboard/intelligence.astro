@@ -1,53 +1,10 @@
 ---
 import DashboardLayout from '../../layouts/DashboardLayout.astro';
+import { CpiDashboard } from '../../components/analytics/CpiDashboard';
 ---
 
 <DashboardLayout title="Intelligence">
-    <div class="max-w-2xl mx-auto py-24 text-center">
-        <div class="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-brand-500/10 border border-brand-500/20 mb-6">
-            <svg class="w-7 h-7 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-        </div>
-
-        <h1 class="text-3xl font-bold tracking-tight text-white mb-3">Intelligence — coming soon</h1>
-
-        <p class="text-zinc-400 leading-relaxed mb-3" id="intel-connected" hidden>
-            Your YouTube channel data is already feeding the curation agents under the hood.
-            The visual dashboard for inspecting it lands in the next release.
-        </p>
-
-        <p class="text-zinc-400 leading-relaxed mb-3" id="intel-not-connected">
-            The visual creator-intelligence dashboard is being polished. In the meantime,
-            you can connect YouTube and Azelia will analyze your past shorts locally —
-            those patterns feed the curation agents straight away.
-        </p>
-
-        <p class="text-sm text-zinc-500 mb-6">
-            <span id="intel-cta-connect">
-                Connect your channel in <a href="/dashboard/settings#integrations" class="text-brand-400 underline">Settings → Integrations</a>.
-            </span>
-            <span id="intel-cta-manage" hidden>
-                Manage your channel in <a href="/dashboard/settings#integrations" class="text-brand-400 underline">Settings → Integrations</a>.
-            </span>
-        </p>
-
-        <script>
-            // Toggle copy based on YouTube connection state.
-            (async () => {
-                try {
-                    const r = await fetch("/api/analytics/youtube/status");
-                    if (!r.ok) return;
-                    const data = await r.json();
-                    if (data?.connected) {
-                        document.getElementById("intel-connected")?.removeAttribute("hidden");
-                        document.getElementById("intel-not-connected")?.setAttribute("hidden", "");
-                        document.getElementById("intel-cta-connect")?.setAttribute("hidden", "");
-                        document.getElementById("intel-cta-manage")?.removeAttribute("hidden");
-                    }
-                } catch { /* keep the default not-connected copy */ }
-            })();
-        </script>
+    <div class="max-w-5xl mx-auto py-8 px-4">
+        <CpiDashboard client:load />
     </div>
 </DashboardLayout>

@@ -234,6 +234,11 @@ export interface ClipLink {
   match_confidence: number;
   match_method?: string;
   status: string;
+  // Info real del video candidato (para revisar con contexto).
+  video_title?: string | null;
+  video_views?: number | null;
+  video_retention?: number | null;
+  video_drop_off?: number | null;
 }
 
 export const CpiApi = {

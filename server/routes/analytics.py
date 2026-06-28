@@ -444,17 +444,25 @@ async def suggest_clip_links(body: dict = Body(default={}), user: User = Depends
 
 @router.get("/analytics/clip-links")
 async def list_clip_links(status: str = "suggested", user: User = Depends(require_auth)):
+    """Lista vínculos + la info REAL del video candidato (título, views,
+    retención, dónde se va la gente) para que el usuario revise con contexto."""
     conn = _get_yt_db()
     try:
         rows = conn.execute(
-            "SELECT id, episode_id, clip_title, video_id, match_confidence, "
-            "match_method, status FROM clip_links WHERE user_id=? AND status=? "
-            "ORDER BY match_confidence DESC",
+            "SELECT cl.id, cl.episode_id, cl.clip_title, cl.video_id, "
+            "cl.match_confidence, cl.match_method, cl.status, "
+            "s.title, s.view_count, s.average_view_percentage, rc.drop_off_ratio "
+            "FROM clip_links cl "
+            "LEFT JOIN youtube_shorts s ON s.video_id=cl.video_id AND s.user_id=cl.user_id "
+            "LEFT JOIN retention_curves rc ON rc.video_id=cl.video_id AND rc.user_id=cl.user_id "
+            "WHERE cl.user_id=? AND cl.status=? ORDER BY cl.match_confidence DESC",
             (user.id, status),
         ).fetchall()
     finally:
         conn.close()
-    cols = ["id", "episode_id", "clip_title", "video_id", "match_confidence", "match_method", "status"]
+    cols = ["id", "episode_id", "clip_title", "video_id", "match_confidence",
+            "match_method", "status", "video_title", "video_views",
+            "video_retention", "video_drop_off"]
     return {"links": [dict(zip(cols, r)) for r in rows]}
 
 
