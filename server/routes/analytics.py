@@ -531,6 +531,10 @@ async def refresh_intelligence(body: dict = Body(default={}), user: User = Depen
         links = conn.execute(
             "SELECT COUNT(*) FROM clip_links WHERE user_id=? AND status='suggested'", (user.id,)
         ).fetchone()[0]
+        zero_reach = conn.execute(
+            "SELECT COUNT(*) FROM youtube_shorts WHERE user_id=? "
+            "AND privacy_status='public' AND view_count=0", (user.id,)
+        ).fetchone()[0]
     finally:
         conn.close()
 
@@ -542,7 +546,26 @@ async def refresh_intelligence(body: dict = Body(default={}), user: User = Depen
         "creator_self_written": creator_self,
         "niche_signals": niche,
         "links_suggested": links,
+        "zero_reach": zero_reach,
     }
+
+
+@router.get("/analytics/zero-reach")
+async def zero_reach(user: User = Depends(require_auth)):
+    """Shorts PÚBLICOS con 0 views = posible problema de distribución (no de
+    contenido). Señal operativa, no de curación: nadie los vio."""
+    conn = _get_yt_db()
+    try:
+        rows = conn.execute(
+            "SELECT video_id, title, published_at, duration_seconds FROM youtube_shorts "
+            "WHERE user_id=? AND privacy_status='public' AND view_count=0 "
+            "ORDER BY published_at DESC",
+            (user.id,),
+        ).fetchall()
+    finally:
+        conn.close()
+    cols = ["video_id", "title", "published_at", "duration_seconds"]
+    return {"videos": [dict(zip(cols, r)) for r in rows], "count": len(rows)}
 
 
 def _get_user_id_from_auth(authorization: str) -> str | None:

@@ -283,11 +283,19 @@ export const CpiApi = {
       creator_self_written: number;
       niche_signals: number;
       links_suggested: number;
+      zero_reach: number;
     }>("/analytics/intelligence/refresh", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ confirmed: true }),
     }),
+
+  /** Shorts públicos con 0 views (posible problema de distribución). */
+  zeroReach: () =>
+    fetchApi<{
+      videos: { video_id: string; title: string; published_at: string; duration_seconds: number }[];
+      count: number;
+    }>("/analytics/zero-reach"),
 };
 
 // --- CLIPS & EPISODES API ---

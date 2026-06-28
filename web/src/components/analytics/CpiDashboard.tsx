@@ -8,6 +8,7 @@ import {
   X,
   TrendingDown,
   Sparkles,
+  AlertTriangle,
 } from "lucide-react";
 import { CpiApi, type ClipLink } from "../../lib/api";
 
@@ -17,6 +18,14 @@ interface Summary {
   creator_signals: number;
   niche_signals: number;
   links_suggested: number;
+  zero_reach: number;
+}
+
+interface ZeroReachVideo {
+  video_id: string;
+  title: string;
+  published_at: string;
+  duration_seconds: number;
 }
 
 function pct(n?: number | null): string {
@@ -51,6 +60,8 @@ export const CpiDashboard: React.FC = () => {
   const [nichePath, setNichePath] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<number | null>(null);
+  const [zeroReach, setZeroReach] = useState<ZeroReachVideo[]>([]);
+  const [showZero, setShowZero] = useState(false);
 
   const loadLinks = async () => {
     try {
@@ -74,10 +85,20 @@ export const CpiDashboard: React.FC = () => {
     }
   };
 
+  const loadZeroReach = async () => {
+    try {
+      const r = await CpiApi.zeroReach();
+      setZeroReach(r.videos);
+    } catch {
+      /* sin data */
+    }
+  };
+
   useEffect(() => {
     (async () => {
       await refresh();
       await loadLinks();
+      await loadZeroReach();
       setLoading(false);
     })();
   }, []);
@@ -175,6 +196,36 @@ export const CpiDashboard: React.FC = () => {
           <StatCard label="Señales propias" value={summary.creator_signals} hint="CREATOR SELF" />
           <StatCard label="Señales de nicho" value={summary.niche_signals} hint="PodFinder" />
           <StatCard label="Matches por revisar" value={summary.links_suggested} />
+        </div>
+      )}
+
+      {/* Alerta de 0-reach (problema de distribución, no de contenido) */}
+      {summary && summary.zero_reach > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+          <button
+            onClick={() => setShowZero((v) => !v)}
+            className="w-full flex items-center gap-2 text-left"
+          >
+            <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+            <span className="text-sm font-semibold text-amber-200">
+              {summary.zero_reach} shorts públicos con 0 reproducciones
+            </span>
+            <span className="text-xs text-amber-200/60 ml-1">
+              — probable problema de distribución, no de contenido. {showZero ? "Ocultar" : "Ver cuáles"}
+            </span>
+          </button>
+          {showZero && (
+            <div className="mt-3 space-y-1.5 border-t border-amber-500/20 pt-3">
+              {zeroReach.map((v) => (
+                <div key={v.video_id} className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-300 truncate flex-1">{v.title || v.video_id}</span>
+                  <span className="text-zinc-500 shrink-0 ml-3">
+                    {v.published_at?.slice(0, 10)} · {Math.round(v.duration_seconds)}s
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
 
