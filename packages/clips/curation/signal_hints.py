@@ -142,6 +142,24 @@ def _fetch_niche_hints(config, conn: sqlite3.Connection) -> List[str]:
     return hints
 
 
+def _fetch_dropoff_hint(conn: sqlite3.Connection) -> Optional[str]:
+    """Resumen de 'dónde se va la gente' desde retention_curves."""
+    try:
+        rows = conn.execute(
+            "SELECT drop_off_ratio FROM retention_curves WHERE drop_off_ratio IS NOT NULL"
+        ).fetchall()
+    except Exception:
+        return None
+    vals = [r[0] for r in rows if r[0] is not None]
+    if not vals:
+        return None
+    avg = sum(vals) / len(vals)
+    return (
+        f"La audiencia suele caer al {avg * 100:.0f}% del clip — "
+        "el gancho y el pico deben ir ANTES de ese punto."
+    )
+
+
 def build_signal_addendum(config, db_path: Optional[str] = None) -> str:
     """Bloque de señales (CREATOR SELF + NICHE) para inyectar al system prompt.
 
@@ -153,16 +171,19 @@ def build_signal_addendum(config, db_path: Optional[str] = None) -> str:
     try:
         creator = _fetch_creator_hints(config, conn)
         niche = _fetch_niche_hints(config, conn)
+        dropoff = _fetch_dropoff_hint(conn)
     finally:
         conn.close()
 
-    if not creator and not niche:
+    if not creator and not niche and not dropoff:
         return ""
 
     parts = ["## Clip Performance Intelligence (señales)"]
-    if creator:
+    if creator or dropoff:
         parts.append("CREATOR SELF — patrones que TE funcionan (precede sobre NICHE):")
         parts.extend(f"- {h}" for h in creator)
+        if dropoff:
+            parts.append(f"- {dropoff}")
     if niche:
         parts.append("NICHE SIGNAL — qué rinde en tu nicho (podintel):")
         parts.extend(f"- {h}" for h in niche)

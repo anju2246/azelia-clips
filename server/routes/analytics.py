@@ -993,9 +993,23 @@ async def extract_creator_signals(
             in_rate, out_rate = 1.0, 5.0
         actual_cost = round((in_t / 1_000_000) * in_rate + (out_t / 1_000_000) * out_rate, 4)
 
+    # Enriquecer con CREATOR SELF retention-aware (determinista, sin red):
+    # pondera por retención real y atribuye los atributos de clips confirmados.
+    creator_self_written = 0
+    try:
+        from packages.core.services.creator_self import compute_creator_self_signals
+        _cs_conn = _get_yt_db()
+        try:
+            creator_self_written = compute_creator_self_signals(_cs_conn, user.id).get("written", 0)
+        finally:
+            _cs_conn.close()
+    except Exception as _cs_e:
+        logger.warning("creator_self compute skipped: %s", _cs_e)
+
     return {
         "status": "complete",
         "signals_created": signals_created,
+        "creator_self_signals": creator_self_written,
         "batch_size": batch_size,
         "model_used": chosen_model,
         "cost_est": _estimate_extraction_cost(batch_size, chosen_model),
