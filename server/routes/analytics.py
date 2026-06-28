@@ -1907,11 +1907,12 @@ async def sync_historical_data(
         try:
             from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
 
+            # Local-first: sin telemetría central ni JWT de usuario. El extractor
+            # corre 100% local contra el OAuth de YouTube del propio usuario.
             extractor = YouTubeHistoricalExtractor(
-                telemetry_svc,
+                None,
                 anthropic_model=chosen_model,
                 output_language=_output_language,
-                user_jwt=getattr(request.state, "user_jwt", None),
             )
 
             result = await extractor.process_historical_shorts(

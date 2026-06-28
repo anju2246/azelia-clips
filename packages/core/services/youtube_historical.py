@@ -23,6 +23,86 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Por debajo de esta fracción de audiencia retenida consideramos que la gente
+# "se fue" (drop-off). 0.5 = quedó la mitad de quienes empezaron.
+RETENTION_DROP_THRESHOLD = 0.5
+
+
+def parse_retention_curve(response: dict) -> list[dict]:
+    """Convierte la respuesta de YouTube Analytics (dimensión
+    `elapsedVideoTimeRatio`) en una curva normalizada.
+
+    Espera `metrics=audienceWatchRatio,relativeRetentionPerformance` y
+    `dimensions=elapsedVideoTimeRatio`. Robusto al orden de columnas: usa
+    `columnHeaders` para mapear. Devuelve [{ratio, audience_watch_ratio,
+    relative_retention}] ordenado por ratio. Filas inválidas se omiten.
+    """
+    if not isinstance(response, dict):
+        return []
+    headers = [h.get("name") for h in response.get("columnHeaders", [])]
+    rows = response.get("rows") or []
+    curve: list[dict] = []
+    for row in rows:
+        try:
+            rd = dict(zip(headers, row))
+            ratio = rd.get("elapsedVideoTimeRatio")
+            if ratio is None:
+                continue
+            curve.append({
+                "ratio": float(ratio),
+                "audience_watch_ratio": (
+                    float(rd["audienceWatchRatio"])
+                    if rd.get("audienceWatchRatio") is not None else None
+                ),
+                "relative_retention": (
+                    float(rd["relativeRetentionPerformance"])
+                    if rd.get("relativeRetentionPerformance") is not None else None
+                ),
+            })
+        except (ValueError, TypeError):
+            continue
+    curve.sort(key=lambda p: p["ratio"])
+    return curve
+
+
+def derive_drop_off_ratio(
+    curve: list[dict], threshold: float = RETENTION_DROP_THRESHOLD
+) -> Optional[float]:
+    """Primer `ratio` donde `audience_watch_ratio` cae por debajo del umbral
+    (dónde se va la mayoría de la gente). None si nunca baja del umbral."""
+    for point in curve:
+        awr = point.get("audience_watch_ratio")
+        if awr is not None and awr < threshold:
+            return point["ratio"]
+    return None
+
+
+def store_retention_curve(
+    conn, video_id: str, curve: list[dict], user_id: str = "local"
+) -> Optional[float]:
+    """Upsert idempotente de la curva en `retention_curves`. Devuelve el
+    drop_off_ratio derivado."""
+    import json as _json
+    from datetime import datetime as _dt, timezone as _tz
+
+    drop_off = derive_drop_off_ratio(curve)
+    conn.execute(
+        """
+        INSERT INTO retention_curves (video_id, user_id, curve_json, drop_off_ratio, fetched_at)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(video_id, user_id) DO UPDATE SET
+            curve_json = excluded.curve_json,
+            drop_off_ratio = excluded.drop_off_ratio,
+            fetched_at = excluded.fetched_at
+        """,
+        (
+            video_id, user_id, _json.dumps(curve),
+            drop_off, _dt.now(_tz.utc).isoformat(),
+        ),
+    )
+    conn.commit()
+    return drop_off
+
 
 class YouTubeHistoricalExtractor:
     """
@@ -180,6 +260,39 @@ class YouTubeHistoricalExtractor:
 
         logger.info("Fetched analytics for %d/%d videos", len(analytics_map), len(video_ids))
         return analytics_map
+
+    async def fetch_retention_curve(
+        self, creds: Credentials, channel_id: str, video_id: str
+    ) -> list[dict]:
+        """Trae la curva de retención de un video (dónde se va la gente).
+
+        YouTube Analytics v2 con dimensión `elapsedVideoTimeRatio`. Devuelve
+        la curva normalizada (ver `parse_retention_curve`). Lista vacía si la
+        API falla — nunca propaga la excepción (degradación elegante).
+        """
+        try:
+            yt_analytics = googleapiclient.discovery.build(
+                "youtubeAnalytics", "v2", credentials=creds
+            )
+        except Exception as e:
+            logger.warning("Could not build YouTube Analytics client for curve: %s", e)
+            return []
+
+        start_date = "2020-01-01"
+        end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        try:
+            response = yt_analytics.reports().query(
+                ids=f"channel=={channel_id}",
+                startDate=start_date,
+                endDate=end_date,
+                metrics="audienceWatchRatio,relativeRetentionPerformance",
+                dimensions="elapsedVideoTimeRatio",
+                filters=f"video=={video_id}",
+            ).execute()
+        except Exception as e:
+            logger.warning("Retention curve fetch failed for %s: %s", video_id, e)
+            return []
+        return parse_retention_curve(response)
 
     async def _call_anthropic(self, system_prompt: str, user_prompt: str, temperature: float = 0.1) -> str:
         """Direct Anthropic call using the chosen model.
