@@ -897,35 +897,90 @@ def _brief_context(brief_dir: Path) -> BriefContext:
         except Exception:
             return []
 
+    def words_provider(ws, we):
+        """Timed words overlapping [ws, we] for trim_to_text; segment-level fallback."""
+        if transcript is None:
+            return []
+        out = []
+        for seg in transcript.segments:
+            for w in getattr(seg, "words", None) or []:
+                if w.end >= ws and w.start <= we:
+                    out.append((w.word, w.start, w.end))
+        if not out:  # no word-level timing — fall back to whole segments
+            for seg in transcript.segments:
+                if seg.end >= ws and seg.start <= we:
+                    out.append((seg.text, seg.start, seg.end))
+        return out
+
     # Prioritization/focus requests are handled semantically by the BriefAgent,
     # which returns a `reorder` with an explicit order — no deterministic ranker.
-    return BriefContext(episode_duration=duration or 1e9, finder=finder)
+    return BriefContext(
+        episode_duration=duration or 1e9, finder=finder, words_provider=words_provider
+    )
 
 
 def _approved_curated_clips(brief_dir: Path, session) -> list:
-    """Map the user-approved candidates back to renderable CuratedClips."""
+    """Map the user-approved candidates back to renderable CuratedClips.
+
+    Order follows the brief (selected candidates as the user sees them). Each
+    candidate keeps the FULL curation metadata (caption, hashtags, pending_review,
+    …) even when the user trimmed/edited it in the brief: an exact (start,end)
+    match is tried first, then a temporal-overlap match (a trimmed clip is a
+    sub-range of its original), with the candidate's edited times/title/summary
+    overriding the source. Only genuinely new clips (rescued/found, no source)
+    fall back to a bare clip.
+    """
     selected = [c for c in session.candidates if c.selected]
-    keys = {(round(c.start_time, 2), round(c.end_time, 2)) for c in selected}
-    out, matched = [], set()
+    curation = []
     for d in _load_curation(brief_dir):
         try:
-            cc = CuratedClip.model_validate(d)
+            curation.append(CuratedClip.model_validate(d))
         except Exception:
             continue
-        k = (round(cc.start_time, 2), round(cc.end_time, 2))
-        if k in keys and k not in matched:
-            out.append(cc)
-            matched.add(k)
-    # selected candidates with no curation entry (e.g. origin="found")
+
+    by_key = {}
+    for i, cc in enumerate(curation):
+        by_key.setdefault((round(cc.start_time, 2), round(cc.end_time, 2)), i)
+
+    out, used = [], set()
     for c in selected:
-        k = (round(c.start_time, 2), round(c.end_time, 2))
-        if k not in matched:
+        # 1) exact match — clip wasn't edited
+        i = by_key.get((round(c.start_time, 2), round(c.end_time, 2)))
+        if i is None or i in used:
+            # 2) overlap match — clip was trimmed/adjusted in the brief
+            i = _best_overlap_source(c, curation, used)
+        if i is not None:
+            used.add(i)
+            out.append(curation[i].model_copy(update={
+                "start_time": c.start_time,
+                "end_time": c.end_time,
+                "title": c.title or curation[i].title,
+                "summary": c.summary or curation[i].summary,
+            }))
+        else:
+            # 3) no curation source (rescued/found) — bare clip
             out.append(CuratedClip(
                 start_time=c.start_time, end_time=c.end_time,
                 title=c.title, summary=c.summary,
             ))
-            matched.add(k)
     return out
+
+
+def _best_overlap_source(candidate, curation, used) -> int | None:
+    """Index of the unused curation clip that best overlaps `candidate`, or None.
+
+    Requires the candidate to sit mostly (≥50%) inside the source so a trimmed
+    sub-range maps to exactly its parent and never to an unrelated neighbour.
+    """
+    best_i, best_ov = None, 0.0
+    for i, cc in enumerate(curation):
+        if i in used:
+            continue
+        ov = min(candidate.end_time, cc.end_time) - max(candidate.start_time, cc.start_time)
+        if ov > best_ov:
+            best_ov, best_i = ov, i
+    dur = max(candidate.end_time - candidate.start_time, 1e-6)
+    return best_i if best_i is not None and best_ov / dur >= 0.5 else None
 
 
 def _record_brief_learning(episode_id: str, session) -> None:
@@ -1001,6 +1056,12 @@ async def post_brief_message(job_id: str, payload: dict, user: User = Depends(re
     message = (payload.get("message") or "").strip()
     if not message or len(message) > 2000:
         raise HTTPException(status_code=400, detail="message must be 1–2000 chars")
+    focus_id = payload.get("focus_id")  # one-by-one flow: clip currently on screen
+    if focus_id is not None:
+        try:
+            focus_id = int(focus_id)
+        except (TypeError, ValueError):
+            focus_id = None
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
@@ -1012,7 +1073,9 @@ async def post_brief_message(job_id: str, payload: dict, user: User = Depends(re
         raise HTTPException(status_code=404, detail="No brief session for this job")
 
     try:
-        actions = BriefAgent().interpret(message, session.candidates, session.messages)
+        actions = BriefAgent().interpret(
+            message, session.candidates, session.messages, focus_id=focus_id
+        )
     except Exception as e:
         # LLM failure — leave the session untouched so the user can retry.
         raise HTTPException(status_code=502, detail=f"LLM interpretation failed: {e}")
@@ -1027,8 +1090,10 @@ async def post_brief_message(job_id: str, payload: dict, user: User = Depends(re
             summaries.append(f"No pude aplicar una acción ({e}).")
     reply = " ".join(s for s in summaries if s) or "Sin cambios."
 
-    session.messages.append(ChatMessage(role="user", content=message))
-    session.messages.append(ChatMessage(role="assistant", content=reply, change_summary=reply))
+    session.messages.append(ChatMessage(role="user", content=message, clip_id=focus_id))
+    session.messages.append(
+        ChatMessage(role="assistant", content=reply, change_summary=reply, clip_id=focus_id)
+    )
     save_session(brief_dir, session)
 
     payload_out = _brief_payload(session)

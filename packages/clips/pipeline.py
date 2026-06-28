@@ -719,9 +719,16 @@ class BatchProcessor:
                     final_path, getattr(plan, "bumpers", None), settings.data_dir, tmp_path
                 )
 
-                # 3f. Save caption to text file
+                # 3f. Save caption to text file. Fall back to title + summary when
+                # no social caption was generated (e.g. rescued/edited clips) so the
+                # accompanying title/description file is never empty.
                 caption_path = target_folder / f"{clip_name}_caption.txt"
-                caption_content = f"{clip.social_caption}\n\n{' '.join(clip.caption_hashtags)}"
+                body = (clip.social_caption or "").strip() or "\n\n".join(
+                    p for p in [getattr(clip, "title", "").strip(),
+                                getattr(clip, "summary", "").strip()] if p
+                )
+                tags = clip.caption_hashtags or getattr(clip, "suggested_hashtags", []) or []
+                caption_content = f"{body}\n\n{' '.join(tags)}".strip() + "\n"
                 caption_path.write_text(caption_content, encoding='utf-8')
 
                 folder_name = "approved" if is_approved else "review"

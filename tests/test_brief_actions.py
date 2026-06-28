@@ -150,3 +150,58 @@ def test_noop_keeps_selection(session, ctx):
     assert res.ok is True
     assert [c.selected for c in session.candidates] == selected_before
     assert "minuto" in res.change_summary
+
+
+# ── trim_to_text (clip-scoped recorte por texto citado) ──────────────────────
+
+def _words(pairs):
+    """pairs: list of (word, start, end) tuples."""
+    return [(w, float(s), float(e)) for (w, s, e) in pairs]
+
+
+def test_trim_to_text_sets_window_from_quote(session):
+    words = _words([
+        ("relleno", 100, 101), ("antes", 101, 102),
+        ("esto", 102, 103), ("es", 103, 104), ("la", 104, 105),
+        ("parte", 105, 106), ("buena", 106, 107),
+        ("y", 107, 108), ("relleno", 108, 109), ("final", 109, 110),
+    ])
+    ctx = BriefContext(episode_duration=3600.0, words_provider=lambda s, e: words)
+    res = apply(session, BriefAction(type="trim_to_text", id=1,
+                                     keep_text="esto es la parte buena"), ctx)
+    assert res.ok is True
+    c1 = next(c for c in session.candidates if c.id == 1)
+    assert c1.start_time == 102.0 and c1.end_time == 107.0
+    assert c1.selected is True  # recortar implica conservar el clip
+    # the card transcript is rebuilt to show only what survived the cut
+    assert c1.transcript == "esto es la parte buena"
+    assert "relleno" not in c1.transcript
+
+
+def test_trim_to_text_matches_despite_punctuation_and_case(session):
+    words = _words([
+        ("Esto,", 102, 103), ("ES", 103, 104), ("la", 104, 105),
+        ("Parte.", 105, 106), ("buena", 106, 107),
+    ])
+    ctx = BriefContext(episode_duration=3600.0, words_provider=lambda s, e: words)
+    res = apply(session, BriefAction(type="trim_to_text", id=1,
+                                     keep_text="esto es la parte buena"), ctx)
+    c1 = next(c for c in session.candidates if c.id == 1)
+    assert c1.start_time == 102.0 and c1.end_time == 107.0
+
+
+def test_trim_to_text_unfound_is_graceful_no_mutation(session):
+    ctx = BriefContext(episode_duration=3600.0, words_provider=lambda s, e: _words([
+        ("hola", 100, 101), ("mundo", 101, 102)]))
+    before = (session.candidates[0].start_time, session.candidates[0].end_time)
+    res = apply(session, BriefAction(type="trim_to_text", id=1,
+                                     keep_text="fragmento que no existe"), ctx)
+    assert res.ok is True
+    assert (session.candidates[0].start_time, session.candidates[0].end_time) == before
+
+
+def test_trim_to_text_requires_id_and_keep_text(session, ctx):
+    with pytest.raises(BriefActionError):
+        apply(session, BriefAction(type="trim_to_text", keep_text="algo"), ctx)
+    with pytest.raises(BriefActionError):
+        apply(session, BriefAction(type="trim_to_text", id=1, keep_text="  "), ctx)
