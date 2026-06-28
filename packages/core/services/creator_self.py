@@ -55,54 +55,42 @@ def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local
     # se incluye para no regresionar instalaciones sin ese dato.
     rows = conn.execute(
         "SELECT video_id, hook_type, emotional_charge, duration_seconds, "
-        "average_view_percentage, view_count, like_count, comment_count "
+        "average_view_percentage, view_count, like_count, comment_count, core_topics "
         "FROM youtube_shorts WHERE user_id=? "
         "AND (privacy_status IS NULL OR privacy_status='public')",
         (user_id,),
     ).fetchall()
 
-    # Atribución: video confirmado → atributos del clip generado (categoría).
-    attr_by_video = {}
-    for vid, aj in conn.execute(
-        "SELECT video_id, clip_attrs_json FROM clip_links "
-        "WHERE user_id=? AND status='confirmed' AND video_id IS NOT NULL",
-        (user_id,),
-    ).fetchall():
-        try:
-            attr_by_video[vid] = json.loads(aj or "{}")
-        except Exception as e:
-            logger.warning("clip_attrs parse failed for video %s: %s", vid, e)
-            attr_by_video[vid] = {}
-
     recs = []
-    for vid, hook, emotion, dur, avp, views, likes, comments in rows:
-        rec = {
+    for vid, hook, emotion, dur, avp, views, likes, comments, core_topics in rows:
+        # core_topics: lista separada por comas, viene de la clasificación
+        # automática del short (transcript → LLM). Atribuye tema al desempeño real.
+        topics = [t.strip() for t in (core_topics or "").split(",") if t.strip()]
+        recs.append({
             "hook_type": hook,
             "emotional_charge": emotion,
             "duration_bucket": duration_bucket(dur or 0),
             "retention": avp,
             "engagement": _engagement(views, likes, comments),
-            "topic_tag": None,
-        }
-        ca = attr_by_video.get(vid)
-        if ca and ca.get("category"):
-            rec["topic_tag"] = ca["category"]
-        recs.append(rec)
+            "topics": topics,
+        })
 
     rets = [r["retention"] for r in recs if r["retention"] is not None]
     median_ret = statistics.median(rets) if rets else None
     engs = [r["engagement"] for r in recs if r["engagement"]]
     median_eng = statistics.median(engs) if engs else None
 
-    # Agrupar por hook_type, duration_bucket y topic_tag (atribución de clips).
+    # Agrupar por hook_type, emotional_charge, duration_bucket y tema.
     groups: dict[tuple, list] = defaultdict(list)
     for r in recs:
         if r["hook_type"]:
             groups[("hook", r["hook_type"])].append(r)
+        if r["emotional_charge"]:
+            groups[("emotion", r["emotional_charge"])].append(r)
         if r["duration_bucket"]:
             groups[("duration", r["duration_bucket"])].append(r)
-        if r["topic_tag"]:
-            groups[("topic", r["topic_tag"])].append(r)
+        for topic in r["topics"]:
+            groups[("topic", topic)].append(r)
 
     now = datetime.now(timezone.utc)
     period = f"{now.isocalendar().year}-W{now.isocalendar().week:02d}"
@@ -129,13 +117,14 @@ def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local
         conn.execute(
             """
             INSERT INTO creator_signals
-              (user_id, signal_type, hook_type, duration_bucket, topic_tag,
+              (user_id, signal_type, hook_type, emotional_charge, duration_bucket, topic_tag,
                performance_premium, confidence, sample_size, avg_retention_pct, period)
-            VALUES (?, 'creator_self', ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, 'creator_self', ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
                 val if kind == "hook" else None,
+                val if kind == "emotion" else None,
                 val if kind == "duration" else None,
                 val if kind == "topic" else None,
                 round(premium, 4),

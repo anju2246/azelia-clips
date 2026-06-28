@@ -226,21 +226,6 @@ async function fetchApi<T>(
 
 // --- CLIP PERFORMANCE INTELLIGENCE (CPI) API ---
 
-export interface ClipLink {
-  id: number;
-  episode_id: string;
-  clip_title: string | null;
-  video_id: string | null;
-  match_confidence: number;
-  match_method?: string;
-  status: string;
-  // Info real del video candidato (para revisar con contexto).
-  video_title?: string | null;
-  video_views?: number | null;
-  video_retention?: number | null;
-  video_drop_off?: number | null;
-}
-
 export const CpiApi = {
   /** Importa señales niche (resultados de PodFinder) a la DB local. */
   importNiche: (path?: string) =>
@@ -253,26 +238,6 @@ export const CpiApi = {
       },
     ),
 
-  /** Genera candidatos de vínculo clip↔video (auto-match). */
-  suggestLinks: (episodeId?: string) =>
-    fetchApi<{ suggested: ClipLink[]; count: number }>("/analytics/clip-links/suggest", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(episodeId ? { episode_id: episodeId } : {}),
-    }),
-
-  /** Lista vínculos por estado (suggested|confirmed|rejected). */
-  listLinks: (status: string = "suggested") =>
-    fetchApi<{ links: ClipLink[] }>(`/analytics/clip-links?status=${encodeURIComponent(status)}`),
-
-  /** Confirma o rechaza un vínculo. */
-  updateLink: (id: number, action: "confirm" | "reject", videoId?: string) =>
-    fetchApi<ClipLink>(`/analytics/clip-links/${id}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action, ...(videoId ? { video_id: videoId } : {}) }),
-    }),
-
   /** Recomputa la inteligencia de curación (CREATOR SELF) y devuelve resumen. */
   refresh: () =>
     fetchApi<{
@@ -282,7 +247,6 @@ export const CpiApi = {
       creator_signals: number;
       creator_self_written: number;
       niche_signals: number;
-      links_suggested: number;
       zero_reach: number;
     }>("/analytics/intelligence/refresh", {
       method: "POST",

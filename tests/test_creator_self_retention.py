@@ -63,21 +63,20 @@ def test_falls_back_without_retention(conn):
     assert q[1] is None        # sin retención
 
 
-def test_confirmed_clip_attribution(conn):
+def test_topic_signal_from_core_topics(conn):
+    """El tema sale de core_topics (clasificación automática del short), no de matching."""
     c, _ = conn
-    _short(c, "v1", "question", 20, 75.0)
-    # clip confirmado con categoría 'startups' apuntando a v1
     c.execute(
-        "INSERT INTO clip_links (user_id, episode_id, clip_start, clip_end, "
-        "clip_attrs_json, video_id, status) VALUES "
-        "('local','ep1',0,20,?, 'v1','confirmed')",
-        (json.dumps({"category": "startups"}),),
+        "INSERT INTO youtube_shorts (video_id, user_id, hook_type, duration_seconds, "
+        "average_view_percentage, view_count, like_count, comment_count, core_topics, privacy_status) "
+        "VALUES ('v1','local','question',20,75.0,100,10,2,'startups,emprendimiento','public')"
     )
     c.commit()
     compute_creator_self_signals(c)
     topic = _signal(c, topic_tag="startups")
-    assert topic is not None              # el atributo del clip se atribuyó al video real
+    assert topic is not None              # tema atribuido al desempeño real del short
     assert topic[1] == pytest.approx(75.0, abs=0.1)
+    assert _signal(c, topic_tag="emprendimiento") is not None  # múltiples temas por short
 
 
 def _short_priv(conn, vid, hook, retention, privacy, views=100, likes=10, comments=2):

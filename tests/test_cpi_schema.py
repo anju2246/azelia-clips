@@ -35,7 +35,7 @@ def _tables(conn):
 def test_new_tables_created(yt_db):
     conn = analytics._get_yt_db()
     tables = _tables(conn)
-    for t in ("niche_signals", "niche_baselines", "retention_curves", "clip_links"):
+    for t in ("niche_signals", "niche_baselines", "retention_curves"):
         assert t in tables, f"falta tabla {t}"
 
     # Columnas clave de niche_signals
@@ -58,14 +58,6 @@ def test_new_tables_created(yt_db):
     rcols = _columns(conn, "retention_curves")
     for c in ("video_id", "user_id", "curve_json", "drop_off_ratio", "fetched_at"):
         assert c in rcols, f"retention_curves sin columna {c}"
-
-    # clip_links
-    lcols = _columns(conn, "clip_links")
-    for c in ("id", "user_id", "episode_id", "clip_title", "clip_caption",
-              "clip_start", "clip_end", "clip_duration", "clip_attrs_json",
-              "video_id", "match_confidence", "match_method", "status",
-              "created_at", "updated_at"):
-        assert c in lcols, f"clip_links sin columna {c}"
     conn.close()
 
 

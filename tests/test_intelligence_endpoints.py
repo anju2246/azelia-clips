@@ -45,7 +45,7 @@ def test_refresh_runs_and_summarizes(client):
     assert data["with_retention"] == 1
     assert data["niche_signals"] >= 10
     assert data["creator_self_written"] >= 1
-    assert "links_suggested" in data
+    assert "zero_reach" in data
 
 
 def test_refresh_reports_zero_reach(client):
