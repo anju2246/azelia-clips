@@ -102,3 +102,11 @@ web/test-results/
 web/e2e/.auth/
 out/
 _logs/
+# Loop-engineering / SDD working docs (no se trackean)
+goal.md
+spec.md
+plan.md
+tasks.md
+constitution.md
+learnings.md
+docs/multi-profile/

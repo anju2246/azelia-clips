@@ -1,9 +1,10 @@
 import shutil
 from pathlib import Path
 
-# Fix to find a valid job
-data_dir = Path("/Users/juanpabloduqueb/Documents/GitHub/azelia-clips/server/data/jobs")
-dummy_mp4 = Path("/Users/juanpabloduqueb/Documents/GitHub/azelia-clips/dummy.mp4")
+# Repo-relative paths (no hardcoded user/home paths)
+ROOT = Path(__file__).resolve().parent.parent
+data_dir = ROOT / "server" / "data" / "jobs"
+dummy_mp4 = ROOT / "dummy.mp4"
 
 # Find first job with clips
 for job_dir in data_dir.iterdir():
