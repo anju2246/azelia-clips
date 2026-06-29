@@ -55,7 +55,12 @@ def _clip_texter(job_dir: Path):
 
 
 def build_session(
-    job_dir: Path, episode_id: str, min_score: float = 70
+    job_dir: Path,
+    episode_id: str,
+    min_score: float = 70,
+    *,
+    hook_enabled: bool = False,
+    hook_duration_s: float = 0.0,
 ) -> BriefSession:
     """Build a brief session from the curation artifacts in ``job_dir``.
 
@@ -86,6 +91,7 @@ def build_session(
                     start_time=float(clip["start_time"]),
                     end_time=float(clip["end_time"]),
                     title=clip.get("title", ""),
+                    hook_text=clip.get("title", ""),  # default = title; user may override
                     summary=clip.get("summary", ""),
                     reasoning=clip.get("reasoning", "") or "",
                     score=score,
@@ -113,6 +119,7 @@ def build_session(
                     start_time=float(d["start_time"]),
                     end_time=float(d["end_time"]),
                     title=d.get("title", ""),
+                    hook_text=d.get("title", ""),  # default = title; user may override
                     summary=d.get("summary", ""),
                     reasoning=d.get("reasoning", "") or "",
                     score=0.0,
@@ -137,6 +144,8 @@ def build_session(
         messages=[],
         created_at=now,
         updated_at=now,
+        hook_enabled=hook_enabled,
+        hook_duration_s=hook_duration_s,
     )
 
 

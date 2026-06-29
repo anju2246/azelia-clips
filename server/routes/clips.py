@@ -851,6 +851,10 @@ def _brief_payload(session) -> dict:
         "episode_id": session.episode_id,
         "candidates": [c.model_dump() for c in session.candidates],
         "messages": [m.model_dump() for m in session.messages],
+        # Hook title (first N seconds) — when enabled, the UI shows an editable
+        # hook field per candidate (candidate.hook_text). False → field hidden.
+        "hook_enabled": getattr(session, "hook_enabled", False),
+        "hook_duration_s": getattr(session, "hook_duration_s", 0.0),
         "counts": {
             "selected": selected,
             "total": len(session.candidates),
@@ -955,13 +959,15 @@ def _approved_curated_clips(brief_dir: Path, session) -> list:
                 "start_time": c.start_time,
                 "end_time": c.end_time,
                 "title": c.title or curation[i].title,
+                "hook_text": getattr(c, "hook_text", "") or c.title or curation[i].title,
                 "summary": c.summary or curation[i].summary,
             }))
         else:
             # 3) no curation source (rescued/found) — bare clip
             out.append(CuratedClip(
                 start_time=c.start_time, end_time=c.end_time,
-                title=c.title, summary=c.summary,
+                title=c.title, hook_text=getattr(c, "hook_text", "") or c.title,
+                summary=c.summary,
             ))
     return out
 
@@ -1047,6 +1053,33 @@ async def get_brief(job_id: str, user: User = Depends(require_auth)):
     session = load_session(_brief_dir(job_id, job.episode_id))
     if session is None:
         raise HTTPException(status_code=404, detail="No brief session for this job")
+    return _brief_payload(session)
+
+
+@router.post("/jobs/{job_id}/brief/candidate/{cand_id}/hook")
+async def set_candidate_hook(
+    job_id: str, cand_id: int, payload: dict, user: User = Depends(require_auth)
+):
+    """Set the editable hook text (first-N-seconds title) of one candidate.
+
+    Deterministic edit (no LLM). Surfaced in the UI only when the job's template
+    has the hook title enabled; the backend stores whatever it's given.
+    """
+    hook_text = (payload.get("hook_text") or "").strip()[:120]
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "awaiting_brief":
+        raise HTTPException(status_code=409, detail="Job is not awaiting brief review")
+    brief_dir = _brief_dir(job_id, job.episode_id)
+    session = load_session(brief_dir)
+    if session is None:
+        raise HTTPException(status_code=404, detail="No brief session for this job")
+    candidate = next((c for c in session.candidates if c.id == cand_id), None)
+    if candidate is None:
+        raise HTTPException(status_code=404, detail=f"Candidate {cand_id} not found")
+    candidate.hook_text = hook_text
+    save_session(brief_dir, session)
     return _brief_payload(session)
 
 

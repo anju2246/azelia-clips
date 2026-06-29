@@ -531,8 +531,12 @@ class BatchProcessor:
         from packages.clips.curation.brief_builder import build_session, save_session
         from server.workers.job_store import get_job_store
         episode_id = f"EP{episode.episode_number:03d}"
+        # Does the job's template render a hook title? If so the brief surfaces an
+        # editable hook field per clip. Best-effort: any failure → feature off.
+        hook_enabled, hook_duration_s = self._resolve_hook_title()
         session = build_session(
-            episode.episode_folder, episode_id, min_score=self.min_score
+            episode.episode_folder, episode_id, min_score=self.min_score,
+            hook_enabled=hook_enabled, hook_duration_s=hook_duration_s,
         )
         session.job_id = job_id
         save_session(episode.episode_folder, session)
@@ -548,6 +552,23 @@ class BatchProcessor:
             f"{selected} seleccionados[/cyan]"
         )
         return 0
+
+    def _resolve_hook_title(self) -> tuple[bool, float]:
+        """Whether the job's template renders a hook title, and its duration.
+
+        Best-effort: returns (False, 0.0) if the template can't be resolved so the
+        brief gate never crashes over a styling lookup.
+        """
+        try:
+            from packages.core.config import settings
+            from packages.clips.templates.store import TemplateStore
+            tpl = TemplateStore(settings.templates_dir()).resolve(getattr(self, "template_id", None))
+            spec = getattr(tpl, "intro_title", None)
+            if spec and getattr(spec, "enabled", False):
+                return True, float(getattr(spec, "duration_s", 0.0) or 0.0)
+        except Exception:
+            pass
+        return False, 0.0
 
     # ── Render ───────────────────────────────────────────────────────────────
 
@@ -701,7 +722,8 @@ class BatchProcessor:
                 generator.generate_word_by_word(
                     clip_transcript, str(subs_path),
                     words_per_line=plan.words_per_line, animation=plan.animation,
-                    intro_title=plan.intro_title, clip_title=getattr(clip, "title", ""),
+                    intro_title=plan.intro_title,
+                    clip_title=getattr(clip, "hook_text", "") or getattr(clip, "title", ""),
                 )
 
                 # 3e. Burn subtitles (+ optional logo / progress bar) and save

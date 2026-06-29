@@ -42,6 +42,62 @@ function OriginBadge({ c }: { c: BriefCandidate }) {
   return null;
 }
 
+/** Editable hook text (first-N-seconds title). Shown only when the job's
+ *  template renders a hook. Saves on blur; the server returns the updated
+ *  brief which the parent applies. */
+function HookField({
+  jobId,
+  candidate,
+  durationS,
+  onSaved,
+}: {
+  jobId: string;
+  candidate: BriefCandidate;
+  durationS: number;
+  onSaved: (b: BriefResponse) => void;
+}) {
+  const [value, setValue] = useState(candidate.hook_text ?? "");
+  const [saving, setSaving] = useState(false);
+
+  // Reset the field when navigating to another candidate.
+  useEffect(() => {
+    setValue(candidate.hook_text ?? "");
+  }, [candidate.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const save = async () => {
+    if (value === (candidate.hook_text ?? "")) return; // no change → skip
+    setSaving(true);
+    try {
+      onSaved(await ClipsApi.setBriefHook(jobId, candidate.id, value));
+    } catch {
+      toast.error("No pude guardar el hook");
+      setValue(candidate.hook_text ?? "");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="mt-3" data-testid="brief-hook-field">
+      <label className="flex items-center gap-1 text-[11px] uppercase tracking-wide text-zinc-500">
+        Hook{durationS > 0 ? ` (primeros ${Math.round(durationS)}s)` : ""}
+        {saving && <Loader2 className="w-3 h-3 animate-spin" />}
+      </label>
+      <input
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+        }}
+        maxLength={120}
+        placeholder={candidate.title}
+        className="mt-1 w-full rounded-lg border border-zinc-800 bg-black/40 px-3 py-2 text-sm text-white focus:border-brand-500 focus:outline-none"
+      />
+    </div>
+  );
+}
+
 export const BriefChatModal: React.FC<BriefChatModalProps> = ({
   jobId,
   onClose,
@@ -320,6 +376,15 @@ export const BriefChatModal: React.FC<BriefChatModalProps> = ({
                   {current.score > 0 ? Math.round(current.score) : "—"}
                 </span>
               </div>
+
+              {brief?.hook_enabled && (
+                <HookField
+                  jobId={jobId}
+                  candidate={current}
+                  durationS={brief.hook_duration_s}
+                  onSaved={setBrief}
+                />
+              )}
 
               {current.summary && (
                 <p className="text-sm text-zinc-200 mt-3">{current.summary}</p>

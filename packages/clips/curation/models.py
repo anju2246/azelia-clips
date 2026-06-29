@@ -145,6 +145,7 @@ class CuratedClip(BaseModel):
     start_time: float = Field(..., description="Start time in seconds")
     end_time: float = Field(..., description="End time in seconds")
     title: str = Field(..., description="Catchy title for the clip")
+    hook_text: str = Field(default="", description="On-screen hook text for the first N seconds; empty falls back to title at render")
     summary: str = Field(..., description="Brief summary of the clip content")
     virality_score: ViralityScore = Field(default_factory=ViralityScore, description="Detailed virality score dimensions")
     category: str = Field(default="insight", description="e.g., insight, story, funny, controversial")

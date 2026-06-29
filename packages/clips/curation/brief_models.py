@@ -31,6 +31,10 @@ class BriefCandidate(BaseModel):
     selected: bool
     origin: str  # "curation" | "rescued" | "found"
     transcript: str = ""  # clip transcript text (for the expandable review card)
+    # Editable text shown on-screen for the first N seconds (the "hook title").
+    # Initialized to the clip title in build_session; the user may override it in
+    # the brief. Only surfaced when the job's template has intro_title enabled.
+    hook_text: str = ""
 
 
 class ChatMessage(BaseModel):
@@ -82,6 +86,10 @@ class BriefSession(BaseModel):
     messages: List[ChatMessage]
     created_at: str
     updated_at: str
+    # Whether the job's template renders a hook title (intro_title.enabled). When
+    # True the UI surfaces the editable hook field per candidate; False → hidden.
+    hook_enabled: bool = False
+    hook_duration_s: float = 0.0  # informative: "first Ns" label in the UI
 
     def to_dict(self) -> dict:
         """Convert to a JSON-serializable dict for persistence."""

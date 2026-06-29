@@ -26,6 +26,8 @@ export interface BriefCandidate {
   selected: boolean;
   origin: "curation" | "rescued" | "found";
   transcript: string;
+  /** Editable on-screen hook text (first N seconds). Defaults to the title. */
+  hook_text: string;
 }
 
 export interface BriefChatMessage {
@@ -47,6 +49,10 @@ export interface BriefResponse {
   candidates: BriefCandidate[];
   messages: BriefChatMessage[];
   counts: BriefCounts;
+  /** True when the job's template renders a hook title → show the hook field. */
+  hook_enabled: boolean;
+  /** Hook duration in seconds (for the "first Ns" label). */
+  hook_duration_s: number;
 }
 
 export interface BriefMessageResponse extends BriefResponse {
@@ -452,6 +458,16 @@ export const ClipsApi = {
         focusId != null ? { message, focus_id: focusId } : { message },
       ),
     }),
+
+  setBriefHook: (jobId: string, candidateId: number, hookText: string) =>
+    fetchApi<BriefResponse>(
+      `/jobs/${jobId}/brief/candidate/${candidateId}/hook`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hook_text: hookText }),
+      },
+    ),
 
   approveBrief: (jobId: string, selectedIds?: number[]) =>
     fetchApi<{ status: string; approved_count: number }>(
