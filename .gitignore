@@ -100,3 +100,5 @@ web/test-results/
 
 # Playwright auth state — never commit; contains live session tokens
 web/e2e/.auth/
+out/
+_logs/
