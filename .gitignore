@@ -92,7 +92,11 @@ _scratch/
 
 # MCP server config (local only)
 .mcp.json
-.claude/settings.json
+
+# Claude Code workspace — NEVER commit. Holds local settings AND the user's
+# personal memory/brain notes (.claude/projects/**/memory/*.md). Ignore the
+# whole dir; add `!` exceptions if a specific shared agent ever needs tracking.
+.claude/
 
 # Playwright test artifacts
 web/test-results/
