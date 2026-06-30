@@ -41,6 +41,12 @@ RECORTE POR TEXTO: si sobre el clip en foco el usuario pega un fragmento del tra
 como "déjalo solo con esto", "saca solo esta parte", "recórtalo a esto", "lo demás bórralo/quítalo/
 elimínalo" → usa trim_to_text con id = clip en foco y keep_text = el fragmento citado TAL CUAL.
 Aquí "lo demás" significa el resto DEL MISMO CLIP, NUNCA otros clips. No emitas drop en este caso.
+Abajo tienes el TRANSCRIPT del clip en foco. NUNCA respondas que "solo conoces los rangos del clip"
+ni que "no puedes cortar en el medio": SÍ puedes. Si el usuario pega, cita o describe un fragmento,
+emite trim_to_text con keep_text = ese fragmento (o, si lo describe, el tramo correspondiente del
+transcript que ves). El backend lo resuelve a tiempos exactos, incluso si el fragmento cae un poco
+fuera del rango actual del clip. Solo usa noop si el pedido es genuinamente ambiguo, jamás para
+excusarte de cortar.
 
 PRIORIZACIÓN: para CUALQUIER pedido de priorizar/ordenar por un enfoque — sea una dimensión
 ("los más polémicos", "los de más energía") o algo temático/semántico ("los que hablan de IA",
@@ -98,6 +104,12 @@ class BriefAgent:
                 f"'busca un mejor cierre/arranque', 'no me convence') aplica al #{focus_id}. "
                 f"No toques otros clips salvo que el usuario los nombre explícitamente."
             )
+            focus_c = next((c for c in candidates if c.id == focus_id), None)
+            tx = (getattr(focus_c, "transcript", "") or "").strip() if focus_c else ""
+            if tx:
+                if len(tx) > 4000:  # defensive: clips are short, this is just a guard
+                    tx = tx[:4000] + " …"
+                lines.append(f"\n## Transcript del clip en foco #{focus_id}\n{tx}")
         if history:
             lines.append("\n## Conversación previa")
             for m in history[-6:]:

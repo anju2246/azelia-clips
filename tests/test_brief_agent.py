@@ -134,6 +134,53 @@ def test_focus_steering_says_dont_touch_other_clips():
     assert "drop" in sent.lower()
 
 
+def _candidates_with_transcript():
+    cs = _candidates()
+    cs[0].transcript = "esto es la parte buena del clip uno sobre inteligencia artificial"
+    cs[1].transcript = "y este es el clip dos sobre el debate"
+    return cs
+
+
+def test_build_message_includes_focus_transcript():
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("recórtalo a esto", _candidates_with_transcript(), focus_id=1)
+    _, kwargs = fake_llm.chat.call_args
+    user_msg = kwargs.get("user_message", "")
+    assert "Transcript del clip en foco" in user_msg
+    assert "esto es la parte buena del clip uno" in user_msg
+    # the OTHER clip's transcript must not be dumped
+    assert "clip dos sobre el debate" not in user_msg
+
+
+def test_build_message_no_focus_omits_transcript():
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("ordena por polémica", _candidates_with_transcript())
+    _, kwargs = fake_llm.chat.call_args
+    user_msg = kwargs.get("user_message", "")
+    assert "Transcript del clip en foco" not in user_msg
+
+
+def test_build_message_truncates_long_transcript():
+    cs = _candidates_with_transcript()
+    cs[0].transcript = "palabra " * 1000  # ~8000 chars
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("recórtalo", cs, focus_id=1)
+    _, kwargs = fake_llm.chat.call_args
+    user_msg = kwargs.get("user_message", "")
+    assert "…" in user_msg
+    # the focus transcript block must be bounded (not the full 8000 chars)
+    assert len(user_msg) < 6000
+
+
+def test_system_prompt_forbids_only_ranges_excuse():
+    agent, fake_llm = _agent_with_llm_returning(json.dumps({"actions": []}))
+    agent.interpret("recórtalo a esto", _candidates_with_transcript(), focus_id=1)
+    _, kwargs = fake_llm.chat.call_args
+    system = kwargs.get("system_prompt", "").lower()
+    assert "solo conoz" in system or "solo conoc" in system  # explicitly names the forbidden excuse
+    assert "rangos" in system
+
+
 def test_focus_id_absent_keeps_global_prompt():
     # Without a focus the user message must not fabricate a specific focused clip
     # (the system prompt still explains the concept; the dynamic block does not).

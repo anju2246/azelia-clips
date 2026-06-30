@@ -6,6 +6,7 @@ No LLM and no network here: `find_new` / `recurate_focus` receive their heavy
 dependencies (finder, ranker) through `BriefContext`, so the whole module is
 unit-testable with fakes.
 """
+import difflib
 import re
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Tuple
@@ -37,38 +38,98 @@ def _tokens(text: str) -> List[str]:
     return re.findall(r"\w+", (text or "").lower(), re.UNICODE)
 
 
+_FUZZY_MIN_RATIO = 0.6  # difflib similarity floor for the fuzzy fallback
+
+
 def match_text_span(
-    words: List[Tuple[str, float, float]], keep_text: str
+    words: List[Tuple[str, float, float]],
+    keep_text: str,
+    anchor_time: Optional[float] = None,
 ) -> Optional[Tuple[float, float]]:
     """Resolve a quoted passage to a (start, end) time span over timed words.
 
     `words` is a list of (word, start, end); matching is punctuation/case
-    insensitive. Anchors on the first/last few query tokens so small transcript
-    differences in the middle don't break the match. Returns None if unfound.
+    insensitive. The matcher is robust in two ways:
+
+    1. **Exact anchors** on the first/last few query tokens, but it gathers ALL
+       occurrences (not just the first), so a phrase repeated elsewhere in the
+       episode still produces every candidate span.
+    2. **Fuzzy fallback** (``difflib``) when no exact anchor pair survives, so a
+       pasted fragment with small differences at the edges or middle still
+       resolves.
+
+    When ``anchor_time`` is given, candidates of equal match quality are broken
+    by proximity to it — i.e. the occurrence nearest the focused clip wins. When
+    it is ``None`` the earliest candidate wins (stable, back-compatible).
+    Returns ``None`` if nothing matches.
     """
+    # Expand each timed word into its alphanumeric tokens, all sharing the
+    # word's (start, end). For word-level transcripts this is one token each;
+    # for the segment-level fallback it lets a whole sentence still be matched.
     norm: List[Tuple[str, float, float]] = []
     for tok, s, e in words:
-        t = _tokens(tok)
-        if t:
-            norm.append((t[0], float(s), float(e)))
+        for piece in _tokens(tok):
+            norm.append((piece, float(s), float(e)))
     q = _tokens(keep_text)
     if not q or not norm:
         return None
-    wt = [n[0] for n in norm]
+    wt = [t for t, _, _ in norm]
     n = len(norm)
-    k = min(5, len(q))
+    lq = len(q)
+    k = min(5, lq)
+
+    # (quality, edge_bonus, length_penalty, start_i, end_j[exclusive]).
+    candidates: List[Tuple[float, int, int, int, int]] = []
+
+    # ── exact-anchor candidates ──────────────────────────────────────────────
     head, tail = q[:k], q[-k:]
+    head_starts = [i for i in range(0, n - k + 1) if wt[i:i + k] == head]
+    if not head_starts:
+        head_starts = [i for i in range(n) if wt[i] == q[0]]
+    tail_ends = [j for j in range(k, n + 1) if wt[j - k:j] == tail]
+    if not tail_ends:
+        tail_ends = [j for j in range(1, n + 1) if wt[j - 1] == q[-1]]
 
-    start_i = next((i for i in range(0, n - k + 1) if wt[i:i + k] == head), None)
-    if start_i is None:
-        start_i = next((i for i in range(n) if wt[i] == q[0]), None)
-    end_j = next((j for j in range(n, k - 1, -1) if wt[j - k:j] == tail), None)
-    if end_j is None:
-        end_j = next((j for j in range(n, 0, -1) if wt[j - 1] == q[-1]), None)
+    lo_len = max(1, int(0.5 * lq))
+    hi_len = int(2.0 * lq) + 5
+    for i in head_starts:
+        for j in tail_ends:
+            if j > i and lo_len <= (j - i) <= hi_len:
+                # exact anchors (quality 2.0) beat any fuzzy match
+                candidates.append((2.0, 2, 0, i, j))
 
-    if start_i is None or end_j is None or end_j <= start_i:
+    # ── fuzzy fallback (only if no exact-anchor pair survived) ───────────────
+    if not candidates:
+        for size in range(max(1, lq - 2), lq + 3):
+            if size > n:
+                continue
+            for i in range(0, n - size + 1):
+                window = wt[i:i + size]
+                sm = difflib.SequenceMatcher(None, window, q)
+                # coverage = fraction of QUERY tokens matched (don't reward
+                # dropping query words just because a shorter window scores
+                # higher on difflib's length-sensitive ratio).
+                matched = sum(b.size for b in sm.get_matching_blocks())
+                coverage = matched / lq
+                if coverage < _FUZZY_MIN_RATIO:
+                    continue
+                # prefer windows whose edges align with the query edges, so a
+                # match isn't padded with unrelated filler at the start/end.
+                edge_bonus = (window[0] == q[0]) + (window[-1] == q[-1])
+                candidates.append((coverage, edge_bonus, abs(size - lq), i, i + size))
+
+    if not candidates:
         return None
-    return (norm[start_i][1], norm[end_j - 1][2])
+
+    def _rank(c: Tuple[float, int, int, int, int]):
+        quality, edge_bonus, length_penalty, i, _j = c
+        prox = abs(norm[i][1] - anchor_time) if anchor_time is not None else 0.0
+        # best coverage, best edge alignment, length closest to the query, then
+        # nearest to the focused clip, then earliest occurrence.
+        return (-quality, -edge_bonus, length_penalty, prox, i)
+
+    _q, _eb, _lp, bi, bj = min(candidates, key=_rank)
+    return (norm[bi][1], norm[bj - 1][2])
 
 
 def _index_by_id(session: BriefSession) -> dict:
@@ -163,14 +224,19 @@ def _trim_to_text(session, action, ctx) -> ChangeResult:
     (c,) = _require_ids(session, [action.id])
     if ctx.words_provider is None:
         raise BriefActionError("trim_to_text needs a transcript in context")
-    # Search only inside the clip's current window so a phrase repeated elsewhere
-    # in the episode can't pull the cut out of this clip.
-    words = ctx.words_provider(c.start_time, c.end_time) or []
-    span = match_text_span(words, text)
+    # Search the WHOLE episode (not just the clip's current window) so a pasted
+    # fragment that falls outside the current [start,end] still resolves and can
+    # move/extend the clip. A phrase repeated elsewhere is disambiguated by
+    # proximity to the clip in focus (anchor_time=c.start_time).
+    words = ctx.words_provider(0.0, ctx.episode_duration) or []
+    span = match_text_span(words, text, anchor_time=c.start_time)
     if span is None:
         return ChangeResult(
             ok=True,
-            change_summary=f"No ubiqué ese fragmento dentro de #{c.id}; pégalo tal cual aparece en el transcript.",
+            change_summary=(
+                f"No encontré ese fragmento en el episodio para #{c.id}; "
+                f"pégalo un poco más largo o tal cual aparece en el transcript."
+            ),
         )
     start, end = span
     if end <= start:

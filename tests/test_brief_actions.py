@@ -12,7 +12,12 @@ from packages.clips.curation.brief_models import (
     BriefCandidate,
     BriefSession,
 )
-from packages.clips.curation.brief_actions import apply, BriefContext, BriefActionError
+from packages.clips.curation.brief_actions import (
+    apply,
+    BriefContext,
+    BriefActionError,
+    match_text_span,
+)
 
 
 def _candidate(id, score, selected=True, critic_approved=True, above=True, origin="curation"):
@@ -205,3 +210,84 @@ def test_trim_to_text_requires_id_and_keep_text(session, ctx):
         apply(session, BriefAction(type="trim_to_text", keep_text="algo"), ctx)
     with pytest.raises(BriefActionError):
         apply(session, BriefAction(type="trim_to_text", id=1, keep_text="  "), ctx)
+
+
+# ── match_text_span (T1: robust matcher + proximity bias) ────────────────────
+
+def test_match_span_no_anchor_backcompat():
+    """Without anchor_time, an exact quote resolves to the precise span (как antes)."""
+    words = _words([
+        ("esto", 102, 103), ("es", 103, 104), ("la", 104, 105),
+        ("parte", 105, 106), ("buena", 106, 107),
+    ])
+    assert match_text_span(words, "esto es la parte buena") == (102.0, 107.0)
+
+
+def test_match_span_fuzzy_tolerates_edge_differences():
+    """Small transcription/paste differences at the edges still resolve the span."""
+    words = _words([
+        ("relleno", 100, 101),
+        ("esto", 102, 103), ("es", 103, 104), ("la", 104, 105),
+        ("parte", 105, 106), ("buena", 106, 107),
+        ("relleno", 108, 109),
+    ])
+    # head "fue" vs "es", tail "bueno" vs "buena" — two edge differences
+    span = match_text_span(words, "esto fue la parte bueno")
+    assert span is not None
+    s, e = span
+    assert 101.5 <= s <= 102.5 and 106.5 <= e <= 107.5
+
+
+def test_match_span_proximity_picks_nearest_occurrence():
+    """A phrase repeated in the episode resolves to the occurrence nearest anchor_time."""
+    words = _words([
+        # occurrence #1 around 100s
+        ("la", 100, 101), ("parte", 101, 102), ("buena", 102, 103),
+        ("bla", 103, 104), ("bla", 104, 105),
+        # occurrence #2 around 500s
+        ("la", 500, 501), ("parte", 501, 502), ("buena", 502, 503),
+    ])
+    near = match_text_span(words, "la parte buena", anchor_time=490.0)
+    assert near == (500.0, 503.0)
+    near2 = match_text_span(words, "la parte buena", anchor_time=99.0)
+    assert near2 == (100.0, 103.0)
+
+
+def test_match_span_absent_returns_none():
+    words = _words([("hola", 100, 101), ("mundo", 101, 102)])
+    assert match_text_span(words, "fragmento que no existe en absoluto") is None
+
+
+# ── trim_to_text whole-episode search (T2) ───────────────────────────────────
+
+def test_trim_resolves_fragment_outside_current_window(session):
+    """The fragment lives outside the clip's current [start,end]; trim moves the clip to it."""
+    # clip #1 is at 100–140; the quoted fragment is at ~200s (outside the window).
+    all_words = _words([
+        ("antes", 100, 101), ("del", 101, 102), ("clip", 102, 103),
+        ("la", 200, 201), ("parte", 201, 202), ("que", 202, 203),
+        ("quiero", 203, 204), ("conservar", 204, 205),
+    ])
+
+    def window_provider(s, e):
+        # honra la ventana pedida: el código viejo pide [100,140] y NO ve los 200s
+        return [(w, ws, we) for (w, ws, we) in all_words if we >= s and ws <= e]
+
+    ctx = BriefContext(episode_duration=3600.0, words_provider=window_provider)
+    res = apply(session, BriefAction(type="trim_to_text", id=1,
+                                     keep_text="la parte que quiero conservar"), ctx)
+    assert res.ok is True
+    c1 = next(c for c in session.candidates if c.id == 1)
+    assert c1.start_time == 200.0 and c1.end_time == 205.0
+    assert c1.selected is True
+
+
+def test_trim_unfound_message_is_clear(session):
+    ctx = BriefContext(episode_duration=3600.0, words_provider=lambda s, e: _words([
+        ("hola", 100, 101), ("mundo", 101, 102)]))
+    before = (session.candidates[0].start_time, session.candidates[0].end_time)
+    res = apply(session, BriefAction(type="trim_to_text", id=1,
+                                     keep_text="esto no aparece en ningun lado del episodio"), ctx)
+    assert res.ok is True
+    assert (session.candidates[0].start_time, session.candidates[0].end_time) == before
+    assert "no encontr" in res.change_summary.lower()
