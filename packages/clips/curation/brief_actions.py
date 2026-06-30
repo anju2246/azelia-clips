@@ -38,7 +38,77 @@ def _tokens(text: str) -> List[str]:
     return re.findall(r"\w+", (text or "").lower(), re.UNICODE)
 
 
-_FUZZY_MIN_RATIO = 0.6  # difflib similarity floor for the fuzzy fallback
+_FUZZY_MIN_RATIO = 0.6        # min fraction of query tokens a fuzzy window must cover
+_ANCHOR_TOKENS = 5            # head/tail tokens used for exact anchoring
+_MIN_LEN_FACTOR = 0.5         # exact-span length must be ≥ this × query length
+_MAX_LEN_FACTOR = 2.0         # …and ≤ this × query length …
+_MAX_LEN_PADDING = 5          # …plus this slack (tokens)
+_FUZZY_WIN_TOLERANCE = 2      # fuzzy window sizes scanned: len(q) ± this
+_EXACT_QUALITY = 2.0          # quality score for exact anchors (beats any fuzzy)
+_EXACT_EDGE_BONUS = 2         # exact anchors align both edges by construction
+_MAX_FUZZY_QUERY_TOKENS = 120  # beyond this, require exact anchors (DoS guard)
+_FUZZY_RADIUS_S = 180.0       # fuzzy sweep stays within ±this of anchor_time
+_MAX_KEEP_TEXT_CHARS = 10_000  # cap pasted-fragment size before tokenizing
+
+
+def _exact_anchor_candidates(wt, n, q, lq):
+    """All exact-anchor (quality, edge_bonus, len_penalty, i, j) spans for `q`.
+
+    Gathers EVERY head/tail occurrence (not just the first) so a phrase repeated
+    in the episode still yields each candidate span for proximity ranking later.
+    """
+    k = min(_ANCHOR_TOKENS, lq)
+    head, tail = q[:k], q[-k:]
+    head_starts = [i for i in range(0, n - k + 1) if wt[i:i + k] == head]
+    if not head_starts:
+        head_starts = [i for i in range(n) if wt[i] == q[0]]
+    tail_ends = [j for j in range(k, n + 1) if wt[j - k:j] == tail]
+    if not tail_ends:
+        tail_ends = [j for j in range(1, n + 1) if wt[j - 1] == q[-1]]
+
+    lo_len = max(1, int(_MIN_LEN_FACTOR * lq))
+    hi_len = int(_MAX_LEN_FACTOR * lq) + _MAX_LEN_PADDING
+    out = []
+    for i in head_starts:
+        for j in tail_ends:
+            if j > i and lo_len <= (j - i) <= hi_len:
+                out.append((_EXACT_QUALITY, _EXACT_EDGE_BONUS, 0, i, j))
+    return out
+
+
+def _fuzzy_candidates(norm, wt, n, q, lq, anchor_time):
+    """Fuzzy (coverage, edge_bonus, len_penalty, i, j) spans via difflib.
+
+    Bounded for performance: skipped for oversized queries, and (when an
+    anchor_time is given) the sliding window only scans words within
+    ``_FUZZY_RADIUS_S`` of the focused clip instead of the whole episode.
+    """
+    if lq > _MAX_FUZZY_QUERY_TOKENS:
+        return []
+    lo, hi = 0, n
+    if anchor_time is not None:  # restrict the O(n·lq²) sweep to the clip's zone
+        lo = next((idx for idx in range(n)
+                   if norm[idx][2] >= anchor_time - _FUZZY_RADIUS_S), n)
+        hi = next((idx for idx in range(n - 1, -1, -1)
+                   if norm[idx][1] <= anchor_time + _FUZZY_RADIUS_S), -1) + 1
+    out = []
+    for size in range(max(1, lq - _FUZZY_WIN_TOLERANCE), lq + _FUZZY_WIN_TOLERANCE + 1):
+        if size > n:
+            continue
+        for i in range(lo, hi - size + 1):
+            window = wt[i:i + size]
+            sm = difflib.SequenceMatcher(None, window, q)
+            # coverage = fraction of QUERY tokens matched; don't reward dropping
+            # query words just because a shorter window scores higher on
+            # difflib's length-sensitive ratio().
+            coverage = sum(b.size for b in sm.get_matching_blocks()) / lq
+            if coverage < _FUZZY_MIN_RATIO:
+                continue
+            # prefer windows whose edges align with the query edges, so a match
+            # isn't padded with unrelated filler at the start/end.
+            edge_bonus = (window[0] == q[0]) + (window[-1] == q[-1])
+            out.append((coverage, edge_bonus, abs(size - lq), i, i + size))
+    return out
 
 
 def match_text_span(
@@ -49,19 +119,12 @@ def match_text_span(
     """Resolve a quoted passage to a (start, end) time span over timed words.
 
     `words` is a list of (word, start, end); matching is punctuation/case
-    insensitive. The matcher is robust in two ways:
-
-    1. **Exact anchors** on the first/last few query tokens, but it gathers ALL
-       occurrences (not just the first), so a phrase repeated elsewhere in the
-       episode still produces every candidate span.
-    2. **Fuzzy fallback** (``difflib``) when no exact anchor pair survives, so a
-       pasted fragment with small differences at the edges or middle still
-       resolves.
-
-    When ``anchor_time`` is given, candidates of equal match quality are broken
-    by proximity to it — i.e. the occurrence nearest the focused clip wins. When
-    it is ``None`` the earliest candidate wins (stable, back-compatible).
-    Returns ``None`` if nothing matches.
+    insensitive. Robust in two ways: exact head/tail anchors (gathering every
+    occurrence), and a bounded ``difflib`` fuzzy fallback when no exact anchor
+    survives — so a pasted fragment with small edge/middle differences still
+    resolves. When ``anchor_time`` is given, equal-quality candidates are broken
+    by proximity to it (the occurrence nearest the focused clip wins); when
+    ``None`` the earliest wins (stable, back-compatible). ``None`` if unfound.
     """
     # Expand each timed word into its alphanumeric tokens, all sharing the
     # word's (start, end). For word-level transcripts this is one token each;
@@ -70,58 +133,19 @@ def match_text_span(
     for tok, s, e in words:
         for piece in _tokens(tok):
             norm.append((piece, float(s), float(e)))
-    q = _tokens(keep_text)
+    q = _tokens((keep_text or "")[:_MAX_KEEP_TEXT_CHARS])
     if not q or not norm:
         return None
     wt = [t for t, _, _ in norm]
-    n = len(norm)
-    lq = len(q)
-    k = min(5, lq)
+    n, lq = len(norm), len(q)
 
-    # (quality, edge_bonus, length_penalty, start_i, end_j[exclusive]).
-    candidates: List[Tuple[float, int, int, int, int]] = []
-
-    # ── exact-anchor candidates ──────────────────────────────────────────────
-    head, tail = q[:k], q[-k:]
-    head_starts = [i for i in range(0, n - k + 1) if wt[i:i + k] == head]
-    if not head_starts:
-        head_starts = [i for i in range(n) if wt[i] == q[0]]
-    tail_ends = [j for j in range(k, n + 1) if wt[j - k:j] == tail]
-    if not tail_ends:
-        tail_ends = [j for j in range(1, n + 1) if wt[j - 1] == q[-1]]
-
-    lo_len = max(1, int(0.5 * lq))
-    hi_len = int(2.0 * lq) + 5
-    for i in head_starts:
-        for j in tail_ends:
-            if j > i and lo_len <= (j - i) <= hi_len:
-                # exact anchors (quality 2.0) beat any fuzzy match
-                candidates.append((2.0, 2, 0, i, j))
-
-    # ── fuzzy fallback (only if no exact-anchor pair survived) ───────────────
+    candidates = _exact_anchor_candidates(wt, n, q, lq)
     if not candidates:
-        for size in range(max(1, lq - 2), lq + 3):
-            if size > n:
-                continue
-            for i in range(0, n - size + 1):
-                window = wt[i:i + size]
-                sm = difflib.SequenceMatcher(None, window, q)
-                # coverage = fraction of QUERY tokens matched (don't reward
-                # dropping query words just because a shorter window scores
-                # higher on difflib's length-sensitive ratio).
-                matched = sum(b.size for b in sm.get_matching_blocks())
-                coverage = matched / lq
-                if coverage < _FUZZY_MIN_RATIO:
-                    continue
-                # prefer windows whose edges align with the query edges, so a
-                # match isn't padded with unrelated filler at the start/end.
-                edge_bonus = (window[0] == q[0]) + (window[-1] == q[-1])
-                candidates.append((coverage, edge_bonus, abs(size - lq), i, i + size))
-
+        candidates = _fuzzy_candidates(norm, wt, n, q, lq, anchor_time)
     if not candidates:
         return None
 
-    def _rank(c: Tuple[float, int, int, int, int]):
+    def _rank(c):
         quality, edge_bonus, length_penalty, i, _j = c
         prox = abs(norm[i][1] - anchor_time) if anchor_time is not None else 0.0
         # best coverage, best edge alignment, length closest to the query, then
@@ -239,6 +263,13 @@ def _trim_to_text(session, action, ctx) -> ChangeResult:
             ),
         )
     start, end = span
+    # Clamp to valid episode bounds (defensive: match_text_span derives times
+    # from words already inside the episode, but a malformed provider shouldn't
+    # push a clip out of range). spec F3.4.
+    if start < 0:
+        start = 0.0
+    if ctx.episode_duration and end > ctx.episode_duration:
+        end = ctx.episode_duration
     if end <= start:
         return ChangeResult(ok=True, change_summary=f"El recorte de #{c.id} quedó vacío; revisa el texto.")
     c.start_time, c.end_time = start, end

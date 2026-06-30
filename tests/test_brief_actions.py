@@ -258,6 +258,26 @@ def test_match_span_absent_returns_none():
     assert match_text_span(words, "fragmento que no existe en absoluto") is None
 
 
+def test_match_span_caps_oversized_query_without_exact_anchor():
+    """A pathologically long fragment with no exact anchor skips the fuzzy sweep
+    (perf guard) and returns None instead of scanning O(n·lq²)."""
+    words = _words([(f"w{i}", float(i), float(i) + 1) for i in range(50)])
+    huge = " ".join(f"x{i}" for i in range(500))  # 500 tokens, none present
+    assert match_text_span(words, huge) is None
+
+
+def test_trim_clamps_span_to_episode_duration(session):
+    """A resolved end beyond episode_duration is clamped (spec F3.4)."""
+    ctx = BriefContext(
+        episode_duration=150.0,
+        words_provider=lambda s, e: _words([("alpha", 148, 152)]),  # ends past 150
+    )
+    res = apply(session, BriefAction(type="trim_to_text", id=1, keep_text="alpha"), ctx)
+    c1 = next(c for c in session.candidates if c.id == 1)
+    assert res.ok is True
+    assert c1.end_time == 150.0  # clamped to episode duration
+
+
 # ── trim_to_text whole-episode search (T2) ───────────────────────────────────
 
 def test_trim_resolves_fragment_outside_current_window(session):

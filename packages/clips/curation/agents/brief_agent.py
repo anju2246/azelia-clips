@@ -58,6 +58,9 @@ Si el pedido es ambiguo (p. ej. "busca algo gracioso" sin minuto para find_new),
 pidiendo la aclaración. Puedes devolver varias acciones en un mismo mensaje."""
 
 
+_MAX_FOCUS_TRANSCRIPT_CHARS = 4000  # defensive truncation of the focus clip text
+
+
 class BriefAgent:
     """Interprets feedback → BriefAction[] via the shared LLM provider."""
 
@@ -107,8 +110,8 @@ class BriefAgent:
             focus_c = next((c for c in candidates if c.id == focus_id), None)
             tx = (getattr(focus_c, "transcript", "") or "").strip() if focus_c else ""
             if tx:
-                if len(tx) > 4000:  # defensive: clips are short, this is just a guard
-                    tx = tx[:4000] + " …"
+                if len(tx) > _MAX_FOCUS_TRANSCRIPT_CHARS:  # clips are short; just a guard
+                    tx = tx[:_MAX_FOCUS_TRANSCRIPT_CHARS] + " …"
                 lines.append(f"\n## Transcript del clip en foco #{focus_id}\n{tx}")
         if history:
             lines.append("\n## Conversación previa")
