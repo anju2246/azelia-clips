@@ -113,4 +113,10 @@ plan.md
 tasks.md
 constitution.md
 learnings.md
+# Variantes por-feature en la raíz (spec-X.md / plan-X.md / tasks-X.md)
+/spec-*.md
+/plan-*.md
+/tasks-*.md
+# Respaldo de docs SDD archivados
+.sdd-archive/
 docs/multi-profile/
