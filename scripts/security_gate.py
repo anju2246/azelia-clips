@@ -1,65 +1,81 @@
 #!/usr/bin/env python3
-"""Security / data-leak gate for azelia-clips.
+"""Security / data-leak gate — Software Factory edition.
 
 A deterministic check that BLOCKS secrets and personal data from reaching any
-branch (especially the PUBLIC `main`). Wired as a `pre-push` git hook and runnable
-by hand / in CI. Has a built-in eval suite (`--self-test`) so the gate itself is
-verified before it's trusted.
+branch of any repo. Generalized from azelia-clips' gate. Wired three ways:
+  1. `.git/hooks/pre-commit`  → `--staged`
+  2. `.git/hooks/pre-push`    → `--range <remote-sha>..<local-sha>`
+  3. Claude Code PreToolUse   → runs `--staged` before every `git commit` the agent makes
 
 The gate inspects two things about the content being introduced:
-  1. PATHS   — forbidden files (job data, .env, *.db, OAuth secrets, the user's
-               .claude memory notes, raw transcripts, key material).
-  2. CONTENT — secret-looking strings on ADDED lines (API keys, private keys, JWTs).
+  1. PATHS   — forbidden files (.env, *.db, key material, OAuth/token JSON,
+               Claude memory notes, auth state).
+  2. CONTENT — secret-looking strings on ADDED lines (API keys, tokens,
+               private keys, JWTs, DB URLs with embedded passwords).
+
+Per-project extras: if `.security-gate.json` exists in the repo root it may add
+rules:  {"forbidden_paths": [["regex","label"],...], "allow_paths": ["regex",...],
+         "secret_patterns": [["regex","label"],...]}
 
 Exit codes: 0 = clean, 2 = violation(s) found, 1 = usage / internal error.
 
 Usage:
   security_gate.py --staged                 # check `git diff --cached` (pre-commit)
   security_gate.py --range <base>..<tip>    # check a commit range (pre-push)
-  security_gate.py --files a.py b.json       # check explicit paths on disk
+  security_gate.py --files a.py b.json      # check explicit paths on disk
   security_gate.py --self-test              # run the eval suite, print PASS/FAIL
 """
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import subprocess
 import sys
 from dataclasses import dataclass
+from pathlib import Path
 
 
 # ── Rules ────────────────────────────────────────────────────────────────────
 # A path is FORBIDDEN if it matches a forbidden pattern and NONE of the allow
-# patterns. Keep these in sync with .gitignore's "never commit" section.
+# patterns. Keep these in sync with the project .gitignore's "never commit" section.
 
 FORBIDDEN_PATH_PATTERNS: list[tuple[str, str]] = [
-    (r"(^|/)data/", "job data dir (clips/transcripts/curation — user content)"),
-    (r"\.db($|-wal$|-shm$)|\.sqlite[0-9]?$", "SQLite database (local user data)"),
     (r"(^|/)\.env$|(^|/)\.env\.", ".env file (may hold secrets)"),
-    (r"(^|/)secrets?\.env$", "secrets.env (API keys / tokens)"),
+    (r"(^|/)secrets?\.env$|(^|/)secrets(/|$)", "secrets file / directory"),
+    (r"\.db($|-wal$|-shm$)|\.sqlite[0-9]?$", "SQLite database (local user data)"),
     (r"\.claude/projects/.*/memory/", "personal Claude memory/brain note"),
-    (r"(^|/)(id_rsa|id_ed25519)$|\.pem$|(^|/)[^/]*\.key$", "private key material"),
+    (r"(^|/)(id_rsa|id_ed25519|id_ecdsa)$|\.pem$|(^|/)[^/]*\.key$", "private key material"),
     (r"client_secret.*\.json$|(^|/)oauth.*\.json$|(^|/)token.*\.json$", "OAuth / token file"),
-    (r"(^|/)transcript[^/]*\.json$", "raw transcript JSON (episode content)"),
-    (r"web/e2e/\.auth/", "Playwright auth state (live session tokens)"),
+    (r"(^|/)credentials\.json$|(^|/)service[-_]?account.*\.json$", "credential / service-account file"),
+    (r"(^|/)\.netrc$", ".netrc (stored credentials)"),
+    (r"(^|/)\.mcp\.json$", "MCP config (may embed tokens)"),
+    (r"(^|/)\.auth/", "auth state dir (live session tokens)"),
 ]
 
 # Paths that LOOK forbidden but are explicitly safe (templates / synthetic).
 ALLOW_PATH_PATTERNS: list[str] = [
-    r"\.env\.example$",
+    r"\.env\.(example|sample|template)$",
     r"(^|/)examples/.*\.json$",
-    r"(^|/)tests/fixtures/.*\.json$",  # synthetic fixtures (reviewed)
+    r"(^|/)tests?/fixtures/.*",  # synthetic fixtures (reviewed)
 ]
 
 # Secret-looking content on ADDED lines. Each is a (regex, label).
 SECRET_CONTENT_PATTERNS: list[tuple[str, str]] = [
     (r"sk-ant-[A-Za-z0-9_-]{20,}", "Anthropic API key"),
+    (r"sk-proj-[A-Za-z0-9_-]{20,}", "OpenAI project API key"),
     (r"AKIA[0-9A-Z]{16}", "AWS access key id"),
     (r"AIza[0-9A-Za-z_-]{30,}", "Google API key"),
-    (r"ghp_[0-9A-Za-z]{30,}", "GitHub personal access token"),
+    (r"gh[pousr]_[0-9A-Za-z]{30,}", "GitHub token"),
+    (r"github_pat_[0-9A-Za-z_]{40,}", "GitHub fine-grained PAT"),
     (r"xox[baprs]-[0-9A-Za-z-]{10,}", "Slack token"),
-    (r"-----BEGIN (?:RSA |OPENSSH |EC )?PRIVATE KEY", "private key block"),
+    (r"sbp_[0-9a-f]{40}", "Supabase access token"),
+    (r"ntn_[0-9A-Za-z]{30,}", "Notion integration token"),
+    (r"sk_live_[0-9A-Za-z]{20,}", "Stripe live secret key"),
+    (r"rk_live_[0-9A-Za-z]{20,}", "Stripe live restricted key"),
+    (r"-----BEGIN (?:RSA |OPENSSH |EC |PGP )?PRIVATE KEY", "private key block"),
     (r"eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{10,}", "JWT"),
+    (r"postgres(?:ql)?://[^\s'\"]+:[^\s'\"@]+@", "database URL with embedded password"),
 ]
 
 # A secret match is ignored if the same line also contains one of these
@@ -67,6 +83,27 @@ SECRET_CONTENT_PATTERNS: list[tuple[str, str]] = [
 SECRET_FALSE_POSITIVE = re.compile(
     r"INVALID|EXAMPLE|PLACEHOLDER|YOUR[_-]?KEY|XXXX|FAKE|DUMMY|REDACTED|<.*>", re.I
 )
+
+
+def _load_project_extras() -> None:
+    """Merge per-project rules from .security-gate.json (repo root), if present."""
+    root = subprocess.run(
+        ["git", "rev-parse", "--show-toplevel"], capture_output=True, text=True, check=False
+    ).stdout.strip()
+    cfg = Path(root or ".") / ".security-gate.json"
+    if not cfg.is_file():
+        return
+    try:
+        data = json.loads(cfg.read_text())
+    except (json.JSONDecodeError, OSError) as exc:
+        print(f"security_gate: could not parse {cfg} ({exc}) — ignoring extras.", file=sys.stderr)
+        return
+    for pat, label in data.get("forbidden_paths", []):
+        FORBIDDEN_PATH_PATTERNS.append((pat, f"{label} (project rule)"))
+    for pat in data.get("allow_paths", []):
+        ALLOW_PATH_PATTERNS.append(pat)
+    for pat, label in data.get("secret_patterns", []):
+        SECRET_CONTENT_PATTERNS.append((pat, f"{label} (project rule)"))
 
 
 @dataclass
@@ -166,12 +203,10 @@ def scan_files(paths: list[str]) -> list[Finding]:
     return findings
 
 
-# ── Eval suite (the "evals definidos") ───────────────────────────────────────
+# ── Eval suite ───────────────────────────────────────────────────────────────
 def self_test() -> int:
     """Defined evals: the gate must flag known-bad and pass known-good."""
     bad_paths = [
-        "data/jobs/abc/transcript.json",
-        "data/jobs/abc/curation.json",
         "secrets.env",
         ".env",
         "server/x.db",
@@ -181,15 +216,19 @@ def self_test() -> int:
         "deploy/id_rsa",
         "certs/server.pem",
         "web/e2e/.auth/state.json",
+        "credentials.json",
+        ".netrc",
+        ".mcp.json",
+        "gcp/service-account-prod.json",
     ]
     good_paths = [
         ".env.example",
-        "web/.env.example",
+        "web/.env.sample",
         "examples/sample.json",
         "tests/fixtures/brief/curation.json",
-        "packages/clips/pipeline.py",
+        "src/pipeline.py",
         "server/routes/clips.py",
-        "scripts/security_gate.py",
+        ".claude/hooks/security_gate.py",
     ]
     # Samples are assembled at runtime so this file never contains a contiguous
     # secret literal (otherwise the gate would flag its own eval fixtures).
@@ -197,16 +236,25 @@ def self_test() -> int:
     aws = "AKIA" + "1234567890ABCDEF"
     pk = "-----BEGIN OPENSSH " + "PRIVATE KEY-----"
     gk = "AIza" + "SyA1234567890abcdefghijklmnopqrstuv"
+    gho = "gho_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+    sbp = "sbp_" + "0123456789abcdef0123456789abcdef01234567"
+    ntn = "ntn_" + "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"
+    dburl = "postgresql://user:" + "hunter2@db.internal:5432/prod"
     bad_content = [
         ("a.py", [(1, f'KEY = "{sk}"')]),
         ("b.ts", [(7, f"const k = '{aws}'")]),
         ("c.txt", [(1, pk)]),
         ("d.env.real", [(1, f"GOOGLE={gk}")]),
+        ("e.json", [(3, f'"GITHUB_PERSONAL_ACCESS_TOKEN": "{gho}"')]),
+        ("f.json", [(2, f'"SUPABASE_ACCESS_TOKEN": "{sbp}"')]),
+        ("g.py", [(9, f'NOTION_TOKEN = "{ntn}"')]),
+        ("h.yml", [(4, f"url: {dburl}")]),
     ]
     good_content = [
         ("e.spec.ts", [(100, "await input.fill('sk-ant-INVALID_KEY_12345')")]),
         ("f.md", [(1, "set ANTHROPIC_API_KEY=<your-key-here>")]),
         ("g.py", [(1, "api_key = os.environ['ANTHROPIC_API_KEY']")]),
+        ("h.md", [(2, "postgresql://user:PLACEHOLDER@localhost/dev")]),
     ]
 
     failures: list[str] = []
@@ -245,6 +293,8 @@ def main(argv: list[str]) -> int:
 
     if args.self_test:
         return self_test()
+
+    _load_project_extras()
     if args.staged:
         findings = scan(["--cached"])
     elif args.range:
@@ -257,8 +307,9 @@ def main(argv: list[str]) -> int:
         for f in findings:
             print(f)
         print(
-            "\nNothing was pushed/committed. Remove the file(s) from the change, or if "
-            "this is a reviewed false positive, add an allow-rule in scripts/security_gate.py."
+            "\nNothing was pushed/committed. Remove the file(s)/lines from the change, "
+            "rotate the credential if it is real, or — only if this is a reviewed false "
+            "positive — add an allow-rule in .security-gate.json."
         )
         return 2
     return 0
