@@ -161,7 +161,7 @@ speechbrain==1.0.3
 SQLAlchemy==2.0.45
 starlette==0.50.0
 storage3==2.27.2
-streamlit==1.53.0
+streamlit==1.54.0
 StrEnum==0.4.15
 strictyaml==1.7.3
 submitit==1.5.4
