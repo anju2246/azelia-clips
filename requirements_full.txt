@@ -100,7 +100,7 @@ openunmix==1.3.0
 optuna==4.6.0
 packaging==25.0
 pandas==2.3.3
-pillow==12.1.0
+pillow==12.3.0
 polars==1.37.1
 polars-runtime-32==1.37.1
 postgrest==2.27.2
