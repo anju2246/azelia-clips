@@ -1,12 +1,10 @@
 """Extract video clips based on curated timestamps."""
 
-import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Union
 
 from rich.console import Console
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 from packages.clips.curation.models import CuratedClip
 
@@ -18,7 +16,7 @@ class ExtractedClip:
     """An extracted video clip with metadata."""
     path: Path
     curated_clip: CuratedClip
-    
+
     @property
     def filename(self) -> str:
         return self.path.name
@@ -69,7 +67,7 @@ class ClipExtractor:
             raise FileNotFoundError(f"Source video not found: {source_video}")
 
         output_path = self._get_clip_path(clip, index)
-        
+
         # Calculate times with padding
         start = max(0, clip.start_time - padding)
         duration = clip.duration + (2 * padding)
@@ -141,7 +139,7 @@ class ClipExtractor:
                     console.print(f"  [green]✓[/green] {result.filename}")
                 except Exception as e:
                     console.print(f"  [red]✗[/red] Clip {i}: {e}")
-                
+
                 progress.update(task, advance=1)
 
         console.print(f"\n[green]✓[/green] Extracted {len(extracted)}/{len(clips)} clips to {self.output_dir}")

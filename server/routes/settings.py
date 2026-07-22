@@ -15,8 +15,8 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from packages.core.config import settings
 from packages.core.llm_provider import (
-    claude_code_available,
     claude_code_authenticated,
+    claude_code_available,
     reset_llm,
     vision_available,
 )

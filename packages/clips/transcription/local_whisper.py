@@ -1,8 +1,11 @@
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from rich.console import Console
+
+from packages.clips.transcription.transcriber import Segment, Transcript, Word
+
 from .base import TranscriptionSource
-from packages.clips.transcription.transcriber import Transcript, Segment, Word
 
 console = Console()
 
@@ -52,7 +55,7 @@ class LocalWhisperSource(TranscriptionSource):
 
         # Try MLX Whisper (Apple Silicon Optimized)
         try:
-            import mlx_whisper
+            import mlx_whisper  # noqa: F401 — availability probe
             return self._transcribe_mlx(video_path)
         except ImportError:
             console.print("[yellow]mlx-whisper not found, falling back to openai-whisper[/yellow]")
@@ -60,8 +63,8 @@ class LocalWhisperSource(TranscriptionSource):
 
     def _transcribe_mlx(self, video_path: Path) -> Transcript:
         import mlx_whisper
-        
-        console.print(f"[blue]🎤[/blue] Transcribing with MLX Whisper (Apple Silicon)...")
+
+        console.print("[blue]🎤[/blue] Transcribing with MLX Whisper (Apple Silicon)...")
         result = mlx_whisper.transcribe(
             str(video_path),
             path_or_hf_repo="mlx-community/whisper-large-v3-turbo",
@@ -69,16 +72,16 @@ class LocalWhisperSource(TranscriptionSource):
             language="es"
         )
         transcript = self._format_result(result, str(video_path))
-        
+
         # Optional: Run speaker diarization if HF token is available
         transcript = self._try_diarize(video_path, transcript)
-        
+
         return transcript
 
     def _transcribe_openai(self, video_path: Path) -> Transcript:
         import whisper
-        
-        console.print(f"[blue]🎤[/blue] Transcribing with Standard Whisper (CPU/CUDA)...")
+
+        console.print("[blue]🎤[/blue] Transcribing with Standard Whisper (CPU/CUDA)...")
         model = whisper.load_model("medium")
         result = model.transcribe(
             str(video_path),
@@ -86,10 +89,10 @@ class LocalWhisperSource(TranscriptionSource):
             word_timestamps=True
         )
         transcript = self._format_result(result, str(video_path))
-        
+
         # Optional: Run speaker diarization if HF token is available
         transcript = self._try_diarize(video_path, transcript)
-        
+
         return transcript
 
     def _format_result(self, result: dict, source_file: str) -> Transcript:
@@ -105,7 +108,7 @@ class LocalWhisperSource(TranscriptionSource):
                 end=seg["end"],
                 words=words,
             ))
-            
+
         return Transcript(
             segments=segments,
             language="es",
@@ -133,8 +136,8 @@ class LocalWhisperSource(TranscriptionSource):
         # ── 1. Try pyannote first if the user opted in via HF_TOKEN ──
         try:
             from packages.clips.transcription.diarizer import (
-                get_diarizer,
                 assign_speakers_to_transcript,
+                get_diarizer,
             )
 
             diarizer = get_diarizer()

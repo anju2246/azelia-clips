@@ -167,7 +167,7 @@ def format_transcript_for_teaser(transcript, max_chars: int = 8000) -> str:
         speaker = seg.speaker or "?"
         time_str = f"[{seg.start:.1f}s - {seg.end:.1f}s]"
         lines.append(f"{time_str} {speaker}: {seg.text}")
-    
+
     full_text = "\n".join(lines)
     if len(full_text) > max_chars:
         # Truncate but keep structure
@@ -180,17 +180,17 @@ def extract_topics_from_transcript(transcript, llm_provider=None) -> list[str]:
     # Simple keyword extraction for now
     # Could be enhanced with LLM-based topic extraction
     full_text = " ".join([seg.text for seg in transcript.segments])
-    
+
     # Very basic topic extraction (placeholder)
     # In production, use LLM for better results
     topics = []
-    
+
     # Common topic indicators
     topic_phrases = [
         "hablamos de", "el tema de", "la importancia de",
         "cómo", "por qué", "qué significa", "el secreto de"
     ]
-    
+
     for phrase in topic_phrases:
         if phrase in full_text.lower():
             # Extract surrounding context
@@ -198,27 +198,27 @@ def extract_topics_from_transcript(transcript, llm_provider=None) -> list[str]:
             context = full_text[idx:idx+100].split(".")[0]
             if len(context) > 10:
                 topics.append(context.strip())
-    
+
     return topics[:5] if topics else ["Conversación en profundidad", "Experiencias personales"]
 
 
 def summarize_transcript_for_intro(transcript, max_chars: int = 2000) -> str:
     """Create a summary of the transcript for intro script generation."""
     segments = transcript.segments
-    
+
     # Take beginning, middle, and end samples
     n = len(segments)
     if n == 0:
         return "Conversación no disponible"
-    
+
     sample_indices = [
         0, n // 4, n // 2, 3 * n // 4, n - 1
     ]
-    
+
     samples = []
     for i in sample_indices:
         if 0 <= i < n:
             seg = segments[i]
             samples.append(f"[{seg.start:.0f}s] {seg.speaker}: {seg.text[:200]}")
-    
+
     return "\n\n".join(set(samples))[:max_chars]

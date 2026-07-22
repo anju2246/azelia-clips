@@ -1,15 +1,17 @@
-import os
 from pathlib import Path
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
+
 from rich.console import Console
+
+from packages.clips.transcription.transcriber import Segment, Transcript, Word
+
 from .base import TranscriptionSource
-from packages.clips.transcription.transcriber import Transcript, Segment, Word
 
 console = Console()
 
 class AssemblyAISource(TranscriptionSource):
     """Transcribes audio using AssemblyAI API."""
-    
+
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Check for API Key."""
         return bool(config.get("assemblyai_api_key"))
@@ -22,7 +24,7 @@ class AssemblyAISource(TranscriptionSource):
         """
         api_key = kwargs.get("assemblyai_api_key")
         language = kwargs.get("language", "es")
-        
+
         if not api_key:
             raise ValueError("AssemblyAI API Key required")
 
@@ -33,7 +35,7 @@ class AssemblyAISource(TranscriptionSource):
             return None
 
         aai.settings.api_key = api_key
-        
+
         audio_path = Path(resource_id)
         if not audio_path.exists():
             raise FileNotFoundError(f"File not found: {audio_path}")
@@ -50,17 +52,17 @@ class AssemblyAISource(TranscriptionSource):
         )
 
         transcript = transcriber.transcribe(str(audio_path), config=config)
-        
+
         if transcript.status == aai.TranscriptStatus.error:
             raise RuntimeError(f"Transcription failed: {transcript.error}")
-            
-        console.print(f"[green]✓[/green] Analysis Complete. Mapping to internal format...")
-        
+
+        console.print("[green]✓[/green] Analysis Complete. Mapping to internal format...")
+
         return self._to_transcript(transcript, str(audio_path))
 
     def _to_transcript(self, aai_transcript: Any, source_file: str) -> Transcript:
         """Convert AssemblyAI result to internal Transcript format."""
-        
+
         # Map speakers
         # AssemblyAI uses "A", "B", etc. We map to SPEAKER_00, SPEAKER_01
         speaker_map = {}
@@ -82,7 +84,7 @@ class AssemblyAISource(TranscriptionSource):
                         end=w.end / 1000.0,
                         score=w.confidence
                     ))
-                
+
                 segments.append(Segment(
                     text=utt.text,
                     start=utt.start / 1000.0,

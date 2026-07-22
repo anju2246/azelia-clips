@@ -14,21 +14,21 @@ _MODEL_CACHE: dict = {}
 def get_diarization_pipeline():
     """Get cached pyannote diarization pipeline."""
     global _MODEL_CACHE
-    
+
     if "diarization" not in _MODEL_CACHE:
         console.print("[blue]🎙️ Loading speaker diarization model (first time)...[/blue]")
-        
+
         from pyannote.audio import Pipeline
-        
+
         hf_token = settings.hf_token
-        
+
         # Workaround for PyTorch 2.6 weights_only=True default
         original_load = torch.load
         def patched_load(*args, **kwargs):
             kwargs['weights_only'] = False
             return original_load(*args, **kwargs)
         torch.load = patched_load
-        
+
         try:
             pipeline = Pipeline.from_pretrained(
                 "pyannote/speaker-diarization-3.1",
@@ -36,7 +36,7 @@ def get_diarization_pipeline():
             )
         finally:
             torch.load = original_load
-        
+
         # Use MPS (Metal) on Mac if available
         if torch.backends.mps.is_available():
             pipeline.to(torch.device("mps"))
@@ -44,10 +44,10 @@ def get_diarization_pipeline():
         elif torch.cuda.is_available():
             pipeline.to(torch.device("cuda"))
             console.print("[green]✓[/green] Diarization using GPU (CUDA)")
-        
+
         _MODEL_CACHE["diarization"] = pipeline
         console.print("[green]✓[/green] Diarization model cached")
-    
+
     return _MODEL_CACHE["diarization"]
 
 

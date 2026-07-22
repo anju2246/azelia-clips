@@ -10,13 +10,11 @@ métrica primaria y el engagement como respaldo cuando no hay retención.
 """
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
 import statistics
 from collections import defaultdict
 from datetime import datetime, timezone
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 

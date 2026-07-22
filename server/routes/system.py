@@ -12,7 +12,6 @@ Data preservation: ~/.azelia/data/ is OUTSIDE the git checkout, so git pull
 + pip install -e . never touches user jobs / clips / SQLite DBs / secrets.
 """
 
-import asyncio
 import os
 import subprocess
 import sys

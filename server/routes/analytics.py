@@ -7,12 +7,21 @@ import logging
 import os
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Body, Depends, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import (
+    APIRouter,
+    Body,
+    Depends,
+    File,
+    Form,
+    Header,
+    HTTPException,
+    Request,
+    UploadFile,
+)
 
 from packages.core.auth import User
 from packages.core.crypto import decrypt_token, encrypt_token
 from server.middleware.auth import require_auth
-from server.services import user_settings as user_settings_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -110,8 +119,8 @@ async def get_analytics_insights(user: User = Depends(require_auth)):
 
 # ─── YouTube Shorts Sync & Insights ─────────────────────────────────────────
 
-import sqlite3
-from pathlib import Path
+import sqlite3  # noqa: E402 — section-local import kept with its feature block
+from pathlib import Path  # noqa: E402
 
 YT_DB_PATH = Path(__file__).parent.parent / "data" / "youtube_shorts.db"
 
@@ -349,8 +358,8 @@ async def import_niche(body: dict = Body(default={}), user: User = Depends(requi
     `settings.podfinder_signals_path`. La data nunca se commitea: vive en la
     SQLite local del perfil activo.
     """
-    from packages.core.services.niche_import import import_niche_signals
     from packages.core.config import settings as _settings
+    from packages.core.services.niche_import import import_niche_signals
 
     path = (body or {}).get("path") or getattr(_settings, "podfinder_signals_path", "") or ""
     if not path:
@@ -380,8 +389,8 @@ async def refresh_intelligence(body: dict = Body(default={}), user: User = Depen
     El sync de YouTube (red) se dispara aparte (auto-sync); aquí consolidamos
     las señales locales para que los agentes las usen en la próxima corrida.
     """
-    from server.services.jobs_guard import has_active_jobs
     from packages.core.services.creator_self import compute_creator_self_signals
+    from server.services.jobs_guard import has_active_jobs
 
     active, ids = has_active_jobs()
     if active:
@@ -779,8 +788,8 @@ async def extract_creator_signals(
     # MultiProviderLLM auto-detects Claude Code (local subscription, $0) and
     # falls back to Anthropic API if the user set ANTHROPIC_API_KEY=sk-ant-...
     # Either path works — no hard requirement for a real Anthropic API key.
-    from packages.core.llm_provider import claude_code_available
     from packages.core.config import settings as app_settings
+    from packages.core.llm_provider import claude_code_available
 
     direct_key_ok = (
         (app_settings.anthropic_api_key or "").startswith("sk-ant-")
@@ -881,9 +890,9 @@ async def extract_creator_signals(
     from packages.core.taxonomy import normalize_language as _norm_lang
     from packages.core.taxonomy import normalize_niche as _norm_niche
 
-    profile_region = None
-    profile_language = "en"
-    profile_category = None
+    _profile_region = None
+    _profile_language = "en"
+    _profile_category = None
     user_jwt = getattr(request.state, "user_jwt", None) or ""
     try:
         import httpx as _httpx
@@ -900,9 +909,9 @@ async def extract_creator_signals(
         if pr.status_code == 200 and pr.json():
             p = pr.json()[0]
             prefs = p.get("preferences") or {}
-            profile_region = _norm_country(prefs.get("region")) or None
-            profile_language = _norm_lang(prefs.get("language")) or "en"
-            profile_category = _norm_niche(p.get("content_niche")) or None
+            _profile_region = _norm_country(prefs.get("region")) or None
+            _profile_language = _norm_lang(prefs.get("language")) or "en"
+            _profile_category = _norm_niche(p.get("content_niche")) or None
     except Exception:
         pass
 
@@ -1777,8 +1786,8 @@ async def _sync_channel(
 
             for s in shorts:
                 clip_data = clips_by_title.get(s["title"])
-                hook_type = clip_data.get("hook_type") if clip_data else None
-                predicted_score = clip_data.get("sentiment_score") if clip_data else None
+                _hook_type = clip_data.get("hook_type") if clip_data else None
+                _predicted_score = clip_data.get("sentiment_score") if clip_data else None
 
                 title_hash = hashlib.sha256(s["title"].encode()).hexdigest()[:12]  # noqa: F841
                 # telemetry block removed in v0.1.0 — analytics stays local
@@ -1976,7 +1985,9 @@ async def sync_historical_data(
     async def _run_historical_sync():
         """Background worker for historical sync."""
         try:
-            from packages.core.services.youtube_historical import YouTubeHistoricalExtractor
+            from packages.core.services.youtube_historical import (
+                YouTubeHistoricalExtractor,
+            )
 
             # Local-first: sin telemetría central ni JWT de usuario. El extractor
             # corre 100% local contra el OAuth de YouTube del propio usuario.
@@ -2381,10 +2392,9 @@ async def fetch_youtube_analytics(
     Updates 'user_connections', matches videos to 'clips_metadata', and emits
     telemetry events for the LI feedback loop.
     """
-    import hashlib
-
     from google.oauth2.credentials import Credentials
     from googleapiclient.discovery import build
+
     from server.services.analytics import AnalyticsSync
 
     token = (authorization or "").replace("Bearer ", "").strip()
@@ -2478,15 +2488,14 @@ async def fetch_youtube_analytics(
 
                 # Extract clip metadata for enriched telemetry
                 clip_data = res.data[0] if res.data else {}
-                hook_type = clip_data.get("hook_type")
-                predicted_score = clip_data.get("sentiment_score")
-                clip_duration = clip_data.get("duration_seconds") or duration_secs
+                _hook_type = clip_data.get("hook_type")
+                _predicted_score = clip_data.get("sentiment_score")
+                _clip_duration = clip_data.get("duration_seconds") or duration_secs
 
                 # NEW: Emit telemetry event for LI feedback loop.
                 # `token` (set earlier from the Authorization header) is the
                 # user JWT — fresh and authenticated for this request.
                 if user_id:
-                    title_hash = hashlib.sha256(title.encode()).hexdigest()[:12]
                     # telemetry call removed in v0.1.0
                     telemetry_count += 1
 

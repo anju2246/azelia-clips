@@ -1,4 +1,5 @@
 from typing import List, Optional
+
 from pydantic import BaseModel, Field, model_validator
 
 # ==========================================
@@ -106,12 +107,12 @@ class ViralityScore(BaseModel):
     quotability: int = Field(default=0, ge=0, le=10, description="How quotable the clip is (0-10)")
     storytelling: int = Field(default=0, ge=0, le=10, description="Narrative arc and structure (0-10)")
     controversy: int = Field(default=0, ge=0, le=10, description="Discussion-provoking potential (0-10)")
-    
+
     # Audio-based (30 pts max)
     energy_level: int = Field(default=0, ge=0, le=10, description="Speaker energy and passion (0-10)")
     pacing: int = Field(default=0, ge=0, le=10, description="Rhythm, pauses, and flow (0-10)")
     emotional_arc: int = Field(default=0, ge=0, le=10, description="Emotional depth and variation (0-10)")
-    
+
     # Structural (30 pts max)
     standalone_clarity: int = Field(default=0, ge=0, le=10, description="Ability to be understood without context (0-10)")
     segment_completeness: int = Field(default=0, ge=0, le=10, description="Resolves its own premise (0-10)")
@@ -120,7 +121,7 @@ class ViralityScore(BaseModel):
     @property
     def total(self) -> int:
         return sum([
-            self.hook_strength, self.quotability, 
+            self.hook_strength, self.quotability,
             self.storytelling, self.controversy,
             self.energy_level, self.pacing, self.emotional_arc,
             self.standalone_clarity, self.segment_completeness,
@@ -130,11 +131,11 @@ class ViralityScore(BaseModel):
     @property
     def text_score(self) -> int:
         return self.hook_strength + self.quotability + self.storytelling + self.controversy
-    
+
     @property
     def audio_score(self) -> int:
         return self.energy_level + self.pacing + self.emotional_arc
-    
+
     @property
     def structural_score(self) -> int:
         return self.standalone_clarity + self.segment_completeness + self.optimal_duration

@@ -135,7 +135,7 @@ def detect_face_identities(
     # Reuse FaceTracker for detection (MTCNN+FaceNet) on each sampled frame.
     # We could call MTCNN directly but reusing the tracker means we
     # inherit identity clustering for free.
-    tracker = FaceTracker(sample_fps=2.0)
+    _tracker = FaceTracker(sample_fps=2.0)
     # The tracker's detect_faces() reads the FULL video; here we'd rather
     # detect on a small set of frames. So we sample frames to disk first
     # and then build a "mini video" or detect frame-by-frame.
@@ -164,8 +164,8 @@ def detect_face_identities(
         # 2. MTCNN per frame + FaceNet embeddings
         try:
             import cv2
-            from facenet_pytorch import MTCNN, InceptionResnetV1
             import torch
+            from facenet_pytorch import MTCNN, InceptionResnetV1
         except ImportError as e:
             logger.error("facenet_pytorch not installed: %s", e)
             return {}

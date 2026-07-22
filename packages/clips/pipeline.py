@@ -10,7 +10,7 @@ import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from packages.clips.transcription.transcriber import Transcript
@@ -18,8 +18,8 @@ if TYPE_CHECKING:
 from rich.console import Console
 from rich.table import Table
 
-from packages.core.utils import run_ffmpeg, validate_video
 from packages.clips.templates.layout import DEFAULT_SAFE_ZONE_MULT
+from packages.core.utils import run_ffmpeg, validate_video
 
 console = Console()
 
@@ -40,7 +40,7 @@ class EpisodeConfig:
     episode_folder: Path
     video_path: Path
     transcript_path: Optional[Path] = None
-    
+
     @property
     def clips_folder(self) -> Path:
         """Output folder for clips."""
@@ -99,7 +99,7 @@ class BatchProcessor:
                 ├── clip_02_caption.txt
                 └── ...
     """
-    
+
     def __init__(
         self,
         external_drive_path: str | Path | None = None,
@@ -133,7 +133,7 @@ class BatchProcessor:
         self.auth_token = auth_token
         self.user_id = user_id or "anonymous"
         self.review_brief = review_brief
-        
+
         # Initialize Transcription Driver
         from packages.clips.transcription.driver import TranscriptionDriver
         self.transcription_config = transcription_config or {}
@@ -146,46 +146,46 @@ class BatchProcessor:
         # pause / cancel without crashing concurrent MLX workers.
         # Set by the /pause and /cancel endpoints via server.dependencies.
         self.abort_event = None
-        
+
         if not self.base_path.exists():
             raise FileNotFoundError(
                 f"⚠️ Podcast folder not accessible: {self.base_path}\n"
                 f"   Set PODCAST_DIR in Settings to your episode library "
                 f"(or AZELIA_DATA_DIR if using a custom data root)."
             )
-    
+
     def discover_episodes(self, start: int = 1, end: int = 999) -> list[EpisodeConfig]:
         """
         Discover episodes in the backup folder.
-        
+
         Args:
             start: First episode number to include
             end: Last episode number to include
-            
+
         Returns:
             List of EpisodeConfig for found episodes
         """
         episodes = []
-        
+
         for folder in sorted(self.base_path.iterdir()):
             if not folder.is_dir():
                 continue
-            
+
             # Parse episode number from folder name (e.g., "EP108 - Title")
             folder_name = folder.name
             if not folder_name.startswith("EP"):
                 continue
-            
+
             try:
                 # Extract number: "EP108 - Title" -> 108
                 ep_num_str = folder_name.split(" ")[0].replace("EP", "")
                 ep_num = int(ep_num_str)
             except (ValueError, IndexError):
                 continue
-            
+
             if ep_num < start or ep_num > end:
                 continue
-            
+
             # Find video file
             video_path = folder / "video.mp4"
             if not video_path.exists():
@@ -195,25 +195,25 @@ class BatchProcessor:
                     if matches:
                         video_path = matches[0]
                         break
-            
+
             if not video_path.exists():
                 console.print(f"[yellow]Warning: No video found in {folder.name}[/yellow]")
                 continue
-            
+
             # Check for existing transcript
             transcript_path = folder / "transcript.json"
             if not transcript_path.exists():
                 transcript_path = None
-            
+
             episodes.append(EpisodeConfig(
                 episode_number=ep_num,
                 episode_folder=folder,
                 video_path=video_path,
                 transcript_path=transcript_path,
             ))
-        
+
         return episodes
-    
+
     def _aborted(self) -> bool:
         """True if pause/cancel was triggered for this job — used to short-circuit
         the render loop between heavy steps so concurrent MLX workers can't collide."""
@@ -227,12 +227,12 @@ class BatchProcessor:
     ) -> int:
         """
         Process a single episode through the full pipeline.
-        
+
         Args:
             episode: Episode configuration
             start_from_clip: Skip clips before this index (for resume)
             job_id: Job ID for progress tracking (optional)
-        
+
         Returns:
             Number of clips generated
         """
@@ -258,34 +258,32 @@ class BatchProcessor:
         if job_id:
             from packages.core.process_registry import set_active_job
             set_active_job(job_id)
-        
-        from packages.clips.transcription.transcriber import Transcript
+
         from packages.clips.curation.pipeline import CurationPipeline
-        from packages.clips.vision.reframer import reframe_video
-        from packages.clips.subtitles.generator import SubtitleGenerator
+        from packages.clips.transcription.transcriber import Transcript
         # telemetry removed in local-first MVP
 
         console.print(f"\n[bold blue]Processing EP{episode.episode_number:03d}[/bold blue]")
         if store and job_id:
             store.update_progress(job_id, 25, "Fase 1: Validando archivo de video...")
-        
+
         # Step 0: Validate video before processing (fail fast)
         video_info = validate_video(episode.video_path)
-        
+
         if store and job_id:
             store.update_progress(job_id, 27, "Fase 2: Creando directorios...")
-            
+
         if not video_info['valid']:
-            console.print(f"[red]✗ Video validation failed:[/red]")
+            console.print("[red]✗ Video validation failed:[/red]")
             for error in video_info['errors']:
                 console.print(f"[red]   - {error}[/red]")
             return 0
-        
+
         console.print(f"[dim]   Video: {video_info['width']}x{video_info['height']} @ {video_info['fps']:.1f}fps, {video_info['duration']:.0f}s[/dim]")
-        
+
         # Create clips folder
         episode.clips_folder.mkdir(exist_ok=True)
-        
+
         if store and job_id:
             # Honest progress label — reflects which transcript source is being tried first.
             store.update_progress(
@@ -303,7 +301,9 @@ class BatchProcessor:
         if self.use_supabase:
             console.print("[dim]   Loading transcript from your Supabase…[/dim]")
             try:
-                from server.sources.supabase_transcripts import get_transcript_from_supabase
+                from server.sources.supabase_transcripts import (
+                    get_transcript_from_supabase,
+                )
                 transcript = get_transcript_from_supabase(f"EP{episode.episode_number:03d}")
                 if transcript is None:
                     console.print("[yellow]   Not found in your Supabase — falling back to local.[/yellow]")
@@ -318,10 +318,10 @@ class BatchProcessor:
         if transcript is None:
             # Traditional mode: local transcript or WhisperX
             if episode.transcript_path and episode.transcript_path.exists():
-                console.print(f"[dim]   Loading existing transcript...[/dim]")
+                console.print("[dim]   Loading existing transcript...[/dim]")
                 transcript = Transcript.load(episode.transcript_path)
             else:
-                console.print(f"[dim]   Transcribing episode (this takes time)...[/dim]")
+                console.print("[dim]   Transcribing episode (this takes time)...[/dim]")
                 ep_id_str = f"EP{episode.episode_number:03d}"
                 transcript = self._transcribe_video(episode.video_path, job_id=job_id, episode_id=ep_id_str)
                 if transcript is None:
@@ -343,13 +343,13 @@ class BatchProcessor:
 
         if store and job_id:
             store.update_progress(job_id, 33, "Fase 4: Preparando curación por IA...")
-            
+
         # Step 2: Curate clips (multi-agent pipeline)
         if store and job_id:
             store.update_progress(job_id, 35, "Iniciando curación por IA (esto puede tardar)...")
-        
+
         curation_path = episode.episode_folder / "curation.json"
-        
+
         if curation_path.exists():
             console.print(f"[green]✓[/green] Using existing curation from {curation_path.name}")
             with open(curation_path, "r") as f:
@@ -357,25 +357,24 @@ class BatchProcessor:
                 data = json.load(f)
                 curated_clips = [CuratedClip.model_validate(d) for d in data]
         else:
-            console.print(f"[dim]   Running multi-agent curation (finding ALL valid clips)...[/dim]")
-            
+            console.print("[dim]   Running multi-agent curation (finding ALL valid clips)...[/dim]")
+
             def curation_progress(current, total, msg):
                 if store and job_id:
                     # Curation stage is the bulk of the 30-70% range
                     pct = (current / total) * 40
                     store.update_progress(job_id, int(30 + pct), msg)
-            
+
             def check_pause():
                 if store and job_id:
                     curr = store.get_job(job_id)
                     return curr.status == 'paused' if curr else False
                 return False
-            
-            curator = CurationPipeline()
-            from packages.core.config import settings
 
+            curator = CurationPipeline()
             # Local Intelligence removed in local-first MVP (no central learning).
             from packages.clips.curation.models import CurationConfig
+            from packages.core.config import settings
             li_patterns = {"high_retention_patterns": [], "preferred_clip_formats": []}
 
             # Podcast identity — pulled from profiles so the agents can be
@@ -413,7 +412,7 @@ class BatchProcessor:
                 is_pro_tier=bool(profile_ctx.get("is_pro_tier", False)),
                 user_cohort_hash=profile_ctx.get("cohort_hash", ""),
             )
-            
+
             curated_clips = curator.curate(
                 transcript,
                 top_n=None,  # Get ALL clips, not limited to clips_per_episode
@@ -425,7 +424,7 @@ class BatchProcessor:
                 pause_callback=check_pause,
                 config=curation_config,
             )
-            
+
             # Save curation results for future re-processing ONLY if we found clips
             # This prevents caching a complete API failure (which returns 0 clips)
             if curated_clips:
@@ -433,7 +432,7 @@ class BatchProcessor:
                     json.dump([c.model_dump() for c in curated_clips], f, indent=2, ensure_ascii=False)
                 console.print(f"[dim]   Curation saved to {curation_path.name}[/dim]")
             else:
-                console.print(f"[yellow]   No clips found, skipping cache save.[/yellow]")
+                console.print("[yellow]   No clips found, skipping cache save.[/yellow]")
 
             # Persist the Critic's full decision (approved + rejected) so the
             # Review UI can show the user WHY clips were cut and collect
@@ -459,32 +458,30 @@ class BatchProcessor:
                 console.print(
                     f"[yellow]   Could not save critic_decisions.json: {e}[/yellow]"
                 )
-        
+
         if not curated_clips:
             console.print(f"[yellow]   No clips found for EP{episode.episode_number}[/yellow]")
             return 0
-        
+
         console.print(f"[dim]   Found {len(curated_clips)} total clips from curation[/dim]")
-        
+
         # Filter clips by score threshold
         # This is where we actually decide which clips to process
-        AUTO_APPROVE_SCORE = 80
-        
         valid_clips = [c for c in curated_clips if c.virality_score.total >= self.min_score]
         skipped = len(curated_clips) - len(valid_clips)
         if skipped > 0:
             console.print(f"[dim]   Filtered: {len(valid_clips)} clips with score >= {self.min_score} (skipped {skipped} below threshold)[/dim]")
-        
+
         if not valid_clips:
             console.print(f"[yellow]   No clips with score >= {self.min_score} for EP{episode.episode_number}[/yellow]")
             return 0
-        
+
         # Sort by score (best first) for processing order
         valid_clips.sort(key=lambda c: c.virality_score.total, reverse=True)
         console.print(f"[green]✓[/green] Processing {len(valid_clips)} clips that meet quality criteria (score >= {self.min_score})")
-        
+
         # Telemetry removed in local-first MVP — metrics stay local in JobStore.
-        
+
         # Clip ID filtering (for re-processing)
         target_clip_id = getattr(self, 'target_clip_id', None)
         if target_clip_id is not None:
@@ -494,7 +491,7 @@ class BatchProcessor:
             else:
                 console.print(f"[red]Error: Clip {target_clip_id} not found in curation results (1-{len(valid_clips)})[/red]")
                 return 0
-        
+
         return self._dispatch_after_curation(
             episode, valid_clips, job_id, start_from_clip
         )
@@ -575,8 +572,8 @@ class BatchProcessor:
         brief gate never crashes over a styling lookup.
         """
         try:
-            from packages.core.config import settings
             from packages.clips.templates.store import TemplateStore
+            from packages.core.config import settings
             tpl = TemplateStore(settings.templates_dir()).resolve(getattr(self, "template_id", None))
             spec = getattr(tpl, "intro_title", None)
             if spec and getattr(spec, "enabled", False):
@@ -688,15 +685,17 @@ class BatchProcessor:
         self, episode, clip, clip_name, target_folder, is_approved, i, total
     ) -> int:
         """Render a single clip end-to-end. Returns 1 on success, 0 on failure."""
-        from packages.clips.vision.reframer import reframe_video
+        import gc
+
+        import torch
+
         from packages.clips.subtitles.generator import SubtitleGenerator
         from packages.clips.templates.render import template_to_render_plan
-        import torch
-        import gc
+        from packages.clips.templates.store import TemplateStore
+        from packages.clips.vision.reframer import reframe_video
 
         # Resolve the clip template once (profile default when template_id is None).
         from packages.core.config import settings
-        from packages.clips.templates.store import TemplateStore
         plan = template_to_render_plan(
             TemplateStore(settings.templates_dir()).resolve(self.template_id)
         )
@@ -804,11 +803,11 @@ class BatchProcessor:
             str(output)
         ]
         run_ffmpeg(cmd, timeout=300)  # 5 min max for clip extraction
-    
+
     @staticmethod
     def _get_ffmpeg_exe() -> str:
         """Return the best available FFmpeg binary.
-        
+
         Prefers the imageio-ffmpeg bundled binary (compiled with libass)
         over the system FFmpeg (Homebrew default lacks libass).
         """
@@ -829,7 +828,10 @@ class BatchProcessor:
         the ass/subtitles filters. Optionally overlays a branding logo (T10)
         and a progress bar (T11) via the pure command builder.
         """
-        import shutil, os, tempfile
+        import os
+        import shutil
+        import tempfile
+
         from packages.clips.templates.ffmpeg_filters import build_burn_command
 
         ffmpeg_exe = self._get_ffmpeg_exe()
@@ -862,6 +864,7 @@ class BatchProcessor:
         if bumpers is None:
             return
         import shutil
+
         from packages.clips.templates.bumpers import (
             build_concat_command,
             build_concat_plan,
@@ -953,7 +956,7 @@ class BatchProcessor:
         except Exception as e:
             console.print(f"[red]Clip transcription failed: {e}[/red]")
             raise e
-    
+
     def run(
         self,
         start_episode: int = 1,
@@ -962,31 +965,31 @@ class BatchProcessor:
     ) -> dict:
         """
         Run batch processing on a range of episodes.
-        
+
         Args:
             start_episode: First episode to process
             end_episode: Last episode to process
             dry_run: If True, only discover episodes without processing
-            
+
         Returns:
             Summary dict with stats
         """
-        console.print(f"\n[bold]🎬 Batch Clip Processor[/bold]")
+        console.print("\n[bold]🎬 Batch Clip Processor[/bold]")
         console.print(f"[dim]   Source: {self.base_path}[/dim]")
         console.print(f"[dim]   Episodes: {start_episode}-{end_episode}[/dim]")
         console.print(f"[dim]   Clips per episode: {self.clips_per_episode}[/dim]")
-        
+
         # Discover episodes
         episodes = self.discover_episodes(start_episode, end_episode)
         console.print(f"\n[green]Found {len(episodes)} episodes to process[/green]")
-        
+
         if dry_run:
             table = Table(title="Episodes Found")
             table.add_column("EP#", style="cyan")
             table.add_column("Folder")
             table.add_column("Video")
             table.add_column("Transcript")
-            
+
             for ep in episodes:
                 table.add_row(
                     f"{ep.episode_number:03d}",
@@ -994,15 +997,15 @@ class BatchProcessor:
                     "✓" if ep.video_path.exists() else "✗",
                     "✓" if ep.transcript_path else "–",
                 )
-            
+
             console.print(table)
             return {"episodes_found": len(episodes), "dry_run": True}
-        
+
         # Process episodes
         total_clips = 0
         processed = 0
         errors = []
-        
+
         for ep in episodes:
             try:
                 clips = self.process_episode(ep)
@@ -1011,14 +1014,14 @@ class BatchProcessor:
             except Exception as e:
                 console.print(f"[red]Error processing EP{ep.episode_number}: {e}[/red]")
                 errors.append((ep.episode_number, str(e)))
-        
+
         # Summary
-        console.print(f"\n[bold green]✓ Batch complete![/bold green]")
+        console.print("\n[bold green]✓ Batch complete![/bold green]")
         console.print(f"   Episodes processed: {processed}/{len(episodes)}")
         console.print(f"   Total clips generated: {total_clips}")
         if errors:
             console.print(f"   Errors: {len(errors)}")
-        
+
         return {
             "episodes_found": len(episodes),
             "episodes_processed": processed,
@@ -1037,14 +1040,14 @@ def run_batch(
 ) -> dict:
     """
     Convenience function to run batch processing.
-    
+
     Args:
         start: First episode number
         end: Last episode number
         clips_per_episode: Number of clips to generate per episode
         dry_run: If True, only show what would be processed
         clip_id: ID of a single clip to process
-        
+
     Returns:
         Processing results summary
     """
@@ -1063,19 +1066,19 @@ def run_batch(
 
 if __name__ == "__main__":
     import sys
-    
+
     # Simple CLI
     dry_run = "--dry-run" in sys.argv
     preview_mode = "--preview" in sys.argv
     from_preview = "--from-preview" in sys.argv
     use_supabase = "--use-supabase" in sys.argv
-    
+
     # Parse episode range (default: start=7 because EP001-EP006 don't have video)
     start = 7
     end = 999
     clip_id = None
     min_score = 70
-    
+
     for arg in sys.argv[1:]:
         if arg.startswith("--start="):
             start = int(arg.split("=")[1])
@@ -1085,7 +1088,7 @@ if __name__ == "__main__":
             clip_id = int(arg.split("=")[1])
         elif arg.startswith("--min-score="):
             min_score = int(arg.split("=")[1])
-    
+
     if preview_mode:
         # ============================================
         # PREVIEW MODE: Human-in-the-loop
@@ -1093,19 +1096,19 @@ if __name__ == "__main__":
         # ============================================
         console.print("\n[bold cyan]🔍 PREVIEW MODE[/bold cyan]")
         console.print("[dim]   Running curation only, exporting preview for review...[/dim]\n")
-        
+
         processor = BatchProcessor(min_score=min_score)
         episodes = processor.discover_episodes(start, end)
-        
+
         for ep in episodes:
             console.print(f"\n[bold blue]EP{ep.episode_number:03d}[/bold blue]")
-            
+
             # Load or run curation
             from packages.clips.curation.models import CuratedClip
             curation_path = ep.episode_folder / "curation.json"
-            
+
             if curation_path.exists():
-                console.print(f"[green]✓[/green] Using existing curation")
+                console.print("[green]✓[/green] Using existing curation")
                 with open(curation_path, "r") as f:
                     curated_clips = [CuratedClip.model_validate(d) for d in json.load(f)]
             else:
@@ -1113,7 +1116,7 @@ if __name__ == "__main__":
                 # Would need to load transcript and run curator here
                 console.print("[yellow]   No curation.json found. Run without --preview first.[/yellow]")
                 continue
-            
+
             # Export editable preview
             preview_path = ep.episode_folder / "preview_candidates.json"
             preview_data = {
@@ -1122,7 +1125,7 @@ if __name__ == "__main__":
                 "min_score_filter": min_score,
                 "clips": []
             }
-            
+
             for i, clip in enumerate(curated_clips, 1):
                 preview_data["clips"].append({
                     "id": i,
@@ -1136,18 +1139,18 @@ if __name__ == "__main__":
                     "summary": clip.summary,
                     "review_notes": "",  # You can add notes here
                 })
-            
+
             with open(preview_path, "w") as f:
                 json.dump(preview_data, f, indent=2, ensure_ascii=False)
-            
+
             console.print(f"[green]✓[/green] Preview exported: {preview_path.name}")
             console.print(f"   Total clips: {len(curated_clips)}")
             console.print(f"   Auto-approved: {len([c for c in curated_clips if c.virality_score.total >= min_score])}")
-        
+
         console.print("\n[bold green]✓ Preview complete![/bold green]")
         console.print("[dim]   Edit preview_candidates.json, then run with --from-preview[/dim]")
         sys.exit(0)
-    
+
     if from_preview:
         console.print("\n[bold cyan]📋 FROM-PREVIEW MODE[/bold cyan]")
         console.print("[yellow]   Not yet implemented. For now, edit curation.json directly.[/yellow]")

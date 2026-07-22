@@ -22,7 +22,10 @@ import logging
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
+
+if TYPE_CHECKING:
+    import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -446,7 +449,6 @@ def _auto_select_k(
     proxy for "how many distinct voices are actually here". If k_max is
     too low (single-speaker audio), we fall back to k=1.
     """
-    import numpy as np
 
     if k_min < 2:
         k_min = 2

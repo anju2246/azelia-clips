@@ -2,6 +2,7 @@
 Domain models for the conversational brief pre-processing feature.
 """
 from typing import List, Optional
+
 from pydantic import BaseModel
 
 # The conversational agent (T3) emits these action types; the applier (T2)

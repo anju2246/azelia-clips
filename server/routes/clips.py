@@ -2,39 +2,59 @@
 Server Routes — Clip Processing, Jobs, Faces, Episodes, WebSocket
 """
 
+import asyncio
+import hashlib
+import json
 import logging
 import shutil
-import hashlib
 import uuid
-import json
-import asyncio
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
-from fastapi import APIRouter, UploadFile, File, BackgroundTasks, HTTPException, Form, Depends, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.responses import FileResponse
 
-from server.models import (
-    JobResponse, JobStatus, ProcessRequest, ProcessLocalRequest, Clip,
-    EpisodeResponse
+from packages.clips.curation.agents.brief_agent import BriefAgent
+from packages.clips.curation.brief_actions import (
+    BriefActionError,
+    BriefContext,
 )
-from server.dependencies import job_queue
-from server.workers.job_store import get_job_store
-from packages.core.config import settings
-from packages.core.utils import validate_supabase_url
-from server.middleware.auth import require_auth, require_onboarding, require_auth_flexible, User
-from packages.clips.vision.face_tracker import FaceTracker
-from packages.clips.curation.brief_builder import load_session, save_session
-from packages.clips.curation.brief_models import BriefAction, ChatMessage
 from packages.clips.curation.brief_actions import (
     apply as apply_brief_action,
-    BriefContext,
-    BriefActionError,
 )
-from packages.clips.curation.agents.brief_agent import BriefAgent
+from packages.clips.curation.brief_builder import load_session, save_session
+from packages.clips.curation.brief_models import ChatMessage
 from packages.clips.curation.models import CuratedClip
 from packages.clips.templates.layout import MAX_FRAMING_OFFSET
+from packages.clips.vision.face_tracker import FaceTracker
+from packages.core.config import settings
+from packages.core.utils import validate_supabase_url
+from server.dependencies import job_queue
+from server.middleware.auth import (
+    User,
+    require_auth,
+    require_onboarding,
+)
+from server.models import (
+    Clip,
+    EpisodeResponse,
+    JobResponse,
+    JobStatus,
+    ProcessLocalRequest,
+    ProcessRequest,
+)
+from server.workers.job_store import get_job_store
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +108,7 @@ async def process_video(
     user: User = Depends(require_onboarding)
 ):
     """Upload a video and start processing."""
-    
+
     # Validate file type by extension AND magic bytes (prevent disguised uploads)
     if not file.filename.lower().endswith(('.mp4', '.mov', '.mkv')):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP4, MOV, MKV supported.")
@@ -101,15 +121,15 @@ async def process_video(
     is_mkv    = header[:4] == b'\x1a\x45\xdf\xa3'
     if not (is_mp4_mov or is_mkv):
         raise HTTPException(status_code=400, detail="File content does not match a valid video format.")
-    
+
     # Create Job ID
     job_id = str(uuid.uuid4())
     job_dir = DATA_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # User Token injected via dependency
     auth_token = None # Deprecated manual passing, using Depends() instead
-    
+
     # Save file
     file_path = job_dir / "source.mp4"
     try:
@@ -118,7 +138,7 @@ async def process_video(
     except Exception:
         logger.exception("Failed to save uploaded file")
         raise HTTPException(status_code=500, detail="Failed to save file")
-    
+
     # Validate the per-job template (None → profile default applied in the pipeline)
     from packages.clips.templates.store import TemplateStore
     template_id = _resolve_template_or_422(TemplateStore(settings.templates_dir()), template_id)
@@ -131,7 +151,7 @@ async def process_video(
         subtitle_style=subtitle_style,
         template_id=template_id or settings.default_template_id,
     )
-    
+
     # Build transcription config. The user can optionally route through their
     # own Supabase if they have transcripts there — Azelia has no Supabase of
     # its own anymore.
@@ -150,7 +170,7 @@ async def process_video(
         "supabase_url": t_url,
         "supabase_key": t_key,
     }
-    
+
     # Initialize Job in Store (Legacy for UI compatibility)
     store.create_job(
         job_id=job_id,
@@ -158,7 +178,7 @@ async def process_video(
         config=process_settings.dict(),
         user_id=user.id,
     )
-    
+
     # Enqueue locally using the Hybrid Queue interface
     payload = {
         "episode_id": file.filename,
@@ -168,9 +188,9 @@ async def process_video(
         "auth_token": auth_token,
         "user_id": user.id if hasattr(user, 'id') else "anonymous"
     }
-    
+
     asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
-    
+
     # Return initial status
     job = store.get_job(job_id)
     return JobResponse(
@@ -190,26 +210,26 @@ async def process_local_video(
 ):
     """Process a video directly from the local file system using the Server-Side Picker."""
     import os
-    
+
     file_path_obj = Path(req.video_path).resolve()
     if not file_path_obj.exists() or not file_path_obj.is_file():
         raise HTTPException(status_code=400, detail="Local file does not exist")
-    
+
     # Security: Only allow files under user home or /Volumes (external drives)
     home = Path(os.path.expanduser("~")).resolve()
     allowed_roots = [home, Path("/Volumes").resolve()]
     if not any(file_path_obj.is_relative_to(root) for root in allowed_roots):
         raise HTTPException(status_code=403, detail="Access denied: file must be in your home directory or external drives")
-        
+
     filename = file_path_obj.name
     if not filename.lower().endswith(('.mp4', '.mov', '.mkv')):
         raise HTTPException(status_code=400, detail="Invalid file type. Only MP4, MOV, MKV supported.")
-        
+
     # Create stable Job ID from file path
     job_id = hashlib.md5(str(file_path_obj).encode()).hexdigest()
     job_dir = DATA_DIR / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Symlink the file instantly instead of copying gigabytes
     target_link = job_dir / "source.mp4"
     if not target_link.exists():
@@ -220,7 +240,7 @@ async def process_local_video(
         except Exception:
             logger.exception("Failed to link local file")
             raise HTTPException(status_code=500, detail="Failed to link local file")
-        
+
     # User-owned Supabase opt-in (transcripts only — Azelia has no DB)
     t_url = req.supabase_url or settings.transcript_supabase_url or None
     t_key = req.supabase_key or settings.transcript_supabase_key or None
@@ -257,7 +277,7 @@ async def process_local_video(
         config=req.dict(),
         user_id=user.id,
     )
-    
+
     payload = {
         "episode_id": filename,
         "video_path": str(target_link),
@@ -266,9 +286,9 @@ async def process_local_video(
         "auth_token": None,
         "user_id": user.id if hasattr(user, 'id') else "anonymous"
     }
-    
+
     asyncio.create_task(job_queue.enqueue(job_id=job_id, payload=payload))
-    
+
     job = store.get_job(job_id)
     return JobResponse(
         id=job.job_id,
@@ -288,10 +308,10 @@ async def get_jobs_history(user: User = Depends(require_auth)):
     # Filter: show only jobs owned by this user (legacy jobs with empty user_id are visible to all)
     jobs = {k: v for k, v in all_jobs.items() if not v.user_id or v.user_id == user.id}
     history = []
-    
+
     # Sort by created_at descending
     sorted_jobs = sorted(jobs.values(), key=lambda j: j.created_at, reverse=True)
-    
+
     for job in sorted_jobs:
         # Check if clips actually exist before counting as processed.
         # Library jobs render into {podcast_dir}/EPNNN - .../clips/, NOT
@@ -307,10 +327,10 @@ async def get_jobs_history(user: User = Depends(require_auth)):
             has_review = review.exists() and any(review.iterdir())
         except (PermissionError, OSError):
             has_review = False
-        
+
         # Determine format
         is_episode = job.episode_id.startswith("EP") and len(job.episode_id) == 5
-        
+
         history.append({
             "id": job.job_id,
             "filename": job.episode_id,
@@ -323,7 +343,7 @@ async def get_jobs_history(user: User = Depends(require_auth)):
             "number": int(job.episode_id[2:]) if is_episode and job.episode_id[2:].isdigit() else 0,
             "title": job.episode_id
         })
-        
+
     return history
 
 def _get_video_duration(path: Path) -> float:
@@ -407,7 +427,7 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
     job = store.get_job_for_user(job_id, user.id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     # Collect generated clips. For library jobs the clips_dir is on the
     # user's drive (resolved from podcast_dir + EP folder); curation.json
     # lives next to it. For upload jobs both live under DATA_DIR/{job_id}.
@@ -418,7 +438,7 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
 
         # Try to load curation metadata for richer clip info
         curation = _load_curation(job_dir)
-        
+
         def _clip_meta(index: int) -> dict:
             """Get curation metadata for clip at index (1-based clip_XX)."""
             if index <= len(curation):
@@ -431,7 +451,7 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
                     "end_time": c.get("end_time", 0),
                 }
             return {"title": f"Clip {index}", "summary": "", "score": 0, "start_time": 0, "end_time": 0}
-        
+
         # Scan approved folder. Skip AppleDouble shadow files (`._clip_XX.mp4`)
         # that macOS creates on non-HFS drives — they have the same glob hit
         # but are 4 KB metadata stubs, not real clips.
@@ -460,7 +480,7 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
                     status="approved",
                     download_url=f"/api/clips/{job_id}/{clip_file.name}"
                 ))
-        
+
         # Scan review folder (same AppleDouble filter as above).
         if (clips_dir / "review").exists():
             base_id = len(clips)
@@ -487,12 +507,12 @@ async def get_job(job_id: str, user: User = Depends(require_auth)):
                     status="review",
                     download_url=f"/api/clips/{job_id}/{clip_file.name}"
                 ))
-    
+
     try:
         status = JobStatus(job.status)
     except ValueError:
         status = JobStatus.ERROR
-    
+
     return JobResponse(
         id=job.job_id,
         status=status,
@@ -615,7 +635,8 @@ async def identify_prepare(
     ffmpeg cuts for audio samples).
     """
     from packages.clips.audio.identification import (
-        prepare_identification, load_labels,
+        load_labels,
+        prepare_identification,
     )
     folder = _episode_folder_for(episode_number)
     if folder is None:
@@ -1020,8 +1041,8 @@ def _framing_gate_open(job_id: str, template_id: str | None, cfg: dict) -> bool:
     if cfg.get("framing_confirmed"):
         return False
     try:
-        from packages.clips.templates.store import TemplateStore
         from packages.clips.templates.layout import is_single_shot
+        from packages.clips.templates.store import TemplateStore
 
         tpl = TemplateStore(settings.templates_dir()).resolve(template_id)
         return is_single_shot(tpl.layout)
@@ -1266,7 +1287,9 @@ def _framing_job_or_409(job_id: str):
 async def get_framing(job_id: str, user: User = Depends(require_auth)):
     """Current framing choice + the presets the modal offers."""
     from packages.clips.templates.layout import (
-        DEFAULT_SAFE_ZONE_MULT, MIN_SAFE_ZONE_MULT, MAX_SAFE_ZONE_MULT,
+        DEFAULT_SAFE_ZONE_MULT,
+        MAX_SAFE_ZONE_MULT,
+        MIN_SAFE_ZONE_MULT,
     )
 
     job = _framing_job_or_409(job_id)
@@ -1303,7 +1326,7 @@ async def framing_preview(
     user: User = Depends(require_auth),
 ):
     """A still of the crop this framing would produce. Cached face scan → ~1s."""
-    from packages.clips.templates.layout import MIN_SAFE_ZONE_MULT, MAX_SAFE_ZONE_MULT
+    from packages.clips.templates.layout import MAX_SAFE_ZONE_MULT, MIN_SAFE_ZONE_MULT
     from packages.clips.vision.framing_preview import build_framing_preview
 
     job = _framing_job_or_409(job_id)
@@ -1353,7 +1376,9 @@ async def confirm_framing(
 ):
     """Lock the framing for this episode and start rendering the approved clips."""
     from packages.clips.templates.layout import (
-        DEFAULT_SAFE_ZONE_MULT, MIN_SAFE_ZONE_MULT, MAX_SAFE_ZONE_MULT,
+        DEFAULT_SAFE_ZONE_MULT,
+        MAX_SAFE_ZONE_MULT,
+        MIN_SAFE_ZONE_MULT,
     )
 
     job = _framing_job_or_409(job_id)
@@ -1390,10 +1415,10 @@ async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
     clips_dir = (
         _resolve_clips_dir(job_id, job.episode_id if job else None) / "rejected"
     ).resolve()
-    
+
     if not clips_dir.exists():
         return []
-    
+
     now = time.time()
     results = []
     for f in sorted(clips_dir.glob("*.mp4")):
@@ -1409,7 +1434,7 @@ async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
             "duration": round(dur, 1),
             "download_url": f"/api/clips/{job_id}/{f.name}"
         })
-    
+
     return results
 
 def _validate_clip_filename(filename: str) -> None:
@@ -1426,31 +1451,31 @@ async def get_clip(job_id: str, filename: str, user: User = Depends(require_auth
     """Serve a generated clip."""
     job = store.get_job(job_id)
     safe_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
-    
+
     # Check approved folder
     path_approved = (safe_dir / "approved" / filename).resolve()
     if not path_approved.is_relative_to(safe_dir):
         raise HTTPException(status_code=400, detail="Invalid filename")
-    
+
     if path_approved.exists():
         return FileResponse(path_approved)
-        
+
     # Check review folder
     path_review = (safe_dir / "review" / filename).resolve()
     if not path_review.is_relative_to(safe_dir):
         raise HTTPException(status_code=400, detail="Invalid filename")
-        
+
     if path_review.exists():
         return FileResponse(path_review)
-        
+
     # Check rejected folder
     path_rejected = (safe_dir / "rejected" / filename).resolve()
     if not path_rejected.is_relative_to(safe_dir):
         raise HTTPException(status_code=400, detail="Invalid filename")
-        
+
     if path_rejected.exists():
         return FileResponse(path_rejected)
-        
+
     raise HTTPException(status_code=404, detail="Clip not found")
 
 @router.post("/clips/{job_id}/{filename}/open")
@@ -1460,19 +1485,19 @@ async def open_clip_location(job_id: str, filename: str, user: User = Depends(re
     _validate_clip_filename(filename)
     job = store.get_job(job_id)
     safe_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
-    
+
     path_approved = (safe_dir / "approved" / filename).resolve()
     path_review = (safe_dir / "review" / filename).resolve()
-    
+
     target_path = None
     if path_approved.exists():
         target_path = path_approved
     elif path_review.exists():
         target_path = path_review
-        
+
     if not target_path:
         raise HTTPException(status_code=404, detail="Clip not found locally")
-        
+
     try:
         # -R flag selects the file in Finder
         subprocess.run(["open", "-R", str(target_path)])
@@ -1488,25 +1513,25 @@ async def approve_clip(job_id: str, filename: str, user: User = Depends(require_
     _validate_clip_filename(filename)
     job = store.get_job(job_id)
     clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
-    
+
     source = clips_dir / "review" / filename
     dest = clips_dir / "approved" / filename
-    
+
     if not source.exists():
         # Already in approved or doesn't exist
         if dest.exists():
             return {"status": "already_approved"}
         raise HTTPException(status_code=404, detail="Clip not found in review folder")
-    
+
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(source), str(dest))
-    
+
     # Also move the caption file if it exists
     caption_source = clips_dir / "review" / filename.replace(".mp4", "_caption.txt")
     if caption_source.exists():
         caption_dest = clips_dir / "approved" / filename.replace(".mp4", "_caption.txt")
         shutil.move(str(caption_source), str(caption_dest))
-    
+
     return {"status": "approved", "filename": filename}
 
 @router.post("/clips/{job_id}/{filename}/reject")
@@ -1518,7 +1543,7 @@ async def reject_clip(job_id: str, filename: str, user: User = Depends(require_a
     clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     rejected_dir = clips_dir / "rejected"
     rejected_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # Find the clip in approved or review
     source = None
     for folder in ["approved", "review"]:
@@ -1526,13 +1551,13 @@ async def reject_clip(job_id: str, filename: str, user: User = Depends(require_a
         if candidate.exists():
             source = candidate
             break
-    
+
     if not source:
         raise HTTPException(status_code=404, detail="Clip not found")
-    
+
     dest = rejected_dir / filename
     shutil.move(str(source), str(dest))
-    
+
     # Also move the caption file
     caption_name = filename.replace(".mp4", "_caption.txt")
     for folder in ["approved", "review"]:
@@ -1540,7 +1565,7 @@ async def reject_clip(job_id: str, filename: str, user: User = Depends(require_a
         if caption.exists():
             shutil.move(str(caption), str(rejected_dir / caption_name))
             break
-    
+
     return {"status": "rejected", "filename": filename}
 @router.post("/clips/{job_id}/{filename}/restore")
 async def restore_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
@@ -1550,21 +1575,21 @@ async def restore_clip(job_id: str, filename: str, user: User = Depends(require_
     job = store.get_job(job_id)
     clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     source = clips_dir / "rejected" / filename
-    
+
     if not source.exists():
         raise HTTPException(status_code=404, detail="Clip not found in rejected folder")
-    
+
     dest_dir = clips_dir / "review"
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest = dest_dir / filename
     shutil.move(str(source), str(dest))
-    
+
     # Also restore caption if exists
     caption_name = filename.replace(".mp4", "_caption.txt")
     caption_source = clips_dir / "rejected" / caption_name
     if caption_source.exists():
         shutil.move(str(caption_source), str(dest_dir / caption_name))
-    
+
     return {"status": "restored", "filename": filename}
 
 
@@ -1820,27 +1845,27 @@ def cleanup_rejected_clips(max_age_days: int = 30):
     now = time.time()
     max_age_seconds = max_age_days * 86400
     deleted = 0
-    
+
     if not DATA_DIR.exists():
         return
-    
+
     for job_dir in DATA_DIR.iterdir():
         if not job_dir.is_dir():
             continue
         rejected_dir = job_dir / "clips" / "rejected"
         if not rejected_dir.exists():
             continue
-        
+
         for f in rejected_dir.iterdir():
             age = now - f.stat().st_mtime
             if age > max_age_seconds:
                 f.unlink()
                 deleted += 1
-        
+
         # Remove the rejected folder if empty
         if rejected_dir.exists() and not any(rejected_dir.iterdir()):
             rejected_dir.rmdir()
-    
+
     if deleted > 0:
         print(f"🗑️ Cleaned up {deleted} rejected clips older than {max_age_days} days")
 
@@ -1859,7 +1884,7 @@ async def extract_faces(job_id: str, user: User = Depends(require_auth)):
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-        
+
     def run_extractor():
         tracker = FaceTracker()
         video_path = DATA_DIR / job_id / "source.mp4"
@@ -1867,13 +1892,13 @@ async def extract_faces(job_id: str, user: User = Depends(require_auth)):
         if not video_path.exists():
             return {}
         return tracker.extract_unique_faces(str(video_path), str(output_dir))
-        
+
     faces = await asyncio.to_thread(run_extractor)
-    
+
     # Save a JSON manifest for the GET endpoint
     with open(DATA_DIR / job_id / "faces.json", "w") as f:
         json.dump(faces, f)
-        
+
     return {"status": "success", "faces": faces}
 
 @router.get("/jobs/{job_id}/faces")
@@ -1882,17 +1907,17 @@ async def get_faces(job_id: str, user: User = Depends(require_auth)):
     json_path = DATA_DIR / job_id / "faces.json"
     if not json_path.exists():
         return {"status": "pending", "faces": {}}
-    
+
     with open(json_path, "r") as f:
         faces = json.load(f)
-    
+
     # Include role assignments if they exist
     roles_path = DATA_DIR / job_id / "roles.json"
     roles = {}
     if roles_path.exists():
         with open(roles_path, "r") as f:
             roles = json.load(f)
-    
+
     return {"status": "success", "faces": faces, "roles": roles}
 
 @router.get("/jobs/{job_id}/faces/{filename}")
@@ -1900,45 +1925,45 @@ async def get_face_image(job_id: str, filename: str, user: User = Depends(requir
     """Serves the actual thumbnail image of a face."""
     safe_dir = (DATA_DIR / job_id / "faces").resolve()
     path = (safe_dir / filename).resolve()
-    
+
     # Path traversal protection
     if not path.is_relative_to(safe_dir) or not path.exists():
         raise HTTPException(status_code=404, detail="Face not found")
-        
+
     return FileResponse(path)
 
 @router.post("/jobs/{job_id}/assign-roles")
 async def assign_roles(job_id: str, role_map: dict, user: User = Depends(require_auth)):
     """
     Assign semantic roles to biometric face IDs.
-    
+
     Body: {"FACE_00": "Host", "FACE_01": "Guest"}
-    
-    These roles are used by the reframer to determine which face to 
+
+    These roles are used by the reframer to determine which face to
     follow based on speaker diarization (e.g., follow the Host).
     """
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    
+
     # Validate that referenced face IDs exist
     faces_path = DATA_DIR / job_id / "faces.json"
     if faces_path.exists():
         with open(faces_path, "r") as f:
             known_faces = json.load(f)
-        
+
         unknown = [fid for fid in role_map if fid not in known_faces]
         if unknown:
             raise HTTPException(
-                status_code=400, 
+                status_code=400,
                 detail=f"Unknown face IDs: {unknown}. Known: {list(known_faces.keys())}"
             )
-    
+
     # Save role assignments
     roles_path = DATA_DIR / job_id / "roles.json"
     with open(roles_path, "w") as f:
         json.dump(role_map, f)
-    
+
     return {"status": "success", "roles": role_map}
 
 
@@ -2007,11 +2032,11 @@ async def process_episode_endpoint(
 ):
     """Trigger processing for a specific episode from the library."""
     from server.processor import BatchProcessor
-    
+
     # Create Job ID
     # Create Stable Job ID for library episodes
     job_id = f"EP{episode_number:03d}-process"
-    
+
     # If job is already running, just return it
     existing = store.get_job(job_id)
     if existing and existing.status in ["processing", "pending", "resuming"]:
@@ -2057,7 +2082,7 @@ async def process_episode_endpoint(
         config=req.dict(),
         user_id=user.id,
     )
-    
+
     # Prepare batch processor for single episode
     # Respect user-owned Supabase if configured (either per-request or in settings)
     t_url_ep = req.supabase_url or settings.transcript_supabase_url or None
@@ -2084,14 +2109,14 @@ async def process_episode_endpoint(
                     "supabase_key": t_key_ep,
                 },
             )
-            
+
             # Find the episode config
             episodes = processor.discover_episodes(start=ep_num, end=ep_num)
             if not episodes:
                 raise Exception(f"Episode {ep_num} not found")
-                
+
             ep = episodes[0]
-            
+
             # Run processing
             clips_count = processor.process_episode(ep, job_id=job_id)
 
@@ -2103,7 +2128,7 @@ async def process_episode_endpoint(
             store.fail_job(job_id, str(e))
 
     background_tasks.add_task(run_batch_task, job_id, episode_number)
-    
+
     return JobResponse(
         id=job_id,
         status=JobStatus.PENDING,
@@ -2124,36 +2149,36 @@ async def upload_transcript_endpoint(episode_number: int, user: User = Depends(r
             status_code=412,
             detail="Configure your own Supabase URL and key in Settings → Integrations first.",
         )
-    from server.sources.supabase_transcripts import upload_transcript
     from packages.clips.transcription.transcriber import Transcript
     from server.processor import BatchProcessor
-    
+    from server.sources.supabase_transcripts import upload_transcript
+
     try:
         # Find episode
         processor = BatchProcessor(external_drive_path=settings.podcast_dir, dry_run=True)
         episodes = processor.discover_episodes(start=episode_number, end=episode_number)
-        
+
         if not episodes:
             raise HTTPException(status_code=404, detail=f"Episode {episode_number} not found")
-            
+
         ep = episodes[0]
-        
+
         if not ep.transcript_path or not ep.transcript_path.exists():
             raise HTTPException(status_code=404, detail="Transcript file not found for this episode")
-            
+
         # Load and upload
         transcript = Transcript.load(ep.transcript_path)
         episode_id = f"EP{episode_number:03d}"
-        
+
         success = upload_transcript(
             transcript=transcript,
             episode_id=episode_id,
             episode_title=ep.episode_folder.name
         )
-        
+
         if not success:
             raise HTTPException(status_code=500, detail="Failed to upload to Supabase")
-            
+
         return {"status": "success", "message": f"Uploaded {episode_id} to Supabase"}
 
     except Exception:
@@ -2172,7 +2197,7 @@ async def websocket_job_status(websocket: WebSocket, job_id: str, token: str = "
     await websocket.accept()
     # Local-first MVP: no real auth — server binds to 127.0.0.1.
     # The `token` query param is kept for API compatibility but not validated.
-    
+
     try:
         while True:
             job = store.get_job(job_id)
@@ -2180,7 +2205,7 @@ async def websocket_job_status(websocket: WebSocket, job_id: str, token: str = "
                 await websocket.send_json({"event": "error", "data": {"error": "Job not found"}})
                 await asyncio.sleep(2)
                 continue
-            
+
             if job.status in ["completed"]:
                 await websocket.send_json({
                     "event": "completed",
@@ -2202,15 +2227,15 @@ async def websocket_job_status(websocket: WebSocket, job_id: str, token: str = "
                         "status": job.status
                     }
                 })
-                
+
             # Stream every 1.5s
             await asyncio.sleep(1.5)
-            
+
     except WebSocketDisconnect:
         pass
     except Exception as e:
         print(f"WebSocket Error on {job_id}: {e}")
-        
+
     try:
         await websocket.close()
     except Exception:

@@ -7,7 +7,11 @@ Components:
 """
 
 from packages.clips.vision.face_tracker import (
-    FaceTracker, FaceDetection, FaceIdentity, IdentityStore, track_face,
+    FaceDetection,
+    FaceIdentity,
+    FaceTracker,
+    IdentityStore,
+    track_face,
 )
 from packages.clips.vision.reframer import VideoReframer, reframe_video
 

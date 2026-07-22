@@ -1,9 +1,11 @@
-import os
-from typing import Dict, Any, List, Optional
 from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
 from rich.console import Console
+
+from packages.clips.transcription.transcriber import Segment, Transcript
+
 from .base import TranscriptionSource
-from packages.clips.transcription.transcriber import Transcript, Segment
 
 console = Console()
 
@@ -18,7 +20,7 @@ class Utterance:
 
 class SupabaseSource(TranscriptionSource):
     """Fetches transcripts from a private/custom Supabase database."""
-    
+
     def validate_config(self, config: Dict[str, Any]) -> bool:
         """Check for URL and Key."""
         return bool(config.get("supabase_url") and config.get("supabase_key"))
@@ -30,7 +32,7 @@ class SupabaseSource(TranscriptionSource):
         """
         url = kwargs.get("supabase_url")
         key = kwargs.get("supabase_key")
-        
+
         if not url or not key:
             raise ValueError("Supabase URL and Key required for SupabaseSource")
 
@@ -43,7 +45,7 @@ class SupabaseSource(TranscriptionSource):
 
         # Lazy import to avoid dependency issues if not used
         from supabase import create_client
-        
+
         client = create_client(url, key)
         console.print(f"[blue]📡[/blue] Fetching utterances for {resource_id} from Custom Supabase...")
 
@@ -66,7 +68,7 @@ class SupabaseSource(TranscriptionSource):
             end = row.get("end_time")
             if start is None or end is None:
                 continue
-                
+
             utterances.append(Utterance(
                 speaker=row.get("speaker", "A"),
                 text=row.get("text", ""),
@@ -93,7 +95,7 @@ class SupabaseSource(TranscriptionSource):
         """Convert Utterances to Transcript object."""
         speaker_map = {"A": "SPEAKER_00", "B": "SPEAKER_01"}
         segments = []
-        
+
         for utt in utterances:
             segments.append(Segment(
                 text=utt.text,
@@ -102,7 +104,7 @@ class SupabaseSource(TranscriptionSource):
                 words=[],  # Supabase usually lacks word-level timestamps
                 speaker=speaker_map.get(utt.speaker, utt.speaker),
             ))
-            
+
         return Transcript(
             segments=segments,
             language="es",

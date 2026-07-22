@@ -2,8 +2,8 @@
 
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Literal, Optional
-from pydantic import BaseModel, Field, field_validator
 
+from pydantic import BaseModel, Field, field_validator
 
 # v2 adds optional, default-off render extensions (intro title, branding,
 # progress bar, bumpers). A v1 .azt still loads: the new fields take their

@@ -1,7 +1,9 @@
 import os
 from pathlib import Path
-from packages.clips.pipeline import BatchProcessor, EpisodeConfig
+
 from rich.console import Console
+
+from packages.clips.pipeline import BatchProcessor, EpisodeConfig
 
 console = Console()
 
@@ -28,7 +30,7 @@ class SingleVideoProcessor(BatchProcessor):
             template_id=kwargs.get('template_id'),
         )
         self.base_path.mkdir(parents=True, exist_ok=True)
-        
+
     def process_single(
         self,
         video_path: Path,

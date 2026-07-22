@@ -1,7 +1,7 @@
 """
 Prompt Manager for loading custom prompt overrides from the file system.
 
-Allows users to place .txt files in `PODCAST_DIR/prompts/` to override 
+Allows users to place .txt files in `PODCAST_DIR/prompts/` to override
 the default system prompts defined in `src.curation.prompts`.
 """
 
@@ -9,23 +9,23 @@ import logging
 from pathlib import Path
 from typing import Optional
 
-from packages.core.config import settings
 from packages.clips.curation import prompts as default_prompts
+from packages.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 class PromptManager:
     """Manages loading of custom prompts."""
-    
+
     def __init__(self, podcast_dir: Optional[Path] = None):
         self.podcast_dir = podcast_dir or settings.podcast_dir
         self.prompts_dir = self.podcast_dir / "prompts"
-        
+
     def _load_override(self, filename: str) -> Optional[str]:
         """Try to load a prompt override from disk."""
         if not self.prompts_dir.exists():
             return None
-            
+
         file_path = self.prompts_dir / filename
         if file_path.exists():
             try:
@@ -35,7 +35,7 @@ class PromptManager:
                     return content
             except Exception as e:
                 logger.error(f"Failed to read custom prompt {file_path}: {e}")
-        
+
         return None
 
     def get_finder_prompt(self) -> str:

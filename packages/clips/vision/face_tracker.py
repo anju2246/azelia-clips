@@ -12,17 +12,15 @@ dependency for who-is-who.
 
 from __future__ import annotations
 
-import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 import cv2
 import numpy as np
 import torch
 from PIL import Image
 from rich.console import Console
-from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
+from rich.progress import BarColumn, Progress, TextColumn, TimeRemainingColumn
 
 console = Console()
 
@@ -75,7 +73,7 @@ class FaceIdentity:
 
 class IdentityStore:
     """Manages N face identity clusters with prototype averaging.
-    
+
     Each identity has a running-average 512-D embedding that becomes more
     stable with each new observation of the same face.
     """
@@ -91,10 +89,10 @@ class IdentityStore:
 
     def match_or_create(self, embedding: np.ndarray) -> FaceIdentity:
         """Match embedding to known identity or create a new one.
-        
+
         Args:
             embedding: 512-D face embedding (will be L2-normalized).
-            
+
         Returns:
             The matched or newly created FaceIdentity.
         """
@@ -136,7 +134,7 @@ class IdentityStore:
 
     def match(self, embedding: np.ndarray) -> FaceIdentity | None:
         """Match embedding to known identity (read-only, no update).
-        
+
         Returns None if no match above threshold.
         """
         if not self.identities:
@@ -156,7 +154,7 @@ class IdentityStore:
 
 class FaceTracker:
     """Face detection + identity tracking using MTCNN + InceptionResnetV1.
-    
+
     Usage:
         tracker = FaceTracker(sample_fps=2.0)
         detections = tracker.detect_faces(video_path)
@@ -219,15 +217,15 @@ class FaceTracker:
         end_time: float | None = None,
     ) -> list[FaceDetection]:
         """Detect and identify faces across video frames.
-        
+
         Uses MTCNN for detection + InceptionResnetV1 for embeddings.
         Returns FaceDetection objects with identity_id assigned.
-        
+
         Args:
             video_path: Path to video file.
             start_time: Start time in seconds.
             end_time: End time in seconds (None = entire video).
-            
+
         Returns:
             List of FaceDetection with identity_id assigned.
         """
@@ -251,7 +249,7 @@ class FaceTracker:
 
         detections: list[FaceDetection] = []
 
-        console.print(f"[blue]👤 Face Detection (MTCNN + FaceNet)[/blue]")
+        console.print("[blue]👤 Face Detection (MTCNN + FaceNet)[/blue]")
         console.print(
             f"[dim]   Sampling at {self.sample_fps} FPS | "
             f"{start_time:.1f}s - {end_time:.1f}s[/dim]"
@@ -378,16 +376,16 @@ class FaceTracker:
         expected_faces: int | None = None,
     ) -> dict[str, str]:
         """Scan video and extract thumbnails for each unique face.
-        
+
         Scans the entire video (or up to max_duration_sec) and saves
         the best thumbnail per identity to output_dir.
-        
+
         Args:
             video_path: Path to source video.
             output_dir: Directory to save face thumbnails.
             max_duration_sec: Max duration to scan (None = full video).
             expected_faces: Hint for expected number of faces (unused, kept for API compat).
-            
+
         Returns:
             Dict mapping face_id → thumbnail filename, e.g. {"FACE_00": "face_00.jpg"}
         """
@@ -486,18 +484,19 @@ class FaceTracker:
         video_width: int = 0,
     ) -> dict[str, dict]:
         """Save labeled face thumbnails and return metadata for user mapping.
-        
+
         Args:
             detections: List of FaceDetection from detect_faces()
             output_dir: Directory to save face_xx.jpg files
             video_path: Source video path (needed to extract crop images)
             video_width: Source video width (for position labels)
-            
+
         Returns:
             Dict of {face_id: {"path": str, "avg_x": int, "avg_y": int, "position": str, "count": int}}
         """
-        import cv2
         from collections import Counter
+
+        import cv2
 
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -517,7 +516,7 @@ class FaceTracker:
 
         # Extract crop images from video
         gallery: dict[str, dict] = {}
-        
+
         if video_path and best_det:
             cap = cv2.VideoCapture(str(video_path))
             for fid, det in best_det.items():
@@ -525,7 +524,7 @@ class FaceTracker:
                 ret, frame = cap.read()
                 if not ret:
                     continue
-                
+
                 h, w = frame.shape[:2]
                 # Add padding around the face (30% margin)
                 margin_x = int(det.width * 0.3)
@@ -535,23 +534,23 @@ class FaceTracker:
                 x2 = min(w, det.x + det.width + margin_x)
                 y2 = min(h, det.y + det.height + margin_y)
                 crop = frame[y1:y2, x1:x2]
-                
+
                 if crop.size == 0:
                     continue
-                
+
                 filepath = output_dir / f"{fid.lower()}.jpg"
                 cv2.imwrite(str(filepath), crop)
-                
+
                 face_dets = [d for d in detections if d.identity_id == fid]
                 avg_x = int(sum(d.center_x for d in face_dets) / len(face_dets))
                 avg_y = int(sum(d.center_y for d in face_dets) / len(face_dets))
-                
+
                 if video_width > 0:
                     third = video_width / 3
                     position = "LEFT" if avg_x < third else ("CENTER" if avg_x < 2 * third else "RIGHT")
                 else:
                     position = "?"
-                
+
                 gallery[fid] = {
                     "path": str(filepath),
                     "avg_x": avg_x,
@@ -572,11 +571,11 @@ class FaceTracker:
         safe_zone_mult: float = 2.5,
     ) -> float:
         """Compute a dynamic zoom factor based on detected face sizes.
-        
+
         Instead of a hardcoded zoom, this creates a "safe zone" where the crop
         height = largest_face_height × safe_zone_mult. This ensures consistent
         head+shoulders framing regardless of how close/far camera is.
-        
+
         Args:
             detections: List of FaceDetection from detect_faces()
             src_height: Source video height
@@ -584,7 +583,7 @@ class FaceTracker:
                 1.5 = very tight (just head)
                 2.5 = head + shoulders (default)
                 4.0 = head + upper body
-                
+
         Returns:
             zoom_factor between 0.3 and 1.0
         """
@@ -592,7 +591,7 @@ class FaceTracker:
         from collections import Counter
         counts = Counter(d.identity_id for d in detections if d.identity_id)
         relevant_faces = {fid for fid, _ in counts.most_common(3)}
-        
+
         # Find the average face height per identity, then take the max
         face_heights: list[float] = []
         for fid in relevant_faces:
@@ -600,29 +599,29 @@ class FaceTracker:
             if heights:
                 avg_h = sum(heights) / len(heights)
                 face_heights.append(avg_h)
-        
+
         if not face_heights:
             return 0.7  # fallback
-        
+
         # Use the LARGEST average face height (most zoomed in person)
         max_face_h = max(face_heights)
-        
+
         # Desired crop height = face_height * multiplier
         ideal_crop_h = max_face_h * safe_zone_mult
-        
+
         # zoom_factor = ideal_crop_h / src_height
         zoom = ideal_crop_h / src_height
         zoom = max(0.3, min(1.0, zoom))  # clamp
-        
+
         console.print(
             f"[dim]   Safe zone: max_face={max_face_h:.0f}px × {safe_zone_mult} = "
             f"ideal_crop={ideal_crop_h:.0f}px → zoom={zoom:.2f}[/dim]"
         )
-        
+
         return zoom
 
     # ─── Active Speaker Detection (Mouth Motion) ──────────────────────────────
-    
+
     def map_speakers_via_mouth_motion(
         self,
         video_path: Path | str,
@@ -632,21 +631,22 @@ class FaceTracker:
         end_time: float | None = None,
     ) -> dict[str, str]:
         """Map diarization SPEAKER_XX to face identities using mouth motion variance.
-        
+
         Args:
             video_path: Path to the source video.
             detections: List of FaceDetection from detect_faces().
             speaker_segments: Pyannote diarization segments (list of dicts with 'speaker', 'start', 'end').
             start_time: Start time in seconds.
             end_time: End time in seconds.
-            
+
         Returns:
             Dict mapping "SPEAKER_XX" -> "FACE_YY".
         """
         from collections import defaultdict
+
         import cv2
         import numpy as np
-        
+
         video_path = Path(video_path)
         cap = cv2.VideoCapture(str(video_path))
         fps = cap.get(cv2.CAP_PROP_FPS)
@@ -673,68 +673,70 @@ class FaceTracker:
         for d in detections:
             if d.identity_id:
                 faces_by_id[d.identity_id].append(d)
-                
+
         valid_identities = [iid for iid, faces in faces_by_id.items() if len(faces) >= 20]
         if not valid_identities:
             # Fallback to all if somehow none have 20+
             valid_identities = list(faces_by_id.keys())
-            
+
         console.print(f"[dim]   Valid identities for mapping: {valid_identities}[/dim]")
-        
+
         # We will calculate motion score ONLY when a speaker's segment is active
         motion_scores: dict[str, dict[str, list[float]]] = {
-            speaker: {iid: [] for iid in valid_identities} 
+            speaker: {iid: [] for iid in valid_identities}
             for speaker in pyannote_speakers
         }
-        
+
         console.print("[dim]   Analyzing mouth movement for speaker mapping...[/dim]")
-        
+
         for iid in valid_identities:
             faces = sorted(faces_by_id[iid], key=lambda x: x.timestamp)
             prev_gray_mouth = None
-            
+
             for f in faces:
                 # Find which pyannote speakers are talking right now
                 active_speakers = [
-                    s["speaker"] for s in speaker_segments 
+                    s["speaker"] for s in speaker_segments
                     if s["start"] <= f.timestamp <= s["end"]
                 ]
-                
+
                 if not active_speakers:
                     prev_gray_mouth = None # Reset diff calculation if gap
                     continue
-                
+
                 # Extract frame
                 cap.set(cv2.CAP_PROP_POS_FRAMES, int(f.timestamp * fps))
                 ret, frame = cap.read()
-                if not ret: continue
-                
+                if not ret:
+                    continue
+
                 # Extract mouth region (bottom 40% of bounding box)
                 x1 = max(0, int(f.center_x - f.width/2))
                 x2 = min(frame.shape[1], int(f.center_x + f.width/2))
                 y1 = int(f.center_y - f.height/2)
                 y2 = int(f.center_y + f.height/2)
-                
+
                 mouth_top = y1 + int((y2 - y1) * 0.60)
                 mouth_bottom = y2
-                
+
                 mouth_crop = frame[max(0, mouth_top):min(frame.shape[0], mouth_bottom), x1:x2]
-                if mouth_crop.size == 0: continue
-                
+                if mouth_crop.size == 0:
+                    continue
+
                 mouth_crop = cv2.resize(mouth_crop, (100, 50))
                 gray_mouth = cv2.cvtColor(mouth_crop, cv2.COLOR_BGR2GRAY)
-                
+
                 if prev_gray_mouth is not None:
                     diff = cv2.absdiff(gray_mouth, prev_gray_mouth)
                     motion = float(np.mean(diff))
-                    
+
                     for speaker in active_speakers:
                         motion_scores[speaker][iid].append(motion)
-                        
+
                 prev_gray_mouth = gray_mouth
-                
+
         cap.release()
-        
+
         # Build the full (speaker × face) motion matrix once. Greedy
         # bijection on top — without this, the highest-motion face wins
         # every speaker and they all end up tracking the same person.
@@ -811,7 +813,7 @@ class FaceTracker:
         episode_folder: Path | str | None = None,
     ) -> list[tuple[float, int, int]]:
         """Generate crop trajectory based on active speaker mapping.
-        
+
         Args:
             video_path: Path to the source video.
             detections: List of FaceDetection from detect_faces().
@@ -821,7 +823,7 @@ class FaceTracker:
             video_height: Source video height.
             speaker_segments: Pyannote diarization segments.
             target_aspect: Aspect ratio for crop (default 9:16).
-            
+
         Returns:
             List of (timestamp, center_x, center_y) crop points.
         """
@@ -888,7 +890,7 @@ class FaceTracker:
             if d.identity_id and d.identity_id in identity_ids:
                 identity_x_sums[d.identity_id].append(d.center_x)
                 identity_y_sums[d.identity_id].append(d.center_y)
-                
+
         for iid in identity_ids:
             xs = identity_x_sums[iid]
             ys = identity_y_sums[iid]
@@ -898,12 +900,10 @@ class FaceTracker:
                 identity_positions[iid] = (video_width // 2, video_height // 2)
 
         # ── Resolve active speaker per frame based on highest Pyannote mapping ──
-        
+
         crop_width = int(video_height * target_aspect)
         min_x = crop_width // 2
         max_x = video_width - crop_width // 2
-        min_y = video_height // 2
-        max_y = video_height // 2 # Clamp strictly to vertical center
 
         crop_points: list[tuple[float, int, int]] = []
         last_center_x = video_width // 2
@@ -986,15 +986,15 @@ class FaceTracker:
         target_aspect: float = 9 / 16,
     ) -> list[tuple[float, int, int]]:
         """Generate a smooth crop trajectory following the largest detected face.
-        
+
         Fallback when speaker diarization is not available.
-        
+
         Args:
             detections: List of FaceDetection from detect_faces().
             video_width: Source video width.
             video_height: Source video height.
             target_aspect: Aspect ratio for crop (default 9:16).
-            
+
         Returns:
             List of (timestamp, center_x, center_y) crop points.
         """
@@ -1040,7 +1040,7 @@ class FaceTracker:
                 last_y * (1 - self.smoothing_factor)
                 + target_y * self.smoothing_factor
             )
-            
+
             clamped_x = max(min_x, min(max_x, smoothed_x))
             clamped_y = max(min_y, min(max_y, smoothed_y))
 
@@ -1095,6 +1095,7 @@ def _load_labeled_speaker_face_map_from_store(
     """
     import json
     from pathlib import Path as _Path
+
     import numpy as np
 
     vp = _Path(video_path)
@@ -1184,7 +1185,7 @@ def track_face(
     end_time: float | None = None,
 ) -> list[tuple[float, int]]:
     """Compatibility wrapper — detects faces and returns crop trajectory.
-    
+
     Uses the largest face in each frame as the crop target.
     """
     video_path = Path(video_path)

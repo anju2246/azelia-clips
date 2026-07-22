@@ -6,10 +6,10 @@ Generates:
 
 Usage:
     from packages.clips.curation.teaser_generator import TeaserIntroGenerator
-    
+
     generator = TeaserIntroGenerator()
     result = generator.generate(transcript, episode_id, guest_name)
-    
+
     # Access results
     teasers = result["teasers"]
     intro_script = result["intro_script"]
@@ -17,21 +17,20 @@ Usage:
 
 import json
 from dataclasses import dataclass
-from typing import Optional
 
 from rich.console import Console
 
-from packages.clips.transcription.transcriber import Transcript
-from packages.core.llm_provider import get_llm
 from packages.clips.curation.teaser_intro import (
-    TEASER_FINDER_SYSTEM,
-    TEASER_FINDER_USER,
     INTRO_SCRIPT_SYSTEM,
     INTRO_SCRIPT_USER,
+    TEASER_FINDER_SYSTEM,
+    TEASER_FINDER_USER,
+    extract_topics_from_transcript,
     format_transcript_for_teaser,
     summarize_transcript_for_intro,
-    extract_topics_from_transcript,
 )
+from packages.clips.transcription.transcriber import Transcript
+from packages.core.llm_provider import get_llm
 
 console = Console()
 
@@ -44,11 +43,11 @@ class TeaserClip:
     hook: str
     reason: str
     intrigue_level: int = 8
-    
+
     @property
     def duration(self) -> float:
         return self.end_time - self.start_time
-    
+
     def to_dict(self) -> dict:
         return {
             "start_time": self.start_time,
@@ -67,7 +66,7 @@ class IntroScript:
     estimated_duration: int
     key_topics: list[str]
     guest_highlights: list[str]
-    
+
     def to_dict(self) -> dict:
         return {
             "text": self.text,
@@ -79,7 +78,7 @@ class IntroScript:
 
 class TeaserIntroGenerator:
     """Generate teasers and intro scripts for podcast episodes."""
-    
+
     def __init__(
         self,
         teaser_min_duration: int = 15,
@@ -89,7 +88,7 @@ class TeaserIntroGenerator:
         self.teaser_min_duration = teaser_min_duration
         self.teaser_max_duration = teaser_max_duration
         self.temperature = temperature
-    
+
     def generate(
         self,
         transcript: Transcript,
@@ -101,7 +100,7 @@ class TeaserIntroGenerator:
     ) -> dict:
         """
         Generate teasers and/or intro script.
-        
+
         Args:
             transcript: Full episode transcript
             episode_id: Episode ID (e.g., "EP113")
@@ -109,18 +108,18 @@ class TeaserIntroGenerator:
             episode_title: Suggested episode title
             generate_teasers: Whether to generate teasers
             generate_intro: Whether to generate intro script
-        
+
         Returns:
             Dict with "teasers" and/or "intro_script"
         """
         result = {}
-        
+
         if generate_teasers:
             console.print("\n[cyan]🎯 Generating teasers (adelantos)...[/cyan]")
             teasers = self._generate_teasers(transcript)
             result["teasers"] = [t.to_dict() for t in teasers]
             console.print(f"[green]✓[/green] Generated {len(teasers)} teasers")
-        
+
         if generate_intro:
             console.print("\n[cyan]📝 Generating intro script...[/cyan]")
             intro = self._generate_intro_script(
@@ -128,14 +127,14 @@ class TeaserIntroGenerator:
             )
             result["intro_script"] = intro.to_dict()
             console.print(f"[green]✓[/green] Intro script ready ({intro.estimated_duration}s)")
-        
+
         return result
-    
+
     def _generate_teasers(self, transcript: Transcript) -> list[TeaserClip]:
         """Generate teaser clips using LLM."""
         # Format transcript for teaser identification
         formatted = format_transcript_for_teaser(transcript)
-        
+
         # Build prompt
         system = TEASER_FINDER_SYSTEM.format(
             min_duration=self.teaser_min_duration,
@@ -146,16 +145,16 @@ class TeaserIntroGenerator:
             max_duration=self.teaser_max_duration,
             transcript=formatted,
         )
-        
+
         # Call LLM
         llm = get_llm()
         response = llm.chat(system, user, temperature=self.temperature)
-        
+
         # Parse response
         teasers = self._parse_teaser_response(response, transcript.duration)
-        
+
         return teasers
-    
+
     def _generate_intro_script(
         self,
         transcript: Transcript,
@@ -167,7 +166,7 @@ class TeaserIntroGenerator:
         # Summarize transcript
         summary = summarize_transcript_for_intro(transcript)
         topics = extract_topics_from_transcript(transcript)
-        
+
         # Build prompt
         system = INTRO_SCRIPT_SYSTEM
         user = INTRO_SCRIPT_USER.format(
@@ -177,37 +176,37 @@ class TeaserIntroGenerator:
             transcript_summary=summary,
             main_topics="\n".join(f"- {t}" for t in topics),
         )
-        
+
         # Call LLM
         llm = get_llm()
         response = llm.chat(system, user, temperature=self.temperature)
-        
+
         # Parse response
         intro = self._parse_intro_response(response)
-        
+
         return intro
-    
+
     def _parse_teaser_response(self, response: str, max_duration: float) -> list[TeaserClip]:
         """Parse LLM response for teasers."""
         teasers = []
-        
+
         try:
             # Extract JSON from response
             data = self._extract_json(response)
-            
+
             for item in data.get("teasers", []):
                 start = item.get("start_time", 0)
                 end = item.get("end_time", 0)
-                
+
                 # Validate timestamps
                 if start >= end or start < 0 or end > max_duration:
                     continue
-                
+
                 # Validate duration
                 duration = end - start
                 if duration < self.teaser_min_duration or duration > self.teaser_max_duration:
                     continue
-                
+
                 teasers.append(TeaserClip(
                     start_time=start,
                     end_time=end,
@@ -215,24 +214,24 @@ class TeaserIntroGenerator:
                     reason=item.get("why", item.get("reason", "")),
                     intrigue_level=item.get("intrigue_level", 8),
                 ))
-        
+
         except Exception as e:
             console.print(f"[yellow]⚠️ Error parsing teasers: {e}[/yellow]")
-        
+
         return teasers
-    
+
     def _parse_intro_response(self, response: str) -> IntroScript:
         """Parse LLM response for intro script."""
         try:
             data = self._extract_json(response)
-            
+
             return IntroScript(
                 text=data.get("intro_script", ""),
                 estimated_duration=data.get("estimated_duration_seconds", 35),
                 key_topics=data.get("key_topics", []),
                 guest_highlights=data.get("guest_highlights", []),
             )
-        
+
         except Exception as e:
             console.print(f"[yellow]⚠️ Error parsing intro: {e}[/yellow]")
             return IntroScript(
@@ -241,21 +240,21 @@ class TeaserIntroGenerator:
                 key_topics=[],
                 guest_highlights=[],
             )
-    
+
     def _extract_json(self, text: str) -> dict:
         """Extract JSON from LLM response."""
         import re
-        
+
         # Try to find JSON between ```json and ```
         json_match = re.search(r'```json\s*([\s\S]*?)\s*```', text)
         if json_match:
             return json.loads(json_match.group(1))
-        
+
         # Try to find JSON between { and }
         brace_match = re.search(r'\{[\s\S]*\}', text)
         if brace_match:
             return json.loads(brace_match.group(0))
-        
+
         # Last resort: try parsing the whole thing
         return json.loads(text)
 

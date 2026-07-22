@@ -1,8 +1,8 @@
-import asyncio
-import time
-from typing import Dict, List, Any, Optional
-from pydantic import BaseModel
 import logging
+import time
+from typing import Dict, List
+
+from pydantic import BaseModel
 
 try:
     from packages.core.config import settings
@@ -30,15 +30,15 @@ class ModelRegistry:
         self._last_refresh = 0.0
         self._ttl_sec = 1800  # 30 mins caching
         self._is_refreshing = False
-    
+
     async def _refresh_if_needed(self):
         now = time.time()
         if now - self._last_refresh < self._ttl_sec and self._models:
             return
-            
+
         if self._is_refreshing:
             return
-            
+
         self._is_refreshing = True
         try:
             await self._refresh_from_providers()
@@ -51,15 +51,18 @@ class ModelRegistry:
     async def _refresh_from_providers(self):
         """Fetch models dynamically from native SDKs"""
         new_models = {}
-        
-        from packages.core.config import settings
-        
+
         import re
 
+        from packages.core.config import settings
+
         def _anthropic_family(m_id: str) -> str:
-            if "opus" in m_id: return "opus"
-            if "sonnet" in m_id: return "sonnet"
-            if "haiku" in m_id: return "haiku"
+            if "opus" in m_id:
+                return "opus"
+            if "sonnet" in m_id:
+                return "sonnet"
+            if "haiku" in m_id:
+                return "haiku"
             return "other"
 
         def _anthropic_version(m_id: str):
@@ -120,7 +123,7 @@ class ModelRegistry:
                     m_id = m.id
                     if "audio" in m_id or "realtime" in m_id or "embed" in m_id or "tts" in m_id or "whisper" in m_id or "dall" in m_id:
                         continue
-                    if m_id == "gpt-4o" or (m_id.startswith("gpt-4o-") and not "mini" in m_id and not "preview" in m_id):
+                    if m_id == "gpt-4o" or (m_id.startswith("gpt-4o-") and "mini" not in m_id and "preview" not in m_id):
                         # Date-stamped variants like gpt-4o-2024-11-20 — extract date
                         date_m = re.search(r'(\d{4}-\d{2}-\d{2})', m_id)
                         oai_families["gpt-4o"].append((date_m.group(1) if date_m else "9999", m_id))
@@ -129,9 +132,9 @@ class ModelRegistry:
                         oai_families["gpt-4o-mini"].append((date_m.group(1) if date_m else "9999", m_id))
                     elif m_id.startswith("o4-mini"):
                         oai_families["o4-mini"].append(("0", m_id))
-                    elif m_id.startswith("o3") and not "mini" in m_id:
+                    elif m_id.startswith("o3") and "mini" not in m_id:
                         oai_families["o3"].append(("0", m_id))
-                    elif m_id.startswith("o1") and not "mini" in m_id and not "preview" in m_id:
+                    elif m_id.startswith("o1") and "mini" not in m_id and "preview" not in m_id:
                         oai_families["o1"].append(("0", m_id))
 
                 oai_display = {
@@ -217,7 +220,7 @@ class ModelRegistry:
                     )
             except Exception as e:
                 logger.error(f"Google AI model fetch failed: {e}")
-                
+
         # Swap memory safely
         if new_models:
             self._models = new_models
@@ -225,14 +228,14 @@ class ModelRegistry:
     async def get_all_models(self) -> List[ModelInfo]:
         """Return all discovered models sorted newest-first by provider then family."""
         await self._refresh_if_needed()
-        
+
         def _sort_key(m: ModelInfo):
             # Provider priority order shown in UI
             provider_order = {"anthropic": 0, "openai": 1, "groq": 2, "google": 3}
             p = provider_order.get(m.provider, 99)
-            
+
             mid = m.id.lower()
-            
+
             # --- Anthropic: extract major.minor from patterns like claude-opus-4-6, claude-3-5-sonnet ---
             if m.provider == "anthropic":
                 import re
@@ -247,23 +250,28 @@ class ModelRegistry:
                 family_rank = 0 if "opus" in mid else (1 if "sonnet" in mid else 2)
                 # Negate for descending (newest first)
                 return (p, -major, -minor, family_rank, m.id)
-            
+
             # --- OpenAI: gpt-4o > o3 > o1 > gpt-4 ---
             if m.provider == "openai":
-                if "gpt-4o" in mid: ver_p = 0
-                elif mid.startswith("o3"): ver_p = 1
-                elif mid.startswith("o1"): ver_p = 2
-                elif "gpt-4" in mid: ver_p = 3
-                else: ver_p = 9
+                if "gpt-4o" in mid:
+                    ver_p = 0
+                elif mid.startswith("o3"):
+                    ver_p = 1
+                elif mid.startswith("o1"):
+                    ver_p = 2
+                elif "gpt-4" in mid:
+                    ver_p = 3
+                else:
+                    ver_p = 9
                 return (p, ver_p, m.id)
-            
+
             # --- Groq: sort by llama version descending ---
             if m.provider == "groq":
                 import re
                 ver = re.search(r'llama-3\.(\d+)', mid)
                 minor = int(ver.group(1)) if ver else 0
                 return (p, -minor, m.id)
-            
+
             # --- Google: gemini-2 > gemini-1, pro > flash ---
             if m.provider == "google":
                 import re
@@ -271,9 +279,9 @@ class ModelRegistry:
                 major = int(ver.group(1)) if ver else 0
                 tier = 0 if "pro" in mid else (1 if "flash" in mid else 2)
                 return (p, -major, tier, m.id)
-            
+
             return (p, m.id)
-        
+
         return sorted(self._models.values(), key=_sort_key)
 
     async def force_refresh(self):
@@ -290,9 +298,9 @@ class ModelRegistry:
         # We don't block here. We use whatever the user set in their settings,
         # but if they didn't set anything, we fallback safely.
         # It takes the current selected provider based on config priority.
-        
+
         from packages.core.config import settings
-        
+
         provider_order_str = getattr(settings, "ai_provider_order", "groq,openai,anthropic,google")
         order_list = [p.strip().lower() for p in provider_order_str.split(",") if p.strip()]
 
@@ -311,10 +319,10 @@ class ModelRegistry:
             elif p == "google" and getattr(settings, "google_api_key", None):
                 current_provider = "google"
                 break
-                
+
         if not current_provider:
             return "claude-3-7-sonnet-latest" # System fallback
-            
+
         if current_provider == "anthropic":
             return getattr(settings, "anthropic_model", "claude-3-7-sonnet-latest")
         elif current_provider == "openai":

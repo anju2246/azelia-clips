@@ -1,12 +1,18 @@
 import json
 from typing import List, Optional
+
 from rich.console import Console
 
+from packages.clips.curation.models import (
+    CriticClip,
+    CriticResponse,
+    CurationConfig,
+    FinderCandidate,
+)
+from packages.clips.curation.prompt_manager import PromptManager
+from packages.clips.curation.prompts import CRITIC_SYSTEM
 from packages.clips.transcription.transcriber import Transcript
 from packages.core.llm_provider import get_llm
-from packages.clips.curation.prompts import CRITIC_SYSTEM
-from packages.clips.curation.prompt_manager import PromptManager
-from packages.clips.curation.models import FinderCandidate, CriticResponse, CriticClip, CurationConfig
 
 # Optional import only used as a default value in the constructor type hint.
 # Keeping it here keeps the existing top-level imports intact.
@@ -192,8 +198,8 @@ class CriticAgent:
     ) -> str:
         """Construye el system prompt del Critic, inyectando las señales CPI
         (CREATOR SELF + NICHE) junto al contexto del podcast."""
-        from packages.core.taxonomy import language_label as _lang_label
         from packages.clips.curation.signal_hints import build_signal_addendum
+        from packages.core.taxonomy import language_label as _lang_label
 
         podcast_context = config.get_podcast_context_block()
         signals = build_signal_addendum(config)
@@ -244,7 +250,6 @@ class CriticAgent:
         )
 
         try:
-            from packages.core.taxonomy import language_label as _lang_label
 
             # Two memory layers, concatenated:
             #   1. Persistent learnings — distilled rules from prior
@@ -260,14 +265,14 @@ class CriticAgent:
             formatted_system_prompt = self._build_system_prompt(
                 config, min_duration, max_duration, memory_block
             )
-            
+
             response_raw = self._llm.chat(
                 system_prompt=formatted_system_prompt,
                 user_message=critic_prompt,
                 temperature=self.temperature,
                 response_format=CriticResponse
             )
-            
+
             if isinstance(response_raw, str):
                 import re
                 json_match = re.search(r"```(?:json)?\s*([\s\S]*?)```", response_raw)
@@ -341,7 +346,7 @@ class CriticAgent:
                         f"·{dur:.0f}s] {title} — {reason}[/dim]"
                     )
             return approved
-            
+
         except Exception as e:
             console.print(f"[red]Failed to run CriticAgent: {e}[/red]")
             console.print("[yellow]Fallback: all candidates marked as NOT approved — manual review required.[/yellow]")

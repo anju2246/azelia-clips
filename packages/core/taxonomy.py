@@ -12,9 +12,6 @@ Source of truth for:
 
 from __future__ import annotations
 
-from typing import Iterable
-
-
 # ─── Content niches ──────────────────────────────────────────────────────────
 # Apple Podcasts top-level categories (2024-2026). `id` is the stable,
 # lowercase-underscored value stored in profiles.content_niche and
@@ -230,7 +227,7 @@ LANGUAGES: list[dict[str, str]] = [
     {"id": "zh", "label": "Chinese"},
 ]
 
-_LANGUAGE_IDS: frozenset[str] = frozenset(l["id"] for l in LANGUAGES)
+_LANGUAGE_IDS: frozenset[str] = frozenset(lang["id"] for lang in LANGUAGES)
 
 
 def normalize_language(value: str | None) -> str:
@@ -251,7 +248,7 @@ def is_valid_language(value: str | None) -> bool:
 
 
 # Lookup: ISO code → human label used in prompts (e.g. "Respond in Spanish").
-_LANGUAGE_ID_TO_LABEL: dict[str, str] = {l["id"]: l["label"] for l in LANGUAGES}
+_LANGUAGE_ID_TO_LABEL: dict[str, str] = {lang["id"]: lang["label"] for lang in LANGUAGES}
 
 
 def language_label(code: str | None, fallback: str = "English") -> str:

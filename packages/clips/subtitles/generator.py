@@ -24,7 +24,7 @@ class SubtitleStyle:
     margin_v: int = 50  # Vertical margin from bottom
 
     # Hola, esto es una nota que dejo a mi yo futuro, ahora estoy revisando el código, la IA está intentando
-    # autocompletar lo que escribo. 
+    # autocompletar lo que escribo.
 
 
 # Preset styles
@@ -267,7 +267,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         else:
                             # Previous words: normal
                             text_parts.append(w.word)
-                    
+
                     text = " ".join(text_parts)
                     start_time = self._format_time(word.start)
                     # End at next word start, or group end for last word
@@ -275,7 +275,7 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
                         end_time = self._format_time(group[j + 1].start)
                     else:
                         end_time = self._format_time(group_end)
-                    
+
                     lines.append(
                         f"Dialogue: 0,{start_time},{end_time},{self.style.name},,0,0,0,,{text}"
                     )

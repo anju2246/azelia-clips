@@ -33,8 +33,8 @@ def process(
     Example:
         azelia process podcast.mp4 --top 5 --output ./clips
     """
-    from packages.clips.transcription.transcriber import Transcript
     from packages.clips.curation import ClipCurator, ClipExtractor
+    from packages.clips.transcription.transcriber import Transcript
 
     console.print("[bold blue]🎬 Azelia Clips[/bold blue] - AI Video Repurposing\n")
 
@@ -139,8 +139,9 @@ def curate(
         azelia curate transcript.json --top 5
     """
     import json
-    from packages.clips.transcription.transcriber import Transcript
+
     from packages.clips.curation import ClipCurator
+    from packages.clips.transcription.transcriber import Transcript
 
     if not transcript.exists():
         console.print(f"[red]Error:[/red] Transcript not found: {transcript}")
@@ -210,8 +211,6 @@ def reframe(
         output = video.with_stem(f"{video.stem}_vertical")
 
     if mode == "face":
-        from packages.clips.vision import FaceTracker
-        import cv2
 
         console.print("[bold blue]🎬 Azelia Clips[/bold blue] - Face Tracking Reframe\n")
         # TODO (Paso 5): Wire up biometric face tracking
@@ -268,14 +267,14 @@ def start(
     Development:
         azelia start --dev          # Start with hot-reload (Astro + FastAPI)
     """
-    from rich.panel import Panel
-    from rich.text import Text
+    import os
     import subprocess
-    import webbrowser
     import threading
     import time
-    import sys
-    import os
+    import webbrowser
+
+    from rich.panel import Panel
+    from rich.text import Text
 
     # ── Explicitly load .env so pydantic-settings picks up all keys ───────
     project_root = Path(__file__).resolve().parent.parent.parent
@@ -287,19 +286,19 @@ def start(
         if env_path.exists():
             load_dotenv(env_path, override=True)
             # Reload settings singleton with fresh env vars
-            from packages.core.config import Settings
             import packages.core.config as config_module
+            from packages.core.config import Settings
             config_module.settings = Settings()
     except ImportError:
         pass  # dotenv not installed; pydantic-settings will handle it
-    
+
     AZELIA_ART = """  █████╗ ███████╗███████╗██╗     ██╗ █████╗      ██████╗██╗     ██╗██████╗ ███████╗
  ██╔══██╗╚══███╔╝██╔════╝██║     ██║██╔══██╗    ██╔════╝██║     ██║██╔══██╗██╔════╝
  ███████║  ███╔╝ █████╗  ██║     ██║███████║    ██║     ██║     ██║██████╔╝███████╗
  ██╔══██║ ███╔╝  ██╔══╝  ██║     ██║██╔══██║    ██║     ██║     ██║██╔═══╝ ╚════██║
  ██║  ██║███████╗███████╗███████╗██║██║  ██║    ╚██████╗███████╗██║██║     ███████║
  ╚═╝  ╚═╝╚══════╝╚══════╝╚══════╝╚═╝╚═╝  ╚═╝     ╚═════╝╚══════╝╚═╝╚═╝     ╚══════╝"""
-    
+
     brand_color = "#3e8e63"
     art_text = Text(AZELIA_ART, style=brand_color, justify="center", no_wrap=True, overflow="crop")
     console.print(Panel(art_text, border_style=brand_color, expand=False))
@@ -312,7 +311,7 @@ def start(
     if dev:
         console.print("[bold blue]🎬 Azelia Clips[/bold blue] — Development Mode\n")
         console.print("[dim]Starting Astro dev server + FastAPI with reload...[/dim]")
-        console.print(f"[green]→[/green] Frontend: http://localhost:4321")
+        console.print("[green]→[/green] Frontend: http://localhost:4321")
         console.print(f"[green]→[/green] API:      http://localhost:{port}")
         console.print("[dim]Press Ctrl+C to stop both.[/dim]\n")
 

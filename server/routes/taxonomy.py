@@ -8,7 +8,7 @@ from the backend's normalization rules.
 
 from fastapi import APIRouter
 
-from packages.core.taxonomy import CONTENT_NICHES, LANGUAGES, COUNTRIES
+from packages.core.taxonomy import CONTENT_NICHES, COUNTRIES, LANGUAGES
 
 router = APIRouter()
 

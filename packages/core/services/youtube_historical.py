@@ -1,14 +1,14 @@
-import os
+import asyncio
 import json
 import logging
-import tempfile
-import asyncio
-from typing import Optional, Tuple
-from datetime import datetime, timezone
-
-import isodate
+import os
 import sqlite3
+import tempfile
+from datetime import datetime, timezone
+from typing import Optional, Tuple
+
 import googleapiclient.discovery
+import isodate
 from google.oauth2.credentials import Credentials
 
 # NOTE: TelemetryService removed in local-first MVP (v0.1.0).
@@ -83,7 +83,8 @@ def store_retention_curve(
     """Upsert idempotente de la curva en `retention_curves`. Devuelve el
     drop_off_ratio derivado."""
     import json as _json
-    from datetime import datetime as _dt, timezone as _tz
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
 
     drop_off = derive_drop_off_ratio(curve)
     conn.execute(
@@ -344,7 +345,8 @@ class YouTubeHistoricalExtractor:
         # `['es','en']` order so for non-Latin podcasts we'd otherwise label
         # everything Spanish. With detection the LLM writes `retention_analysis`
         # and `growth_driver` in the actual language of the short.
-        from packages.core.utils import detect_language as _detect_lang, language_label as _lang_label
+        from packages.core.utils import detect_language as _detect_lang
+        from packages.core.utils import language_label as _lang_label
         per_video_lang = _lang_label(_detect_lang(transcript, fallback="en"))
 
         # Build rich metrics context for the LLM
@@ -516,7 +518,7 @@ no prose):
 
         _report(15, f"🎬 {len(short_ids)} shorts detectados. Obteniendo analíticas de YouTube...")
         analytics_map = await self.fetch_youtube_analytics(creds, channel_id, short_ids)
-        _report(25, f"📊 Analíticas obtenidas. Filtrando shorts ya analizados...")
+        _report(25, "📊 Analíticas obtenidas. Filtrando shorts ya analizados...")
 
         # Skip shorts that already have an LLM analysis in our local SQLite —
         # re-running historical sync should NEVER re-bill the creator for

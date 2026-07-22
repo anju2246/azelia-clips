@@ -1,12 +1,12 @@
-import json
 from typing import List, Optional
+
 from rich.console import Console
 
-from packages.clips.transcription.transcriber import Transcript
-from packages.clips.curation.models import CuratedClip, CurationConfig
-from packages.clips.curation.agents.finder import FinderAgent
 from packages.clips.curation.agents.critic import CriticAgent
+from packages.clips.curation.agents.finder import FinderAgent
 from packages.clips.curation.agents.ranker import RankerAgent
+from packages.clips.curation.models import CuratedClip, CurationConfig
+from packages.clips.transcription.transcriber import Transcript
 
 console = Console()
 
@@ -21,7 +21,7 @@ class CurationPipeline:
         self.finder = FinderAgent(temperature)
         self.critic = CriticAgent(temperature)
         self.ranker = RankerAgent(temperature)
-        
+
     def _validate_clip_duration(
         self,
         clip: CuratedClip,
@@ -30,29 +30,29 @@ class CurationPipeline:
     ) -> str:
         """Validates duration limits and sets pending review status if needed."""
         duration = clip.duration
-        
+
         # Too short (< 50% min) or too long (> 3 min) are dead invalid
         if duration < min_duration * 0.5:
             return 'invalid'
         if duration > 180:
             return 'invalid'
-            
+
         # Perfect
         if min_duration <= duration <= max_duration:
             return 'valid'
-            
+
         # Over max but under 180s = Review
         if duration > max_duration:
             clip.pending_review = True
             clip.review_reason = f"Duration {duration:.1f}s > {max_duration}s."
             return 'pending'
-            
+
         # Too short but high score = Review
         if duration < min_duration and clip.virality_score.total >= 50:
             clip.pending_review = True
             clip.review_reason = f"Duration {duration:.1f}s < {min_duration}s but high score."
             return 'pending'
-            
+
         return 'invalid'
 
     def _apply_performance_bonus(self, clip: CuratedClip, config: Optional[CurationConfig] = None) -> CuratedClip:
@@ -67,15 +67,21 @@ class CurationPipeline:
         bonus = 0
 
         # DURATION BONUS (universal — mirrors YouTube's platform-level preferences)
-        if 30 <= clip.duration <= 40: bonus += 5
-        elif 40 < clip.duration <= 60: bonus += 3
-        elif 25 <= clip.duration < 30: bonus += 2
-        elif clip.duration > 90: bonus -= 3
+        if 30 <= clip.duration <= 40:
+            bonus += 5
+        elif 40 < clip.duration <= 60:
+            bonus += 3
+        elif 25 <= clip.duration < 30:
+            bonus += 2
+        elif clip.duration > 90:
+            bonus -= 3
 
         # CATEGORY BONUS (universal)
         cat = clip.category.lower()
-        if 'emotional' in cat or 'story' in cat: bonus += 4
-        elif 'insight' in cat: bonus += 1
+        if 'emotional' in cat or 'story' in cat:
+            bonus += 4
+        elif 'insight' in cat:
+            bonus += 1
 
         # Legacy topic keywords only if no podcast identity set — prevents
         # them from biasing niche-specific podcasts.
@@ -104,13 +110,13 @@ class CurationPipeline:
         pause_callback=None,
         config: CurationConfig = None,
     ) -> List[CuratedClip]:
-        
-        console.print(f"\n[blue]🧠[/blue] Multi-Agent Pipeline (Phase 2 Architecture)")
-        
+
+        console.print("\n[blue]🧠[/blue] Multi-Agent Pipeline (Phase 2 Architecture)")
+
         # Build config with LI patterns if not provided
         if config is None:
             config = CurationConfig(podcast_name=podcast_name)
-        
+
         # 1. FINDER (config carries LI intelligence_addendum)
         candidates = self.finder.find_candidates(
             transcript, min_duration, max_duration, config=config,
@@ -119,7 +125,7 @@ class CurationPipeline:
         if not candidates:
             console.print("[yellow]Phase 1 (Finder) found no candidates.[/yellow]")
             return []
-            
+
         console.print(f"[green]✓ Finder proposed {len(candidates)} candidates.[/green]")
 
         # 2. CRITIC (receives config so it can reject off-topic clips for this podcast)
@@ -136,28 +142,28 @@ class CurationPipeline:
         ranked_clips = self.ranker.rank_clips(
             approved_critics, transcript, top_n=len(approved_critics), config=config
         )
-        
+
         # Post-Processing
         final_clips = []
         for clip in ranked_clips:
             # Re-sanitize timestamps and duration validation
             if clip.end_time <= clip.start_time:
                 continue
-                
+
             val_status = self._validate_clip_duration(clip, min_duration, max_duration)
             if val_status == 'invalid':
                 continue
-                
+
             clip = self._apply_performance_bonus(clip, config=config)
             final_clips.append(clip)
-            
+
         # Sort by total score
         final_clips.sort(key=lambda c: c.virality_score.total, reverse=True)
-        
+
         # Keep all valid clips or slice top_n
         if top_n and top_n > 0:
             final_clips = final_clips[:top_n]
-            
+
         # Cap captions to only the exported/top ones to save tokens
         if episode_number > 0 and final_clips:
             # Forward language + podcast identity so the caption generator
@@ -171,5 +177,5 @@ class CurationPipeline:
             final_clips = self.ranker.generate_captions(
                 final_clips, transcript, episode_number, cap_config
             )
-            
+
         return final_clips

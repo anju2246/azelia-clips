@@ -9,13 +9,13 @@ import json
 import re
 from typing import List, Optional
 
-from packages.core.llm_provider import get_llm
 from packages.clips.curation.brief_models import (
     ACTION_TYPES,
     BriefAction,
     BriefCandidate,
     ChatMessage,
 )
+from packages.core.llm_provider import get_llm
 
 _SYSTEM_PROMPT = """Eres el asistente del "brief" de Azelia. El usuario revisa los clips
 candidatos de un podcast ANTES de renderizarlos y te da feedback en lenguaje natural.
