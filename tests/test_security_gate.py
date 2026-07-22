@@ -16,6 +16,9 @@ gate = importlib.util.module_from_spec(_spec)
 # Register before exec so @dataclass can resolve the module (Python 3.13).
 sys.modules["security_gate"] = gate
 _spec.loader.exec_module(gate)
+# Project rules (.security-gate.json) are part of the contract these evals lock:
+# the real-leak path class (data/jobs/) comes from there, not the global gate.
+gate._load_project_extras()
 
 
 @pytest.mark.parametrize(

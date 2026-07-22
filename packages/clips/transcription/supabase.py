@@ -34,6 +34,13 @@ class SupabaseSource(TranscriptionSource):
         if not url or not key:
             raise ValueError("Supabase URL and Key required for SupabaseSource")
 
+        from packages.core.utils import validate_supabase_url
+        url = validate_supabase_url(url)
+        if not url:
+            raise ValueError(
+                "Supabase URL must be HTTPS with a public hostname (e.g. https://xyz.supabase.co)"
+            )
+
         # Lazy import to avoid dependency issues if not used
         from supabase import create_client
         

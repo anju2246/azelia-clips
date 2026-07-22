@@ -49,6 +49,45 @@ jobs:
       - name: Verify CLI loads
         run: python -c "from packages.clips.cli import app; print('OK')"
 
+  test-python:
+    name: Tests (Python)
+    runs-on: ubuntu-latest
+    needs: lint-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install deps (skip torch-family ML)
+        run: |
+          pip install --upgrade pip
+          pip install fastapi uvicorn pydantic pydantic-settings sqlmodel rich \
+                      typer ffmpeg-python imageio-ffmpeg python-dotenv supabase \
+                      "anthropic[vertex]" google-genai PyJWT requests openai \
+                      google-api-python-client google-auth google-auth-oauthlib \
+                      isodate python-multipart httpx langdetect \
+                      numpy opencv-python-headless Pillow \
+                      pytest pytest-asyncio
+      - name: pytest (torch-dependent suites run locally)
+        run: |
+          python -m pytest tests/ -q \
+            --ignore=tests/test_face_tracker.py \
+            --ignore=tests/test_diarizer.py \
+            --ignore=tests/test_framing_gate.py
+
+  audit-python:
+    name: Audit (Python deps)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pip-audit
+      - name: pip-audit requirements
+        run: pip-audit -r requirements.txt --skip-editable
+
   build-web:
     name: Build (Web)
     runs-on: ubuntu-latest

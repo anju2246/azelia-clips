@@ -1,0 +1,6 @@
+{
+  "forbidden_paths": [
+    ["(^|/)data/jobs/", "local job output (real transcripts / personal data)"],
+    ["(^|/)private/", "private directory (never public)"]
+  ]
+}

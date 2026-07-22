@@ -2,6 +2,7 @@
 Server Routes — Clip Processing, Jobs, Faces, Episodes, WebSocket
 """
 
+import logging
 import shutil
 import hashlib
 import uuid
@@ -21,6 +22,7 @@ from server.models import (
 from server.dependencies import job_queue
 from server.workers.job_store import get_job_store
 from packages.core.config import settings
+from packages.core.utils import validate_supabase_url
 from server.middleware.auth import require_auth, require_onboarding, require_auth_flexible, User
 from packages.clips.vision.face_tracker import FaceTracker
 from packages.clips.curation.brief_builder import load_session, save_session
@@ -32,6 +34,8 @@ from packages.clips.curation.brief_actions import (
 )
 from packages.clips.curation.agents.brief_agent import BriefAgent
 from packages.clips.curation.models import CuratedClip
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 store = get_job_store()
@@ -110,8 +114,9 @@ async def process_video(
     try:
         with file_path.open("wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save file: {e}")
+    except Exception:
+        logger.exception("Failed to save uploaded file")
+        raise HTTPException(status_code=500, detail="Failed to save file")
     
     # Validate the per-job template (None → profile default applied in the pipeline)
     from packages.clips.templates.store import TemplateStore
@@ -131,6 +136,10 @@ async def process_video(
     # its own anymore.
     t_url = supabase_url or settings.transcript_supabase_url or None
     t_key = supabase_key or settings.transcript_supabase_key or None
+    if t_url:
+        t_url = validate_supabase_url(t_url)
+        if not t_url:
+            raise HTTPException(status_code=422, detail="Invalid Supabase URL")
     effective_source = transcription_source
     if t_url and t_key and transcription_source == "local_whisper":
         effective_source = "supabase_custom"
@@ -149,21 +158,9 @@ async def process_video(
         user_id=user.id,
     )
     
-    # Create Episode in SQLite
-    with Session(engine) as session:
-        episode = Episode(
-            user_id=user.id if user else "anonymous",
-            title=file.filename,
-            video_path=str(file_path),
-            status="queued"
-        )
-        session.add(episode)
-        session.commit()
-        session.refresh(episode)
-    
     # Enqueue locally using the Hybrid Queue interface
     payload = {
-        "episode_id": episode.id,
+        "episode_id": file.filename,
         "video_path": str(file_path),
         "settings": process_settings.dict(),
         "transcription_config": transcription_config,
@@ -219,12 +216,17 @@ async def process_local_video(
             os.symlink(file_path_obj, target_link)
         except FileExistsError:
             pass  # Already linked from a previous run
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Failed to link local file: {e}")
+        except Exception:
+            logger.exception("Failed to link local file")
+            raise HTTPException(status_code=500, detail="Failed to link local file")
         
     # User-owned Supabase opt-in (transcripts only — Azelia has no DB)
     t_url = req.supabase_url or settings.transcript_supabase_url or None
     t_key = req.supabase_key or settings.transcript_supabase_key or None
+    if t_url:
+        t_url = validate_supabase_url(t_url)
+        if not t_url:
+            raise HTTPException(status_code=422, detail="Invalid Supabase URL")
     effective_source = req.transcription_source
     if t_url and t_key and req.transcription_source == "local_whisper":
         effective_source = "supabase_custom"
@@ -255,19 +257,8 @@ async def process_local_video(
         user_id=user.id,
     )
     
-    with Session(engine) as session:
-        episode = Episode(
-            user_id=user.id if user else "anonymous",
-            title=filename,
-            video_path=str(target_link),
-            status="queued"
-        )
-        session.add(episode)
-        session.commit()
-        session.refresh(episode)
-        
     payload = {
-        "episode_id": episode.id,
+        "episode_id": filename,
         "video_path": str(target_link),
         "settings": req.dict(),
         "transcription_config": transcription_config,
@@ -542,8 +533,9 @@ async def get_critic_decisions(job_id: str, user: User = Depends(require_auth)):
 
     try:
         decisions = json.loads(decisions_path.read_text())
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Could not parse decisions: {e}")
+    except Exception:
+        logger.exception("Could not parse decisions file")
+        raise HTTPException(status_code=500, detail="Could not parse decisions file")
 
     # Pull existing feedback so the UI can pre-fill the user's verdict.
     feedback_rows = store.get_critic_feedback_for_episode(job.episode_id)
@@ -654,10 +646,14 @@ async def identify_prepare(
 
     try:
         manifest = prepare_identification(folder, segments, num_speakers=num_speakers)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Preflight failed: {e}")
+    except FileNotFoundError:
+        logger.exception("Identification preflight: required file missing")
+        raise HTTPException(
+            status_code=404, detail="Required file for identification not found"
+        )
+    except Exception:
+        logger.exception("Identification preflight failed")
+        raise HTTPException(status_code=500, detail="Preflight failed")
 
     return {
         "episode_id": f"EP{episode_number:03d}",
@@ -1109,9 +1105,12 @@ async def post_brief_message(job_id: str, payload: dict, user: User = Depends(re
         actions = BriefAgent().interpret(
             message, session.candidates, session.messages, focus_id=focus_id
         )
-    except Exception as e:
+    except Exception:
         # LLM failure — leave the session untouched so the user can retry.
-        raise HTTPException(status_code=502, detail=f"LLM interpretation failed: {e}")
+        logger.exception("Brief agent LLM interpretation failed")
+        raise HTTPException(
+            status_code=502, detail="LLM interpretation failed — try again"
+        )
 
     ctx = _brief_context(brief_dir)
     summaries = []
@@ -1206,6 +1205,15 @@ async def list_rejected_clips(job_id: str, user: User = Depends(require_auth)):
     
     return results
 
+def _validate_clip_filename(filename: str) -> None:
+    """Reject any filename that is not a plain single-segment name.
+
+    Starlette already blocks `/` inside a path param, but a literal `..`
+    segment still resolves one level above the clips folder."""
+    if not filename or filename != Path(filename).name or filename in {".", ".."}:
+        raise HTTPException(status_code=400, detail="Invalid filename")
+
+
 @router.get("/clips/{job_id}/{filename}")
 async def get_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Serve a generated clip."""
@@ -1242,6 +1250,7 @@ async def get_clip(job_id: str, filename: str, user: User = Depends(require_auth
 async def open_clip_location(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Open the local folder containing the clip (macOS)."""
     import subprocess
+    _validate_clip_filename(filename)
     job = store.get_job(job_id)
     safe_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     
@@ -1261,13 +1270,15 @@ async def open_clip_location(job_id: str, filename: str, user: User = Depends(re
         # -R flag selects the file in Finder
         subprocess.run(["open", "-R", str(target_path)])
         return {"status": "success"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        logger.exception("Could not open clip location in Finder")
+        raise HTTPException(status_code=500, detail="Could not open clip location")
 
 @router.post("/clips/{job_id}/{filename}/approve")
 async def approve_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Approve a clip: move it from review/ to approved/."""
     import shutil
+    _validate_clip_filename(filename)
     job = store.get_job(job_id)
     clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     
@@ -1295,6 +1306,7 @@ async def approve_clip(job_id: str, filename: str, user: User = Depends(require_
 async def reject_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Reject a clip: move it to rejected/ (auto-deleted after 30 days)."""
     import shutil
+    _validate_clip_filename(filename)
     job = store.get_job(job_id)
     clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     rejected_dir = clips_dir / "rejected"
@@ -1327,6 +1339,7 @@ async def reject_clip(job_id: str, filename: str, user: User = Depends(require_a
 async def restore_clip(job_id: str, filename: str, user: User = Depends(require_auth)):
     """Restore a rejected clip back to the review folder."""
     import shutil
+    _validate_clip_filename(filename)
     job = store.get_job(job_id)
     clips_dir = _resolve_clips_dir(job_id, job.episode_id if job else None).resolve()
     source = clips_dir / "rejected" / filename
@@ -1935,9 +1948,10 @@ async def upload_transcript_endpoint(episode_number: int, user: User = Depends(r
             raise HTTPException(status_code=500, detail="Failed to upload to Supabase")
             
         return {"status": "success", "message": f"Uploaded {episode_id} to Supabase"}
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+    except Exception:
+        logger.exception("Supabase upload failed")
+        raise HTTPException(status_code=500, detail="Upload to Supabase failed")
 
 
 # ─── WebSocket Progress Stream ──────────────────────────────────────────────

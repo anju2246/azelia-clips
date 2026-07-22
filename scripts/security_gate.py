@@ -183,8 +183,8 @@ def scan(diff_args: list[str]) -> list[Finding]:
     for path in _changed_paths(diff_args):
         findings += check_path(path)
     for path, added in _added_lines_by_path(diff_args).items():
-        if _path_is_allowed(path):
-            continue
+        # Allow-listed paths (fixtures, examples) skip only the PATH check;
+        # their content is still scanned so a real secret can't hide in them.
         findings += check_content(path, added)
     return findings
 
@@ -196,8 +196,7 @@ def scan_files(paths: list[str]) -> list[Finding]:
         try:
             with open(path, encoding="utf-8", errors="ignore") as fh:
                 added = [(i + 1, ln) for i, ln in enumerate(fh.read().splitlines())]
-            if not _path_is_allowed(path):
-                findings += check_content(path, added)
+            findings += check_content(path, added)
         except OSError:
             pass
     return findings
@@ -249,6 +248,8 @@ def self_test() -> int:
         ("f.json", [(2, f'"SUPABASE_ACCESS_TOKEN": "{sbp}"')]),
         ("g.py", [(9, f'NOTION_TOKEN = "{ntn}"')]),
         ("h.yml", [(4, f"url: {dburl}")]),
+        # Allow-listed fixture path: content must STILL be scanned.
+        ("tests/fixtures/youtube/oauth_real.json", [(2, f'"token": "{sk}"')]),
     ]
     good_content = [
         ("e.spec.ts", [(100, "await input.fill('sk-ant-INVALID_KEY_12345')")]),

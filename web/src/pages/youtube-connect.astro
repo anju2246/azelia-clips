@@ -55,21 +55,28 @@ import '../styles/global.css';
                     const result = await res.json();
                     if (!res.ok) throw new Error(result.detail || 'Error conectando YouTube');
 
+                    // channel_name/message come from the API response —
+                    // set via textContent, never innerHTML.
                     statusEl.innerHTML = `
                         <div class="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center">
                             <svg class="w-6 h-6 text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
                             </svg>
                         </div>
-                        <p class="text-white font-medium">${result.channel_name || 'Canal'} conectado</p>
-                        <p class="text-zinc-400 text-xs">${result.total_shorts ?? 0} videos sincronizados · Redirigiendo...</p>
+                        <p class="text-white font-medium" id="yt-channel"></p>
+                        <p class="text-zinc-400 text-xs" id="yt-count"></p>
                     `;
+                    document.getElementById('yt-channel')!.textContent =
+                        `${result.channel_name || 'Canal'} conectado`;
+                    document.getElementById('yt-count')!.textContent =
+                        `${result.total_shorts ?? 0} videos sincronizados · Redirigiendo...`;
                 } catch (e: any) {
                     statusEl.innerHTML = `
                         <p class="text-red-400 font-medium">Error conectando YouTube</p>
-                        <p class="text-zinc-500 text-xs">${e.message}</p>
+                        <p class="text-zinc-500 text-xs" id="yt-error"></p>
                         <p class="text-zinc-600 text-xs">Redirigiendo al dashboard...</p>
                     `;
+                    document.getElementById('yt-error')!.textContent = e.message;
                 }
 
                 setTimeout(() => window.location.replace('/dashboard'), 2500);

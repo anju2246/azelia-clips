@@ -25,6 +25,17 @@ from server.routes.templates import router as templates_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # The API has no auth: anyone who can reach it owns the machine's data.
+    # Binding beyond loopback therefore requires an explicit opt-in.
+    bind_host = getattr(settings, "bind_host", "127.0.0.1")
+    if bind_host not in ("127.0.0.1", "localhost", "::1") and os.environ.get(
+        "AZELIA_ALLOW_UNSAFE_LAN"
+    ) != "1":
+        raise RuntimeError(
+            f"AZELIA_BIND_HOST={bind_host} exposes the unauthenticated API beyond "
+            "this machine. Set AZELIA_ALLOW_UNSAFE_LAN=1 only if you understand "
+            "that anyone on the network gets full control of Azelia."
+        )
     # Migrate the legacy tree on first run + bind the active profile to settings.
     # Must happen before anything reads settings.data_dir.
     initialize_active_profile()

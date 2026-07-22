@@ -44,6 +44,36 @@ def detect_language(text: str, fallback: str = "en") -> str:
         return fallback
 
 
+def validate_supabase_url(url: str) -> str | None:
+    """Normalize a user-supplied Supabase URL, or None if it is not acceptable.
+
+    The server makes outbound requests to this URL, so reject the SSRF-prone
+    shapes: non-HTTPS, raw IPs, localhost, and single-label/internal hostnames.
+    `https://*.supabase.co` always passes; self-hosted instances pass as long
+    as they use HTTPS with a public-looking hostname.
+    """
+    import ipaddress
+    from urllib.parse import urlsplit
+
+    u = (url or "").strip().rstrip("/")
+    if not u:
+        return None
+    parts = urlsplit(u)
+    host = (parts.hostname or "").lower()
+    if parts.scheme != "https" or not host:
+        return None
+    if host.endswith(".supabase.co"):
+        return u
+    try:
+        ipaddress.ip_address(host)
+        return None
+    except ValueError:
+        pass
+    if host == "localhost" or host.endswith((".local", ".internal")) or "." not in host:
+        return None
+    return u
+
+
 def language_label(code: str, fallback: str = "English") -> str:
     """Human-readable label for an ISO 639-1 code (e.g. `es` → 'Spanish')."""
     if not code:

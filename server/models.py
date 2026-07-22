@@ -57,9 +57,9 @@ class JobResponse(BaseModel):
 
 
 class ProcessRequest(BaseModel):
-    min_duration: int = 30
-    max_duration: int = 90
-    min_score: int = 70
+    min_duration: int = Field(default=30, ge=5, le=600)
+    max_duration: int = Field(default=90, ge=5, le=600)
+    min_score: int = Field(default=70, ge=0, le=100)
     subtitle_style: str = "highlight"
     template_id: Optional[str] = None  # Clip template to apply (None = profile default)
     transcription_source: str = "local_whisper"

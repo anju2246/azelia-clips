@@ -61,7 +61,7 @@ def claude_code_authenticated() -> Optional[dict]:
         # `claude` CLI doesn't have a stable JSON status command, so we run a
         # trivial query and infer auth from exit code.
         result = subprocess.run(
-            [_claude_cmd(), "-p", "say only the word ok"],
+            [_claude_cmd(), "-p", "say only the word ok", "--tools", ""],
             capture_output=True,
             timeout=15,
             text=True,
@@ -174,11 +174,15 @@ class MultiProviderLLM:
 
         `claude -p` doesn't have a separate system prompt slot, so we concatenate.
         Temperature is ignored (CLI uses defaults).
+
+        `--tools ""` disables ALL tools: the prompt embeds untrusted transcript
+        and user text, and a text-only completion must never be able to run
+        Bash/Write/etc. via prompt injection.
         """
         full_prompt = f"{system_prompt}\n\n---\n\n{user_message}"
         try:
             result = subprocess.run(
-                [_claude_cmd(), "-p", full_prompt],
+                [_claude_cmd(), "-p", full_prompt, "--tools", ""],
                 capture_output=True,
                 text=True,
                 timeout=300,
@@ -209,7 +213,10 @@ class MultiProviderLLM:
         )
         try:
             result = subprocess.run(
-                [_claude_cmd(), "-p", full_prompt, "--allowedTools", "Read"],
+                [
+                    _claude_cmd(), "-p", full_prompt,
+                    "--tools", "Read", "--allowedTools", "Read",
+                ],
                 capture_output=True,
                 text=True,
                 timeout=300,

@@ -21,6 +21,7 @@ from packages.core.llm_provider import (
     vision_available,
 )
 from packages.core.services.model_registry import model_registry
+from packages.core.utils import validate_supabase_url
 from server.middleware.auth import User, require_auth
 from server.models import SettingsResponse, UpdateSettingsRequest
 
@@ -166,8 +167,19 @@ async def update_settings(req: UpdateSettingsRequest, user: User = Depends(requi
         settings.anthropic_model = req.anthropic_model
     # User-owned Supabase for transcripts (optional)
     if req.transcript_supabase_url is not None and not _is_masked(req.transcript_supabase_url):
-        env["TRANSCRIPT_SUPABASE_URL"] = req.transcript_supabase_url
-        settings.transcript_supabase_url = req.transcript_supabase_url
+        clean_url = ""
+        if req.transcript_supabase_url.strip():
+            clean_url = validate_supabase_url(req.transcript_supabase_url) or ""
+            if not clean_url:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        "transcript_supabase_url must be an HTTPS URL with a "
+                        "public hostname (e.g. https://xyz.supabase.co)"
+                    ),
+                )
+        env["TRANSCRIPT_SUPABASE_URL"] = clean_url
+        settings.transcript_supabase_url = clean_url
     if req.transcript_supabase_key is not None and not _is_masked(req.transcript_supabase_key):
         env["TRANSCRIPT_SUPABASE_KEY"] = req.transcript_supabase_key
         settings.transcript_supabase_key = req.transcript_supabase_key
@@ -239,6 +251,9 @@ async def test_transcript_supabase(user: User = Depends(require_auth)):
     key = (settings.transcript_supabase_key or "").strip()
     if not url or not key:
         return {"ok": False, "reason": "not_configured"}
+    url = validate_supabase_url(url) or ""
+    if not url:
+        return {"ok": False, "reason": "invalid_url"}
 
     try:
         import httpx

@@ -1,0 +1,4 @@
+#!/bin/sh
+# Pre-commit: scan staged changes for secrets / personal data.
+# Installed into .git/hooks by scripts/install-git-hooks.sh.
+exec python3 scripts/security_gate.py --staged
