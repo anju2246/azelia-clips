@@ -24,6 +24,7 @@ class JobStatus(str, Enum):
     PENDING = "pending"
     PROCESSING = "processing"
     AWAITING_BRIEF = "awaiting_brief"
+    AWAITING_FRAMING = "awaiting_framing"
     PAUSED = "paused"
     RESUMING = "resuming"
     COMPLETED = "completed"

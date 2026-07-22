@@ -34,6 +34,7 @@ from packages.clips.curation.brief_actions import (
 )
 from packages.clips.curation.agents.brief_agent import BriefAgent
 from packages.clips.curation.models import CuratedClip
+from packages.clips.templates.layout import MAX_FRAMING_OFFSET
 
 logger = logging.getLogger(__name__)
 
@@ -1008,11 +1009,80 @@ def _record_brief_learning(episode_id: str, session) -> None:
             pass
 
 
+def _framing_gate_open(job_id: str, template_id: str | None, cfg: dict) -> bool:
+    """Whether this job still needs the user to confirm the close-up framing.
+
+    Only for single-shot layouts, and only once per job: `framing_confirmed` in
+    the saved config is the latch that lets the second pass render straight
+    through. Any failure resolving the template means no gate — a styling
+    lookup must never strand a job.
+    """
+    if cfg.get("framing_confirmed"):
+        return False
+    try:
+        from packages.clips.templates.store import TemplateStore
+        from packages.clips.templates.layout import is_single_shot
+
+        tpl = TemplateStore(settings.templates_dir()).resolve(template_id)
+        return is_single_shot(tpl.layout)
+    except Exception:
+        return False
+
+
+def _framing_sample_time(brief_dir: Path) -> float:
+    """A representative moment to preview: inside the first approved clip."""
+    try:
+        session = load_session(brief_dir)
+        selected = [c for c in session.candidates if c.selected]
+        if selected:
+            c = selected[0]
+            return float(c.start_time) + min(6.0, (float(c.end_time) - float(c.start_time)) / 3)
+    except Exception:
+        pass
+    return 60.0
+
+
 def _render_approved(job_id: str, ep_num: int) -> None:
-    """Background task: render only the approved subset after brief approval."""
+    """Background task: render only the approved subset after brief approval.
+
+    Rebuilds the processor from the job's SAVED config (template, durations,
+    transcription source) — the same settings the run was launched with. Without
+    this the approved clips render with the profile's default template instead of
+    the one the user picked, which also silently drops the hook title.
+    """
     from packages.clips.pipeline import BatchProcessor
     try:
-        proc = BatchProcessor(min_score=settings.min_score if hasattr(settings, "min_score") else 70)
+        cfg = store.get_config(job_id) or {}
+        eff_source = cfg.get("transcription_source")
+        proc = BatchProcessor(
+            external_drive_path=settings.podcast_dir,
+            min_duration=cfg.get("min_duration", 30),
+            max_duration=cfg.get("max_duration", 90),
+            min_score=cfg.get("min_score", getattr(settings, "min_score", 70)),
+            use_supabase=eff_source == "supabase",
+            template_id=cfg.get("template_id") or settings.default_template_id,
+            safe_zone_mult=cfg.get("safe_zone_mult"),
+            framing_offset=(
+                cfg.get("framing_offset_x") or 0.0,
+                cfg.get("framing_offset_y") or 0.0,
+            ),
+            transcription_config={
+                "source_type": eff_source,
+                "assemblyai_api_key": cfg.get("assemblyai_key"),
+                "supabase_url": cfg.get("supabase_url"),
+                "supabase_key": cfg.get("supabase_key"),
+            },
+        )
+        # Framing gate: a one-shot template puts the whole frame on the close-up
+        # crop, so park once before rendering and let the user set the tightness
+        # for THIS episode. Skipped once confirmed (and for multi-shot layouts).
+        if _framing_gate_open(job_id, proc.template_id, cfg):
+            store.update_progress(
+                job_id, 70,
+                "Esperando que confirmes el encuadre del close-up…",
+                status="awaiting_framing",
+            )
+            return
         eps = proc.discover_episodes(start=ep_num, end=ep_num)
         if not eps:
             store.fail_job(job_id, f"Episode {ep_num} not found")
@@ -1033,7 +1103,7 @@ def _finalize_unless_parked(job_id: str, clips_count: int) -> None:
     with `completed(0)`, making the brief modal flash and vanish.
     """
     current = store.get_job(job_id)
-    if current and current.status in ("awaiting_brief", "paused", "cancelled"):
+    if current and current.status in ("awaiting_brief", "awaiting_framing", "paused", "cancelled"):
         return
     store.complete_job(job_id, clips_count)
 
@@ -1173,6 +1243,143 @@ async def approve_brief(
     store.update_progress(job_id, 70, "Procesando clips aprobados…", status="processing")
     background_tasks.add_task(_render_approved, job_id, ep_num)
     return {"status": "processing", "approved_count": len(approved)}
+
+
+# ─── Framing gate (close-up tightness, pre-render) ───────────────────────────
+
+
+def _clamp_offset(value: float) -> float:
+    """Keep a crop nudge inside ±MAX_FRAMING_OFFSET of the crop's own size."""
+    return max(-MAX_FRAMING_OFFSET, min(float(value), MAX_FRAMING_OFFSET))
+
+
+def _framing_job_or_409(job_id: str):
+    job = store.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    if job.status != "awaiting_framing":
+        raise HTTPException(status_code=409, detail="Job is not awaiting framing review")
+    return job
+
+
+@router.get("/jobs/{job_id}/framing")
+async def get_framing(job_id: str, user: User = Depends(require_auth)):
+    """Current framing choice + the presets the modal offers."""
+    from packages.clips.templates.layout import (
+        DEFAULT_SAFE_ZONE_MULT, MIN_SAFE_ZONE_MULT, MAX_SAFE_ZONE_MULT,
+    )
+
+    job = _framing_job_or_409(job_id)
+    cfg = store.get_config(job_id) or {}
+    brief_dir = _brief_dir(job_id, job.episode_id)
+    session = load_session(brief_dir)
+    approved = len([c for c in session.candidates if c.selected]) if session else 0
+    return {
+        "job_id": job_id,
+        "episode_id": job.episode_id,
+        "safe_zone_mult": cfg.get("safe_zone_mult") or DEFAULT_SAFE_ZONE_MULT,
+        "offset_x": cfg.get("framing_offset_x") or 0.0,
+        "offset_y": cfg.get("framing_offset_y") or 0.0,
+        "min": MIN_SAFE_ZONE_MULT,
+        "max": MAX_SAFE_ZONE_MULT,
+        "max_offset": MAX_FRAMING_OFFSET,
+        "approved_count": approved,
+        "template_id": cfg.get("template_id"),
+        "presets": [
+            {"id": "cerrado", "label": "Cerrado", "hint": "Solo cabeza", "mult": 1.8},
+            {"id": "normal", "label": "Normal", "hint": "Cabeza y hombros", "mult": 2.5},
+            {"id": "abierto", "label": "Abierto", "hint": "Medio cuerpo", "mult": 3.5},
+            {"id": "ambiente", "label": "Ambiente", "hint": "Se ve el set", "mult": 4.5},
+        ],
+    }
+
+
+@router.get("/jobs/{job_id}/framing/preview")
+async def framing_preview(
+    job_id: str,
+    mult: float,
+    ox: float = 0.0,
+    oy: float = 0.0,
+    user: User = Depends(require_auth),
+):
+    """A still of the crop this framing would produce. Cached face scan → ~1s."""
+    from packages.clips.templates.layout import MIN_SAFE_ZONE_MULT, MAX_SAFE_ZONE_MULT
+    from packages.clips.vision.framing_preview import build_framing_preview
+
+    job = _framing_job_or_409(job_id)
+    mult = max(MIN_SAFE_ZONE_MULT, min(float(mult), MAX_SAFE_ZONE_MULT))
+    ox, oy = _clamp_offset(ox), _clamp_offset(oy)
+
+    ep_num = _ep_num_from(job.episode_id)
+    if ep_num is None:
+        raise HTTPException(status_code=422, detail="Framing preview needs a library episode")
+
+    from packages.clips.pipeline import BatchProcessor
+
+    eps = BatchProcessor(external_drive_path=settings.podcast_dir).discover_episodes(
+        start=ep_num, end=ep_num
+    )
+    if not eps:
+        raise HTTPException(status_code=404, detail=f"Episode {ep_num} not found")
+    ep = eps[0]
+
+    brief_dir = _brief_dir(job_id, job.episode_id)
+    work = ep.episode_folder / ".framing"
+    tag = f"{mult}_{ox}_{oy}".replace(".", "_").replace("-", "m")
+    out = work / f"preview_{tag}.jpg"
+    try:
+        await asyncio.to_thread(
+            build_framing_preview,
+            ep.video_path,
+            _framing_sample_time(brief_dir),
+            out,
+            safe_zone_mult=mult,
+            offset_x=ox,
+            offset_y=oy,
+            cache_path=work / "faces.json",
+        )
+    except Exception:
+        logger.exception("Framing preview failed")
+        raise HTTPException(status_code=500, detail="Preview failed")
+    return FileResponse(out, media_type="image/jpeg")
+
+
+@router.post("/jobs/{job_id}/framing/confirm", status_code=202)
+async def confirm_framing(
+    job_id: str,
+    payload: dict,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_auth),
+):
+    """Lock the framing for this episode and start rendering the approved clips."""
+    from packages.clips.templates.layout import (
+        DEFAULT_SAFE_ZONE_MULT, MIN_SAFE_ZONE_MULT, MAX_SAFE_ZONE_MULT,
+    )
+
+    job = _framing_job_or_409(job_id)
+    try:
+        mult = float(payload.get("safe_zone_mult") or DEFAULT_SAFE_ZONE_MULT)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="safe_zone_mult must be a number")
+    mult = max(MIN_SAFE_ZONE_MULT, min(mult, MAX_SAFE_ZONE_MULT))
+    try:
+        ox = _clamp_offset(float(payload.get("offset_x") or 0.0))
+        oy = _clamp_offset(float(payload.get("offset_y") or 0.0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=422, detail="offset_x/offset_y must be numbers")
+
+    cfg = store.get_config(job_id) or {}
+    cfg["safe_zone_mult"] = mult
+    cfg["framing_offset_x"] = ox
+    cfg["framing_offset_y"] = oy
+    cfg["framing_confirmed"] = True
+    store.save_config(job_id, cfg)
+
+    ep_num = _ep_num_from(job.episode_id)
+    store.update_progress(job_id, 70, "Procesando clips aprobados…", status="processing")
+    background_tasks.add_task(_render_approved, job_id, ep_num)
+    return {"status": "processing", "safe_zone_mult": mult,
+            "offset_x": ox, "offset_y": oy}
 
 
 @router.get("/clips/{job_id}/rejected")
@@ -1379,7 +1586,7 @@ async def cancel_job(job_id: str, user: User = Depends(require_auth)):
     job = store.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
-    if job.status not in ("processing", "pending", "paused", "resuming"):
+    if job.status not in ("processing", "pending", "paused", "resuming", "awaiting_brief", "awaiting_framing"):
         raise HTTPException(status_code=400, detail=f"Job is not running (status: {job.status})")
 
     # 1. Tell the pipeline to stop at the next checkpoint.

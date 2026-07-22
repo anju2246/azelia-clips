@@ -418,7 +418,9 @@ export const TemplateEditorModal: React.FC<Props> = ({
                         key={t}
                         disabled={!editable}
                         onClick={() =>
-                          t === "regions" ? lay(twoGuestSplitLayout()) : lay({ type: t })
+                          t === "regions"
+                            ? lay(twoGuestSplitLayout())
+                            : lay({ type: t, regions: [] })
                         }
                         className={`rounded-md py-1.5 text-xs font-medium transition ${
                           l.type === t

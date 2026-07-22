@@ -4,7 +4,7 @@ VENV := venv
 PYTHON := $(VENV)/bin/python
 PIP := $(VENV)/bin/pip
 
-setup: $(VENV)/bin/activate  ## Create venv and install all dependencies
+setup: $(VENV)/bin/activate web/node_modules  ## Create venv and install all dependencies
 	@echo "✅ Setup complete. Run: source venv/bin/activate"
 
 $(VENV)/bin/activate:
@@ -12,6 +12,9 @@ $(VENV)/bin/activate:
 	$(PIP) install --upgrade pip
 	$(PIP) install -r requirements.txt
 	@touch $(VENV)/bin/activate
+
+web/node_modules: web/package.json
+	cd web && npm install
 
 dev: setup  ## Start the backend + frontend dev servers
 	$(PYTHON) -m uvicorn server.app:app --reload --port 8000 &
@@ -24,5 +27,5 @@ test: setup  ## Run all tests
 	$(PYTHON) -m pytest tests/ -v
 
 clean:  ## Remove venv and caches
-	rm -rf $(VENV) .pytest_cache __pycache__ _scratch
+	rm -rf $(VENV) web/node_modules .pytest_cache __pycache__ _scratch
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true

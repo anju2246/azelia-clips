@@ -109,13 +109,20 @@ class VideoReframer:
         start_time: float = 0,
         duration: float | None = None,
         zoom_factor: float = 1.0,
+        offset_x: float = 0.0,
+        offset_y: float = 0.0,
     ):
         """
         Crop video dynamically following face positions over time.
-        
+
         Uses FFmpeg crop filter with TIME-BASED EXPRESSIONS that interpolate
         the crop position between trajectory keyframes, creating a smooth
         pan that follows the active speaker.
+
+        ``offset_x``/``offset_y`` nudge the whole crop as a fraction of its own
+        size (+x right, +y down), for shots the automatic centring frames off —
+        a subject sitting off-axis, or a desk eating the bottom of the frame.
+        Clamping still keeps the window inside the source.
         """
         import cv2
         
@@ -177,8 +184,10 @@ class VideoReframer:
             )
         
         # Build time-based FFmpeg expressions for X and Y
-        x_keypoints = [(t, x) for t, x, y in simplified]
-        y_keypoints = [(t, y) for t, x, y in simplified]
+        dx = int(offset_x * crop_width)
+        dy = int(offset_y * crop_height)
+        x_keypoints = [(t, x + dx) for t, x, y in simplified]
+        y_keypoints = [(t, y + dy) for t, x, y in simplified]
         
         x_expr = self._build_crop_expr(x_keypoints, half_w, src_width, self.TRANSITION_SECS)
         y_expr = self._build_crop_expr(y_keypoints, half_h, src_height, self.TRANSITION_SECS)
@@ -291,6 +300,7 @@ def _locked_trajectory(detections, identity_id, timestamps, fallback):
 def _reframe_regions(
     video_path, output_path, regions, start_time, duration,
     src_w, src_h, out_w, out_h, speaker_segments, episode_folder,
+    safe_zone_mult: float = 2.5, offset_x: float = 0.0, offset_y: float = 0.0,
 ) -> Path:
     """Render each region (active-speaker / locked-speaker / wide) then composite.
 
@@ -321,7 +331,7 @@ def _reframe_regions(
     step = 0.5
     timestamps = [round(i * step, 1) for i in range(int((duration or 1) / step) + 1)] or [0.0]
     try:
-        zoom = FaceTracker.compute_safe_zoom(detections, src_h)
+        zoom = FaceTracker.compute_safe_zoom(detections, src_h, safe_zone_mult=safe_zone_mult)
     except Exception:
         zoom = 0.7
 
@@ -376,6 +386,9 @@ def reframe_video(
     episode_folder: Path | str | None = None,
     layout_type: str = "split",  # "split" (close-up + wide) or "fullscreen" (face-tracked full crop)
     regions: list | None = None,  # multi-region layout (T18); overrides layout_type when set
+    safe_zone_mult: float = 2.5,  # close-up tightness: crop height = face height × this
+    offset_x: float = 0.0,  # nudge the crop sideways, as a fraction of its width
+    offset_y: float = 0.0,  # nudge the crop vertically, as a fraction of its height
 ) -> Path:
     """
     Create split screen with:
@@ -422,7 +435,8 @@ def reframe_video(
             return _reframe_regions(
                 video_path, output_path, regions, start_time, duration,
                 src_width, src_height, target_width, target_height,
-                speaker_segments, episode_folder,
+                speaker_segments, episode_folder, safe_zone_mult=safe_zone_mult,
+                offset_x=offset_x, offset_y=offset_y,
             )
         except Exception as e:  # noqa: BLE001 — never let a new layout break a render
             console.print(
@@ -498,14 +512,17 @@ def reframe_video(
         zoom_factor = 0.7  # default fallback
         try:
             zoom_factor = FaceTracker.compute_safe_zoom(
-                detections, src_height,
+                detections, src_height, safe_zone_mult=safe_zone_mult,
             )
         except Exception:
             pass  # use default
         
         # Close-up sized to fit exactly above wide shot (or full frame if fullscreen)
         reframer = VideoReframer(output_width=target_width, output_height=closeup_height)
-        reframer.reframe_dynamic(video_path, closeup_path, trajectory, start_time, duration, zoom_factor=zoom_factor)
+        reframer.reframe_dynamic(
+            video_path, closeup_path, trajectory, start_time, duration,
+            zoom_factor=zoom_factor, offset_x=offset_x, offset_y=offset_y,
+        )
 
         from packages.core.process_registry import run_tracked
 

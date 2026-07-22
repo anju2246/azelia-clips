@@ -12,6 +12,31 @@ import math
 
 from packages.clips.templates.models import LayoutSpec, Region, RegionSource
 
+# ── Close-up framing ─────────────────────────────────────────────────────────
+# The crop height is `face_height × mult`, so a smaller number frames tighter.
+# Chosen per episode in the framing gate, not stored on the template: how tight
+# a close-up should be depends on the set and the shot, which change per episode.
+DEFAULT_SAFE_ZONE_MULT = 2.5
+MIN_SAFE_ZONE_MULT = 1.5
+MAX_SAFE_ZONE_MULT = 4.5
+# How far the crop may be nudged off the detected face, as a fraction of the
+# crop's own size. Half a crop away is already the edge of useful.
+MAX_FRAMING_OFFSET = 0.5
+
+
+def is_single_shot(layout: LayoutSpec) -> bool:
+    """True when the layout shows one face-tracked shot and nothing else.
+
+    These are the layouts where the close-up framing IS the whole frame, so the
+    crop deserves a look before committing to a full render.
+    """
+    if layout.type == "fullscreen":
+        return True
+    if layout.type == "regions":
+        regions = list(layout.regions)
+        return len(regions) == 1 and regions[0].source.mode in ("active_speaker", "speaker")
+    return False
+
 
 def resolve_regions(layout: LayoutSpec) -> list[Region]:
     """The effective region list for any layout type.

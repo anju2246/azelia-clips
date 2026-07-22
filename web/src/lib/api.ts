@@ -55,6 +55,29 @@ export interface BriefResponse {
   hook_duration_s: number;
 }
 
+export interface FramingPreset {
+  id: string;
+  label: string;
+  hint: string;
+  mult: number;
+}
+
+export interface FramingResponse {
+  job_id: string;
+  episode_id: string;
+  /** Crop height = detected face height × this. Lower = tighter close-up. */
+  safe_zone_mult: number;
+  /** Crop nudge as a fraction of the crop's own size: +x right, +y down. */
+  offset_x: number;
+  offset_y: number;
+  min: number;
+  max: number;
+  max_offset: number;
+  approved_count: number;
+  template_id: string | null;
+  presets: FramingPreset[];
+}
+
 export interface BriefMessageResponse extends BriefResponse {
   reply: string;
   change_summary: string;
@@ -478,6 +501,33 @@ export const ClipsApi = {
         body: JSON.stringify(
           selectedIds ? { selected_ids: selectedIds } : {},
         ),
+      },
+    ),
+
+  // ── Framing gate (close-up tightness, single-shot templates) ─────
+  getFraming: (jobId: string) =>
+    fetchApi<FramingResponse>(`/jobs/${jobId}/framing`),
+
+  // Image endpoint: used as an <img> src, so it returns a URL, not a promise.
+  framingPreviewUrl: (jobId: string, mult: number, ox = 0, oy = 0) =>
+    `${API_BASE}/jobs/${jobId}/framing/preview?mult=${mult}&ox=${ox}&oy=${oy}`,
+
+  confirmFraming: (
+    jobId: string,
+    safeZoneMult: number,
+    offsetX = 0,
+    offsetY = 0,
+  ) =>
+    fetchApi<{ status: string; safe_zone_mult: number }>(
+      `/jobs/${jobId}/framing/confirm`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          safe_zone_mult: safeZoneMult,
+          offset_x: offsetX,
+          offset_y: offsetY,
+        }),
       },
     ),
 };

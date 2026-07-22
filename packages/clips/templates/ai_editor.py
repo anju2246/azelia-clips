@@ -167,6 +167,20 @@ def _diff(old: dict, new: dict, prefix: str = "") -> list[dict]:
     return changes
 
 
+def _normalize_layout(raw: dict) -> dict:
+    """Reconcile `type` with an explicit `regions` list before validation.
+
+    Models routinely echo the base layout's `type` while emitting the region
+    stack the user asked for. Taking the list as the statement of intent keeps
+    that request from being dropped as stale by LayoutSpec.
+    """
+    if not isinstance(raw, dict):
+        return raw
+    if raw.get("regions") and raw.get("type") != "regions":
+        return {**raw, "type": "regions"}
+    return raw
+
+
 def _coerce(raw: str, base: ClipTemplate) -> dict:
     """Validate the model reply into {explanation, template, changes, unsupported}."""
     data = _extract_json(raw)
@@ -175,7 +189,7 @@ def _coerce(raw: str, base: ClipTemplate) -> dict:
         raise ValueError("missing template object")
 
     subtitles = SubtitleSpec(**t["subtitles"]) if t.get("subtitles") else base.subtitles
-    layout = LayoutSpec(**t["layout"]) if t.get("layout") else base.layout
+    layout = LayoutSpec(**_normalize_layout(t["layout"])) if t.get("layout") else base.layout
 
     # Optional v2 specs: present-and-dict → set, explicit null → disable,
     # key absent → keep what the draft already had.

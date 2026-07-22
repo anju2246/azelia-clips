@@ -17,6 +17,9 @@ interface LiveProcessingWidgetProps {
   onPause?: () => void;
   onResume?: () => void;
   onAwaitingBrief?: () => void;
+  onAwaitingFraming?: () => void;
+  /** Drop the widget without touching the job — for jobs already finished. */
+  onDismiss?: () => void;
 }
 
 export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
@@ -26,6 +29,8 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
   onPause,
   onResume,
   onAwaitingBrief,
+  onAwaitingFraming,
+  onDismiss,
 }) => {
   const [job, setJob] = useState<JobResponse | null>(null);
   const [wsStatus, setWsStatus] = useState<
@@ -33,14 +38,19 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
   >("connecting");
   const wsRef = useRef<WebSocket | null>(null);
   const briefFiredRef = useRef(false);
+  const framingFiredRef = useRef(false);
   const completedFiredRef = useRef(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Fire the brief gate once when the job parks at awaiting_brief.
+  // Fire each gate once when the job parks on it.
   const maybeFireBrief = (status?: string) => {
     if (status === "awaiting_brief" && !briefFiredRef.current) {
       briefFiredRef.current = true;
       onAwaitingBrief?.();
+    }
+    if (status === "awaiting_framing" && !framingFiredRef.current) {
+      framingFiredRef.current = true;
+      onAwaitingFraming?.();
     }
   };
 
@@ -151,7 +161,9 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
   }
 
   const isCompleted = job.status === "completed";
-  const isError = job.status === "error";
+  // The store writes `failed`; the API enum calls it `error`. Both are terminal,
+  // and treating only one as such leaves the widget spinning forever.
+  const isError = job.status === "error" || job.status === "failed";
   const progressPercent = job.progress || 0;
 
   return (
@@ -257,7 +269,7 @@ export const LiveProcessingWidget: React.FC<LiveProcessingWidgetProps> = ({
             </a>
           ) : isError ? (
             <button
-              onClick={onCancel}
+              onClick={onDismiss ?? onCancel}
               className="px-6 py-2.5 bg-zinc-800 hover:bg-zinc-700 text-white rounded-xl font-medium transition-colors"
             >
               Back to Upload

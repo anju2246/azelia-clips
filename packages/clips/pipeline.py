@@ -19,6 +19,7 @@ from rich.console import Console
 from rich.table import Table
 
 from packages.core.utils import run_ffmpeg, validate_video
+from packages.clips.templates.layout import DEFAULT_SAFE_ZONE_MULT
 
 console = Console()
 
@@ -113,10 +114,16 @@ class BatchProcessor:
         user_id: str | None = None, # NEW: User ID for telemetry reporting
         review_brief: bool | None = None, # NEW: per-job override for the brief gate (None = user setting)
         template_id: str | None = None, # NEW: clip template to apply (None = profile default)
+        safe_zone_mult: float | None = None, # NEW: per-episode close-up tightness (None = default 2.5)
+        framing_offset: tuple[float, float] | None = None, # NEW: per-episode crop nudge (x, y)
     ):
         from packages.core.config import settings
         self.base_path = Path(external_drive_path) if external_drive_path else settings.podcast_dir
         self.template_id = template_id
+        # Close-up tightness, chosen per episode in the framing gate. None keeps
+        # the automatic head+shoulders framing.
+        self.safe_zone_mult = float(safe_zone_mult) if safe_zone_mult else DEFAULT_SAFE_ZONE_MULT
+        self.framing_offset = tuple(framing_offset) if framing_offset else (0.0, 0.0)
         self.clips_per_episode = clips_per_episode
         self.min_duration = min_duration
         self.max_duration = max_duration
@@ -322,10 +329,18 @@ class BatchProcessor:
                         f"Could not obtain a transcript for {ep_id_str}: "
                         "no Supabase row, no local transcript.json, and Whisper returned nothing."
                     )
-                # Save transcript for future use
-                transcript_out = episode.episode_folder / "transcript.json"
+
+        # Persist the transcript whatever its source (Supabase included). The brief
+        # reads transcript.json to show each clip's words and to trim by text; without
+        # it the brief cards come up empty and trim_to_text silently no-ops.
+        transcript_out = episode.episode_folder / "transcript.json"
+        if not transcript_out.exists():
+            try:
                 transcript.save(transcript_out)
-        
+            except Exception as e:
+                console.print(f"[yellow]   Could not persist transcript.json: {e}[/yellow]")
+
+
         if store and job_id:
             store.update_progress(job_id, 33, "Fase 4: Preparando curación por IA...")
             
@@ -714,6 +729,9 @@ class BatchProcessor:
                     layout_type=plan.layout_type,
                     wide_height_ratio=plan.wide_height_ratio,
                     regions=getattr(plan, "regions", None),
+                    safe_zone_mult=self.safe_zone_mult,
+                    offset_x=self.framing_offset[0],
+                    offset_y=self.framing_offset[1],
                 )
 
                 # 3d. Generate subtitles from the template's style

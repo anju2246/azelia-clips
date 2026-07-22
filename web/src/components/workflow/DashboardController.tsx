@@ -5,6 +5,7 @@ import { LibraryView } from "./LibraryView";
 import { LiveProcessingWidget } from "./LiveProcessingWidget";
 import { SpeakerIdentificationModal } from "./SpeakerIdentificationModal";
 import { BriefChatModal } from "./BriefChatModal";
+import { FramingGateModal } from "./FramingGateModal";
 import { MissingApiKeyModal } from "./MissingApiKeyModal";
 import { YouTubeNudge } from "../analytics/YouTubeNudge";
 import { CreditsStatusBanner } from "./CreditsStatusBanner";
@@ -58,6 +59,9 @@ export const DashboardController: React.FC = () => {
   // Brief gate — modal shown when a job parks at awaiting_brief (after
   // curation, before the heavy render). Set by LiveProcessingWidget.
   const [briefJobId, setBriefJobId] = useState<string | null>(null);
+  // Framing gate — second stop, only for single-shot templates, where the
+  // close-up crop gets sized for this episode before the heavy render.
+  const [framingJobId, setFramingJobId] = useState<string | null>(null);
 
   // Fetch YouTube connection status so the Pro card doesn't nudge
   // users who already connected during onboarding.
@@ -153,10 +157,14 @@ export const DashboardController: React.FC = () => {
             j.status === "pending" ||
             j.status === "resuming" ||
             j.status === "paused" ||
-            j.status === "awaiting_brief",
+            j.status === "awaiting_brief" ||
+            j.status === "awaiting_framing",
         );
         if (cancelled) return;
-        if (running?.status === "awaiting_brief") {
+        if (
+          running?.status === "awaiting_brief" ||
+          running?.status === "awaiting_framing"
+        ) {
           // Re-track the job so LiveProcessingWidget mounts and re-opens the brief.
           setAndPersistJobId(running.id);
           setOrphanJob(null);
@@ -307,6 +315,7 @@ export const DashboardController: React.FC = () => {
         <LiveProcessingWidget
           jobId={activeJobId}
           onAwaitingBrief={() => setBriefJobId(activeJobId)}
+          onAwaitingFraming={() => setFramingJobId(activeJobId)}
           onJobComplete={() => {
             // Keep showing so user can click "Review Clips"
           }}
@@ -460,6 +469,14 @@ export const DashboardController: React.FC = () => {
           jobId={briefJobId}
           onClose={() => setBriefJobId(null)}
           onApproved={() => setBriefJobId(null)}
+        />
+      )}
+
+      {framingJobId && (
+        <FramingGateModal
+          jobId={framingJobId}
+          onClose={() => setFramingJobId(null)}
+          onConfirmed={() => setFramingJobId(null)}
         />
       )}
     </div>

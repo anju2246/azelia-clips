@@ -292,7 +292,8 @@ class JobStore:
     def cancel_job(self, job_id: str) -> bool:
         """Mark a job as cancelled. Returns True if a row was updated.
 
-        Accepts cancel from any non-terminal state (pending/processing/paused/resuming).
+        Accepts cancel from any non-terminal state
+        (pending/processing/paused/resuming/awaiting_brief/awaiting_framing).
         Pipeline polls status between clips and exits cleanly when it sees 'cancelled'.
         """
         now = datetime.utcnow().isoformat()
@@ -303,7 +304,7 @@ class JobStore:
                     status = 'cancelled',
                     message = '⛔ Cancelado por el usuario',
                     updated_at = ?
-                WHERE job_id = ? AND status IN ('pending','processing','paused','resuming')
+                WHERE job_id = ? AND status IN ('pending','processing','paused','resuming','awaiting_brief','awaiting_framing')
                 """,
                 (now, job_id),
             )

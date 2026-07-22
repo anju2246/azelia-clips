@@ -94,6 +94,11 @@ class LayoutSpec(BaseModel):
     def _regions_present_for_regions_type(cls, v, info):
         if info.data.get("type") == "regions" and not v:
             raise ValueError("type='regions' requires at least one region")
+        # Regions left over from an earlier `type='regions'` edit are dead weight:
+        # every consumer keys off `type`, so a stale list only makes the stored
+        # template read as something it does not render. Drop it at the boundary.
+        if info.data.get("type") in ("split", "fullscreen") and v:
+            return []
         return v
 
 
