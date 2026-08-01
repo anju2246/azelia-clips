@@ -60,7 +60,11 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 echo "[fetching] git fetch origin main"
-git fetch origin main --tags
+# --force on tags: a tag that moved upstream (a re-cut release, a corrected tag)
+# is otherwise rejected with "would clobber existing tag", git exits 1, and
+# `set -e` aborts the whole update before it starts. We hard-reset to
+# origin/main below anyway, so upstream is always the authority on tags too.
+git fetch origin main --tags --force
 
 CURRENT_SHA="$(git rev-parse HEAD)"
 LATEST_SHA="$(git rev-parse origin/main)"
