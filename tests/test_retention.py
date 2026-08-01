@@ -14,7 +14,7 @@ from packages.core.services.youtube_historical import (
     RETENTION_DROP_THRESHOLD,
 )
 
-CURVE_JSON = Path(__file__).parent / "fixtures" / "youtube" / "retention_curve_real.json"
+CURVE_JSON = Path(__file__).parent / "fixtures" / "youtube" / "retention_curve_synthetic.json"
 
 
 @pytest.fixture

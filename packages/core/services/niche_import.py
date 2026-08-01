@@ -54,7 +54,7 @@ def _baselines_path(signals_path: Path) -> Path:
     """Deriva la ruta de baselines hermana reemplazando 'signals'→'baselines'.
 
     `ic_signals_ready.json` → `ic_baselines_ready.json`
-    `ic_signals_slice.json` → `ic_baselines_slice.json`
+    `ic_signals_synthetic.json` → `ic_baselines_synthetic.json`
     """
     return signals_path.with_name(signals_path.name.replace("signals", "baselines"))
 

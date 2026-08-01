@@ -9,7 +9,7 @@ import server.routes.analytics as analytics
 from packages.core.services.niche_import import import_niche_signals
 
 FIXT = Path(__file__).parent / "fixtures" / "niche"
-SIGNALS = FIXT / "ic_signals_slice.json"
+SIGNALS = FIXT / "ic_signals_synthetic.json"
 
 
 @pytest.fixture

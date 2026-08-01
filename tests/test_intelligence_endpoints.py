@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 import server.routes.analytics as analytics
 from packages.core.services.niche_import import import_niche_signals
 
-SIGNALS = Path(__file__).parent / "fixtures" / "niche" / "ic_signals_slice.json"
+SIGNALS = Path(__file__).parent / "fixtures" / "niche" / "ic_signals_synthetic.json"
 
 
 @pytest.fixture

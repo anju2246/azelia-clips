@@ -4,6 +4,31 @@ All notable changes to Azelia Clips. This project follows [Keep a Changelog](htt
 
 ---
 
+## [Unreleased]
+
+Work landed on `main` since v0.1.0. Not yet tagged or released.
+
+### Added
+- **Multi-profile workspaces.** Each profile owns its own `data_dir`, Claude Code binary and `CLAUDE_CONFIG_DIR`, so several podcasts (or several Claude accounts) can share one install without stepping on each other. Profile bubble at the foot of the sidebar, full management under `/dashboard/profiles`, and automatic migration of the legacy single-workspace tree on first run.
+- **Clip templates.** A template is the reusable look of a clip: caption style, logo/watermark, progress bar, intro/outro bumpers and hook title. Built-in templates ship from the existing styles; custom ones live per profile under `/dashboard/templates`, are pickable per episode, and default per profile.
+- **Lego layout builder.** Drag-and-drop canvas with snapping for composing multi-region layouts (e.g. two guests side by side), backed by a pure region compositor and multi-region rendering.
+- **Template AI assistant.** Describe the change in plain text, get a diff of the full template schema, and apply it — no blind edits.
+- **Brief gate (human-in-the-loop).** The pipeline now pauses after AI curation. You review the proposed clips in a chat, one at a time, with expandable cards showing topic, reasoning and transcript, then approve before anything renders. Feedback in natural language becomes deterministic actions (drop / rescue / reorder / adjust / recurate / find new), including reliable text-based trimming clamped to the episode and an editable hook field.
+- **Clip Performance Intelligence (CPI).** Two learning layers feeding the Finder, Critic and Ranker: NICHE (signals imported from a PodFinder export into the local SQLite, never committed) and CREATOR SELF (your own YouTube retention curves, so the agents learn where your audience actually drops off). Includes an intelligence dashboard, a `zero-reach` alert for public Shorts with 0 views, and filtering to public videos only so raw/unlisted cuts never pollute the learning.
+- **Framing gate.** Confirm the close-up framing before a clip renders.
+
+### Changed
+- Curation agents receive a signal addendum with CREATOR SELF ranked ahead of NICHE hints.
+- Clip↔Short attribution moved from noisy direct matching to automatic classification of Shorts (hook / emotion / core topics).
+
+### Security
+- Post-audit hardening: column allow-listing on analytics queries, generic error responses, stricter logging.
+- `security_gate.py` gained a hard tier of forbidden paths that the fixture allow-list cannot override, closing the blind spot where a production data export could sit unnoticed under `tests/fixtures/`.
+- Test fixtures containing real PodFinder intelligence records replaced with hand-authored synthetic data; `tests/fixtures/README.md` documents the synthetic-only policy.
+- Pre-push guardrail (`scripts/install-git-hooks.sh`) blocks secrets and personal data from ever leaving the machine; `.claude/` is fully ignored.
+
+---
+
 ## [0.1.0] — 2026-05-17
 
 ### The "local-first" release

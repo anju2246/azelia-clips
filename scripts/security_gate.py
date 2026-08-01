@@ -9,12 +9,15 @@ branch of any repo. Generalized from azelia-clips' gate. Wired three ways:
 
 The gate inspects two things about the content being introduced:
   1. PATHS   — forbidden files (.env, *.db, key material, OAuth/token JSON,
-               Claude memory notes, auth state).
+               Claude memory notes, auth state). Split in two tiers: a HARD tier
+               (real-data dumps/exports/slices) that the allow-list cannot
+               override, and the normal tier that it can.
   2. CONTENT — secret-looking strings on ADDED lines (API keys, tokens,
                private keys, JWTs, DB URLs with embedded passwords).
 
 Per-project extras: if `.security-gate.json` exists in the repo root it may add
 rules:  {"forbidden_paths": [["regex","label"],...], "allow_paths": ["regex",...],
+         "always_forbidden_paths": [["regex","label"],...],
          "secret_patterns": [["regex","label"],...]}
 
 Exit codes: 0 = clean, 2 = violation(s) found, 1 = usage / internal error.
@@ -39,6 +42,21 @@ from pathlib import Path
 # ── Rules ────────────────────────────────────────────────────────────────────
 # A path is FORBIDDEN if it matches a forbidden pattern and NONE of the allow
 # patterns. Keep these in sync with the project .gitignore's "never commit" section.
+
+# Hard rules the allow-list CANNOT override. These catch production data that
+# was copied into an otherwise-allowed location (the classic leak: a real export
+# parked under tests/fixtures/, which the blanket "fixtures are synthetic" allow
+# rule would happily wave through). Naming convention is the tripwire: anything
+# named like a real dump/export/slice of live data must never be committed.
+ALWAYS_FORBIDDEN_PATH_PATTERNS: list[tuple[str, str]] = [
+    (r"(^|/)data/jobs/", "local job output (real transcripts / personal data)"),
+    (r"_ready\.json$", "production data export (*_ready.json)"),
+    (r"_export\.(json|csv)$", "production data export (*_export.*)"),
+    (r"_dump\.(json|csv|sql)$", "production data dump (*_dump.*)"),
+    (r"_real\.(json|csv)$", "file named as real data (*_real.*) — rename if synthetic"),
+    (r"_slice\.(json|csv)$", "slice of a production dataset (*_slice.*)"),
+    (r"_OLD_[0-9]{6,}\.", "dated production snapshot (*_OLD_<date>.*)"),
+]
 
 FORBIDDEN_PATH_PATTERNS: list[tuple[str, str]] = [
     (r"(^|/)\.env$|(^|/)\.env\.", ".env file (may hold secrets)"),
@@ -100,6 +118,8 @@ def _load_project_extras() -> None:
         return
     for pat, label in data.get("forbidden_paths", []):
         FORBIDDEN_PATH_PATTERNS.append((pat, f"{label} (project rule)"))
+    for pat, label in data.get("always_forbidden_paths", []):
+        ALWAYS_FORBIDDEN_PATH_PATTERNS.append((pat, f"{label} (project rule)"))
     for pat in data.get("allow_paths", []):
         ALLOW_PATH_PATTERNS.append(pat)
     for pat, label in data.get("secret_patterns", []):
@@ -123,6 +143,10 @@ def _path_is_allowed(path: str) -> bool:
 
 
 def check_path(path: str) -> list[Finding]:
+    # Hard tier first: the allow-list cannot rescue these.
+    for pat, label in ALWAYS_FORBIDDEN_PATH_PATTERNS:
+        if re.search(pat, path):
+            return [Finding(path=path, kind="path", detail=label)]
     if _path_is_allowed(path):
         return []
     out = []
@@ -219,12 +243,22 @@ def self_test() -> int:
         ".netrc",
         ".mcp.json",
         "gcp/service-account-prod.json",
+        # Hard tier: real data parked under an allow-listed path must STILL be flagged.
+        "data/jobs/abc-123/transcript.json",
+        "tests/fixtures/niche/ic_signals_ready.json",
+        "tests/fixtures/niche/ic_baselines_export.json",
+        "tests/fixtures/youtube/retention_curve_real.json",
+        "examples/analytics_dump.json",
+        "tests/fixtures/niche/ic_signals_OLD_20260609.json",
+        "tests/fixtures/niche/ic_signals_slice.json",
     ]
     good_paths = [
         ".env.example",
         "web/.env.sample",
         "examples/sample.json",
         "tests/fixtures/brief/curation.json",
+        "tests/fixtures/niche/ic_signals_synthetic.json",
+        "tests/fixtures/youtube/retention_curve_synthetic.json",
         "src/pipeline.py",
         "server/routes/clips.py",
         ".claude/hooks/security_gate.py",
