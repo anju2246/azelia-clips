@@ -4,9 +4,11 @@ All notable changes to Azelia Clips. This project follows [Keep a Changelog](htt
 
 ---
 
-## [Unreleased]
+## [0.2.0] — 2026-08-01
 
-Work landed on `main` since v0.1.0. Not yet tagged or released.
+### The "make it yours" release
+
+Everything between the transcript and the rendered clip is now yours to shape: a reusable look per clip (templates), a layout you compose by hand (Lego builder), a conversation where you approve every cut before anything renders (brief gate), and agents that learn from how your own clips actually performed (CPI). Plus multiple workspaces, so one install serves several podcasts.
 
 ### Added
 - **Multi-profile workspaces.** Each profile owns its own `data_dir`, Claude Code binary and `CLAUDE_CONFIG_DIR`, so several podcasts (or several Claude accounts) can share one install without stepping on each other. Profile bubble at the foot of the sidebar, full management under `/dashboard/profiles`, and automatic migration of the legacy single-workspace tree on first run.
