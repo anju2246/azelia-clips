@@ -2005,10 +2005,15 @@ async def sync_historical_data(
                 job_id=job_id,
             )
 
+            snap = result.get("creator_self") or {}
             store.complete_job(
                 job_id,
                 clips_generated=result.get("processed", 0),
-                message=f"✅ {result.get('processed', 0)} videos analizados",
+                message=(
+                    f"✅ {result.get('metrics_refreshed', 0)} shorts con métricas, "
+                    f"{result.get('processed', 0)} etiquetados, "
+                    f"{snap.get('signals_written', 0)} señales creator_self"
+                ),
             )
         except Exception as e:
             import logging as _logging

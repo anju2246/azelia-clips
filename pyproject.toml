@@ -57,6 +57,10 @@ asr = [
 asr-mlx = [
     "mlx-whisper>=0.4.0",
 ]
+# Parakeet TDT 0.6B v3 (ONNX int8) para el fallback de Shorts propios en Linux.
+asr-nvidia = [
+    "onnx-asr[cpu,hub]>=0.10.0",
+]
 vision = [
     "facenet-pytorch>=2.5.0",
     "opencv-python>=4.8.0",
@@ -64,7 +68,7 @@ vision = [
     "pyannote.audio>=3.1.0",
 ]
 all = [
-    "azelia-clips[asr,asr-mlx,vision,youtube]",
+    "azelia-clips[asr,asr-mlx,asr-nvidia,vision,youtube]",
 ]
 dev = [
     "pytest>=7.0.0",
