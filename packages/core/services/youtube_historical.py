@@ -2,19 +2,22 @@ import asyncio
 import json
 import logging
 import os
-import sqlite3
+import shutil
 import tempfile
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Optional, Tuple
 
 import googleapiclient.discovery
 import isodate
 from google.oauth2.credentials import Credentials
 
-# NOTE: TelemetryService removed in local-first MVP (v0.1.0).
-# This module is currently unused — YouTube historical sync returns 501.
-# Re-enable in v0.1.1 with local-only persistence (no central telemetry).
-from packages.core.llm_provider import get_llm  # noqa: F401
+# El sync histórico SÍ está cableado: POST /analytics/youtube/historical/sync
+# llama a YouTubeHistoricalExtractor. No devuelve 501. El comentario viejo
+# que decía "unused / 501" estaba desactualizado. Lo que impedía correrlo
+# fuera del Mac era el fallback MLX Whisper tiny, que solo existe en Apple
+# Silicon. El fallback ahora es NVIDIA Parakeet en Linux.
+from packages.core.llm_provider import get_llm
 
 try:
     from youtube_transcript_api import YouTubeTranscriptApi
@@ -105,13 +108,136 @@ def store_retention_curve(
     return drop_off
 
 
+def labeling_available() -> tuple[bool, str]:
+    """Hay un LLM para etiquetar transcripts. Si no, no se inventan etiquetas."""
+    from packages.core.config import settings as _settings
+
+    if (getattr(_settings, "anthropic_api_key", "") or "").strip():
+        return True, ""
+    try:
+        get_llm()
+    except Exception as e:
+        return False, (
+            "Etiquetar transcripts requiere ANTHROPIC_API_KEY o Claude Code autenticado. "
+            f"({e})"
+        )
+    return True, ""
+
+
+def _metric_or_none(analytics: dict, key: str):
+    """Valor real de Analytics, o None si la API no lo trajo. None no pisa
+    un número ya guardado y no se sustituye por un cero inventado."""
+    if not analytics or key not in analytics or analytics[key] is None:
+        return None
+    return analytics[key]
+
+
+def core_topics_for_storage(topics) -> str:
+    """CSV, el formato que lee creator_self. El JSON completo queda en llm_analysis."""
+    if isinstance(topics, str):
+        return topics.strip()
+    if not isinstance(topics, list):
+        return ""
+    return ",".join(str(topic).strip() for topic in topics if str(topic).strip())
+
+
+def upsert_short_performance(conn, user_id: str, record: dict) -> None:
+    """Guarda vistas, likes, comentarios y retención real. No borra una
+    etiqueta previa ni una retención ya medida si este pase no la trajo."""
+    analytics = record.get("analytics") or {}
+    conn.execute(
+        """
+        INSERT INTO youtube_shorts
+            (video_id, user_id, title, published_at, duration_seconds,
+             view_count, like_count, comment_count, privacy_status,
+             average_view_duration, average_view_percentage,
+             shares_count, subscribers_gained, subscribers_lost,
+             estimated_minutes_watched, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+        ON CONFLICT(video_id, user_id) DO UPDATE SET
+            title = excluded.title,
+            published_at = COALESCE(excluded.published_at, youtube_shorts.published_at),
+            duration_seconds = excluded.duration_seconds,
+            view_count = excluded.view_count,
+            like_count = excluded.like_count,
+            comment_count = excluded.comment_count,
+            privacy_status = COALESCE(excluded.privacy_status, youtube_shorts.privacy_status),
+            average_view_duration = COALESCE(excluded.average_view_duration, youtube_shorts.average_view_duration),
+            average_view_percentage = COALESCE(excluded.average_view_percentage, youtube_shorts.average_view_percentage),
+            shares_count = COALESCE(excluded.shares_count, youtube_shorts.shares_count),
+            subscribers_gained = COALESCE(excluded.subscribers_gained, youtube_shorts.subscribers_gained),
+            subscribers_lost = COALESCE(excluded.subscribers_lost, youtube_shorts.subscribers_lost),
+            estimated_minutes_watched = COALESCE(excluded.estimated_minutes_watched, youtube_shorts.estimated_minutes_watched),
+            synced_at = excluded.synced_at
+        """,
+        (
+            record["video_id"],
+            user_id,
+            record.get("title") or "",
+            record.get("published_at") or None,
+            record.get("duration_seconds"),
+            int(record.get("views") or 0),
+            int(record.get("likes") or 0),
+            int(record.get("comments") or 0),
+            record.get("privacy_status"),
+            _metric_or_none(analytics, "averageViewDuration"),
+            _metric_or_none(analytics, "averageViewPercentage"),
+            _metric_or_none(analytics, "shares"),
+            _metric_or_none(analytics, "subscribersGained"),
+            _metric_or_none(analytics, "subscribersLost"),
+            _metric_or_none(analytics, "estimatedMinutesWatched"),
+        ),
+    )
+
+
+def store_short_labels(conn, user_id: str, video_id: str, analysis: dict) -> None:
+    conn.execute(
+        """
+        UPDATE youtube_shorts
+        SET hook_type = ?, emotional_charge = ?, core_topics = ?, llm_analysis = ?
+        WHERE video_id = ? AND user_id = ?
+        """,
+        (
+            analysis.get("hook_type"),
+            analysis.get("emotional_charge"),
+            core_topics_for_storage(analysis.get("core_topics")),
+            json.dumps(analysis, ensure_ascii=False),
+            video_id,
+            user_id,
+        ),
+    )
+
+
+def pending_label_ids(conn, user_id: str, video_ids: list[str]) -> list[str]:
+    """Shorts que todavía no tienen análisis. Re-correr el sync no vuelve a
+    cobrar el LLM por un short ya etiquetado."""
+    if not video_ids:
+        return []
+    placeholders = ",".join(["?"] * len(video_ids))
+    rows = conn.execute(
+        f"""
+        SELECT video_id FROM youtube_shorts
+        WHERE user_id=? AND video_id IN ({placeholders})
+          AND llm_analysis IS NOT NULL AND llm_analysis != ''
+        """,
+        (user_id, *video_ids),
+    ).fetchall()
+    done = {row[0] for row in rows}
+    return [video_id for video_id in video_ids if video_id not in done]
+
+
+def snapshot_path_for(db_path: str, user_id: str) -> str:
+    safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in (user_id or "local"))[:80]
+    return os.path.join(os.path.dirname(os.path.abspath(db_path)), f"creator_self.{safe or 'local'}.json")
+
+
 class YouTubeHistoricalExtractor:
     """
-    Analyzes historical YouTube Shorts to cold-start the Collective Intelligence Dashboard.
-    Uses youtube_transcript_api with yt-dlp + mlx-whisper as fallback.
+    Analiza los Shorts históricos del propio canal y refresca el snapshot
+    creator_self con vistas, likes, comentarios y average view percentage reales.
+    Captions de YouTube primero; si faltan, NVIDIA Parakeet en Linux.
     """
 
-    WHISPER_MODEL = "mlx-community/whisper-tiny"
     # Path to local SQLite DB
     YT_DB_PATH = os.path.join(os.path.dirname(__file__), "..", "..", "..", "server", "data", "youtube_shorts.db")
 
@@ -127,7 +253,9 @@ class YouTubeHistoricalExtractor:
         anthropic_model: Optional[str] = None,
         output_language: str = "English",
     ):
-        self.llm = get_llm()
+        # El LLM se resuelve al etiquetar. Construirlo aquí tumbaba el sync
+        # entero en una máquina sin Claude Code ni ANTHROPIC_API_KEY, antes
+        # siquiera de guardar las métricas reales del canal.
         self.anthropic_model = anthropic_model or self.DEFAULT_ANTHROPIC_MODEL
         # Human-readable language label (e.g. "Spanish", "Japanese"). Used in
         # the `Respond in X` instruction at the top of the analysis prompt so
@@ -150,49 +278,50 @@ class YouTubeHistoricalExtractor:
                 logger.warning("YouTube transcript API failed for %s: %s", video_id, e)
 
         result = await self._transcribe_fallback(video_id)
-        return result, "whisper_fallback"
+        return result, "nvidia_parakeet"
 
     async def _transcribe_fallback(self, video_id: str) -> Optional[str]:
-        """Downloads audio with yt-dlp and transcribes with mlx-whisper."""
-        try:
-            import mlx_whisper
-        except ImportError:
-            logger.error("mlx-whisper not installed — cannot use whisper fallback. Install with: pip install 'azelia-clips[asr-mlx]'")
-            return None
+        """Baja el audio con yt-dlp y lo transcribe con NVIDIA Parakeet (Linux)."""
+        from packages.core.services.nvidia_asr import transcribe_wav
 
-        temp_dir = tempfile.mkdtemp()
-        output_path = os.path.join(temp_dir, f"{video_id}.mp3")
+        temp_dir = tempfile.mkdtemp(prefix="azelia_parakeet_")
+        outtmpl = os.path.join(temp_dir, "%(id)s.%(ext)s")
         url = f"https://www.youtube.com/watch?v={video_id}"
 
         try:
             proc = await asyncio.create_subprocess_exec(
                 "yt-dlp",
-                "--extract-audio", "--audio-format", "mp3",
-                "--audio-quality", "5", "--no-playlist",
-                "--quiet", "--no-warnings",
-                "-o", output_path, url,
+                "-x",
+                "--audio-format",
+                "wav",
+                "--postprocessor-args",
+                "ffmpeg:-ar 16000 -ac 1",
+                "--no-playlist",
+                "--quiet",
+                "--no-warnings",
+                "-o",
+                outtmpl,
+                url,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
             _, stderr = await proc.communicate()
-
-            if proc.returncode != 0 or not os.path.exists(output_path):
+            wavs = [
+                os.path.join(temp_dir, name)
+                for name in os.listdir(temp_dir)
+                if name.lower().endswith(".wav")
+            ]
+            if proc.returncode != 0 or not wavs:
                 logger.error("yt-dlp failed for %s: %s", video_id, stderr.decode()[:200])
                 return None
 
-            result = mlx_whisper.transcribe(
-                output_path, path_or_hf_repo=self.WHISPER_MODEL, verbose=False
-            )
-            return result.get("text", "").strip() or None
+            return await asyncio.to_thread(transcribe_wav, wavs[0])
 
         except Exception as e:
-            logger.error("Fallback transcription error for %s: %s", video_id, e)
+            logger.error("NVIDIA Parakeet fallback failed for %s: %s", video_id, e)
             return None
         finally:
-            if os.path.exists(output_path):
-                os.remove(output_path)
-            if os.path.exists(temp_dir):
-                os.rmdir(temp_dir)
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
     async def fetch_youtube_analytics(
         self, creds: Credentials, channel_id: str, video_ids: list[str]
@@ -327,6 +456,28 @@ class YouTubeHistoricalExtractor:
 
         return await asyncio.to_thread(_run)
 
+    async def _complete(self, system_prompt: str, user_prompt: str) -> str:
+        """Etiqueta con el modelo histórico si hay clave de Anthropic; si no,
+        con el LLM ya configurado (Claude Code). Sin ninguno, no inventa la etiqueta."""
+        from packages.core.config import settings as _settings
+
+        if (getattr(_settings, "anthropic_api_key", "") or "").strip():
+            return await self._call_anthropic(system_prompt, user_prompt, temperature=0.1)
+        llm = get_llm()
+        return await asyncio.to_thread(llm.chat, system_prompt, user_prompt, 0.1)
+
+    def _open_shorts_db(self):
+        """Abre la SQLite del canal y aplica las migraciones de analytics."""
+        from server.routes import analytics as analytics_routes
+
+        target = os.path.abspath(self.YT_DB_PATH)
+        previous = analytics_routes.YT_DB_PATH
+        analytics_routes.YT_DB_PATH = Path(target)
+        try:
+            return analytics_routes._get_yt_db()
+        finally:
+            analytics_routes.YT_DB_PATH = previous
+
     async def analyze_video(self, video: dict) -> Optional[dict]:
         """Fetches transcript and prompts LLM for IC analysis (Stage 1: Structural Extraction)."""
         video_id = video.get("video_id")
@@ -395,7 +546,7 @@ no prose):
         user_prompt = f"Original Title: {title}{metrics_context}\n\nTRANSCRIPT:\n{transcript}"
 
         try:
-            result_json = await self._call_anthropic(system_prompt, user_prompt, temperature=0.1)
+            result_json = await self._complete(system_prompt, user_prompt)
 
             # Strip markdown fences if present
             if result_json.startswith("```"):
@@ -492,7 +643,7 @@ no prose):
         for i in range(0, len(vid_ids), 50):
             batch = vid_ids[i:i+50]
             stats_response = youtube.videos().list(
-                part="statistics,snippet,contentDetails", id=",".join(batch)
+                part="statistics,snippet,contentDetails,status", id=",".join(batch)
             ).execute()
 
             for s in stats_response.get("items", []):
@@ -500,6 +651,7 @@ no prose):
                     "title": s["snippet"]["title"],
                     "duration": s["contentDetails"]["duration"],
                     "published_at": s["snippet"].get("publishedAt", ""),
+                    "privacy_status": (s.get("status") or {}).get("privacyStatus"),
                     "metrics": {
                         "views": int(s["statistics"].get("viewCount", 0)),
                         "likes": int(s["statistics"].get("likeCount", 0)),
@@ -518,126 +670,101 @@ no prose):
 
         _report(15, f"🎬 {len(short_ids)} shorts detectados. Obteniendo analíticas de YouTube...")
         analytics_map = await self.fetch_youtube_analytics(creds, channel_id, short_ids)
-        _report(25, "📊 Analíticas obtenidas. Filtrando shorts ya analizados...")
+        _report(25, "📊 Analíticas obtenidas. Guardando métricas reales...")
 
-        # Skip shorts that already have an LLM analysis in our local SQLite —
-        # re-running historical sync should NEVER re-bill the creator for
-        # content we already processed.
-        try:
-            _abspath = os.path.abspath(self.YT_DB_PATH)
-            _c = sqlite3.connect(_abspath)
-            placeholders = ",".join(["?"] * len(short_ids)) if short_ids else ""
-            if placeholders:
-                _rows = _c.execute(
-                    f"SELECT video_id FROM youtube_shorts WHERE user_id=? AND video_id IN ({placeholders}) AND llm_analysis IS NOT NULL AND llm_analysis != ''",
-                    (user_id, *short_ids),
-                ).fetchall()
-                _analyzed = {r[0] for r in _rows}
-            else:
-                _analyzed = set()
-            _c.close()
-            if _analyzed:
-                short_ids = [v for v in short_ids if v not in _analyzed]
-                _report(26, f"⏭️  Saltando {len(_analyzed)} shorts ya analizados. Quedan {len(short_ids)}.")
-        except Exception as _filter_err:
-            logger.warning("Could not filter already-analyzed shorts: %s", _filter_err)
-
-        # Set total in JobStore for accurate percentage
-        if _store and job_id:
-            _store.set_total_clips(job_id, len(short_ids))
-
-        # ─── Process each short ───
-        processed_count = 0
-        failed_count = 0
         db_path = os.path.abspath(self.YT_DB_PATH)
+        conn = self._open_shorts_db()
+        try:
+            for v_id in short_ids:
+                stat_data = stats_map[v_id]
+                duration_delta = isodate.parse_duration(stat_data["duration"])
+                upsert_short_performance(conn, user_id, {
+                    "video_id": v_id,
+                    "title": stat_data["title"],
+                    "published_at": stat_data.get("published_at") or None,
+                    "duration_seconds": int(duration_delta.total_seconds()),
+                    "privacy_status": stat_data.get("privacy_status"),
+                    "views": stat_data["metrics"].get("views", 0),
+                    "likes": stat_data["metrics"].get("likes", 0),
+                    "comments": stat_data["metrics"].get("comments", 0),
+                    "analytics": analytics_map.get(v_id, {}),
+                })
+                existing_curve = conn.execute(
+                    "SELECT 1 FROM retention_curves WHERE video_id=? AND user_id=?",
+                    (v_id, user_id),
+                ).fetchone()
+                if existing_curve:
+                    continue
+                curve = await self.fetch_retention_curve(creds, channel_id, v_id)
+                if curve:
+                    store_retention_curve(conn, v_id, curve, user_id=user_id)
+            conn.commit()
 
-        for v_id in short_ids:
-            if v_id not in stats_map:
-                continue
+            # Las métricas se refrescan siempre. El LLM solo corre en shorts
+            # sin etiqueta, para no volver a cobrar lo ya analizado.
+            to_label = pending_label_ids(conn, user_id, short_ids)
+            already = len(short_ids) - len(to_label)
+            if already:
+                _report(26, f"⏭️  {already} shorts ya etiquetados conservan su análisis. Métricas actualizadas.")
 
-            stat_data = stats_map[v_id]
-            duration_delta = isodate.parse_duration(stat_data["duration"])
-            analytics_data = analytics_map.get(v_id, {})
+            can_label, label_reason = labeling_available()
+            if not can_label:
+                logger.warning("Historical labels skipped: %s", label_reason)
+                _report(40, label_reason)
 
-            full_vid_data = {
-                "video_id": v_id,
-                "title": stat_data["title"],
-                "metrics": stat_data["metrics"],
-                "analytics": analytics_data,
-            }
+            if _store and job_id:
+                _store.set_total_clips(job_id, len(to_label))
 
-            # Report per-video progress (25% to 95% range)
-            video_progress = 25 + int((processed_count + failed_count) / max(len(short_ids), 1) * 70)
-            _report(video_progress, f"🧠 Analizando {processed_count + failed_count + 1}/{len(short_ids)}: {stat_data['title'][:40]}...")
+            processed_count = 0
+            failed_count = 0
+            if can_label:
+                for index, v_id in enumerate(to_label):
+                    stat_data = stats_map[v_id]
+                    analytics_data = analytics_map.get(v_id, {})
+                    full_vid_data = {
+                        "video_id": v_id,
+                        "title": stat_data["title"],
+                        "metrics": stat_data["metrics"],
+                        "analytics": analytics_data,
+                    }
+                    video_progress = 25 + int(index / max(len(to_label), 1) * 65)
+                    _report(
+                        video_progress,
+                        f"🧠 Analizando {index + 1}/{len(to_label)}: {stat_data['title'][:40]}...",
+                    )
+                    result = await self.analyze_video(full_vid_data)
+                    if not result:
+                        failed_count += 1
+                        continue
+                    try:
+                        store_short_labels(conn, user_id, v_id, result["analysis"])
+                        conn.commit()
+                        processed_count += 1
+                        logger.info("Stored labels for %s", v_id)
+                    except Exception as e:
+                        failed_count += 1
+                        logger.error("Failed to store labels for %s: %s", v_id, e)
 
-            result = await self.analyze_video(full_vid_data)
-            if not result:
-                failed_count += 1
-                continue
+            from packages.core.services.creator_self import refresh_creator_self_snapshot
 
-            analysis = result["analysis"]
-            metrics = result["performance"]
-            vid_analytics = result.get("analytics", {})
-
-            # ─── Store in local SQLite (Local Intelligence) ───
-            try:
-                conn = sqlite3.connect(db_path)
-                conn.execute("""
-                    INSERT INTO youtube_shorts
-                        (video_id, user_id, title, duration_seconds,
-                         view_count, like_count, comment_count,
-                         average_view_duration, average_view_percentage,
-                         shares_count, subscribers_gained, subscribers_lost,
-                         estimated_minutes_watched,
-                         hook_type, emotional_charge, core_topics, llm_analysis,
-                         synced_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
-                    ON CONFLICT(video_id, user_id) DO UPDATE SET
-                        average_view_duration = excluded.average_view_duration,
-                        average_view_percentage = excluded.average_view_percentage,
-                        shares_count = excluded.shares_count,
-                        subscribers_gained = excluded.subscribers_gained,
-                        subscribers_lost = excluded.subscribers_lost,
-                        estimated_minutes_watched = excluded.estimated_minutes_watched,
-                        hook_type = excluded.hook_type,
-                        emotional_charge = excluded.emotional_charge,
-                        core_topics = excluded.core_topics,
-                        llm_analysis = excluded.llm_analysis,
-                        synced_at = excluded.synced_at
-                """, (
-                    v_id,
-                    user_id,
-                    stat_data["title"],
-                    int(duration_delta.total_seconds()),
-                    metrics.get("views", 0),
-                    metrics.get("likes", 0),
-                    metrics.get("comments", 0),
-                    vid_analytics.get("averageViewDuration"),
-                    vid_analytics.get("averageViewPercentage"),
-                    vid_analytics.get("shares", 0),
-                    vid_analytics.get("subscribersGained", 0),
-                    vid_analytics.get("subscribersLost", 0),
-                    vid_analytics.get("estimatedMinutesWatched"),
-                    analysis.get("hook_type"),
-                    analysis.get("emotional_charge"),
-                    json.dumps(analysis.get("core_topics", []), ensure_ascii=False),
-                    json.dumps(analysis, ensure_ascii=False),
-                ))
-                conn.commit()
-                conn.close()
-                logger.info("✅ Stored analysis for %s in local DB", v_id)
-            except Exception as e:
-                logger.error("Failed to store analysis for %s: %s", v_id, e)
-
-            # Telemetry removed in local-first MVP — data stays in local SQLite.
-            logger.info("Stored locally (telemetry disabled in v0.1.0).")
-
-            processed_count += 1
+            snapshot = refresh_creator_self_snapshot(
+                conn, user_id, snapshot_path=snapshot_path_for(db_path, user_id)
+            )
+        finally:
+            conn.close()
+        _report(
+            100,
+            f"✅ Snapshot creator_self: {snapshot['signals_written']} señales, "
+            f"retención en {snapshot['shorts_with_retention']} shorts",
+        )
 
         return {
             "status": "success",
             "processed": processed_count,
             "failed": failed_count,
-            "total_evaluated": len(short_ids),
+            "total_evaluated": len(to_label),
+            "metrics_refreshed": len(short_ids),
             "analytics_fetched": len(analytics_map),
+            "labeling_skipped": None if can_label else label_reason,
+            "creator_self": snapshot,
         }

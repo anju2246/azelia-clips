@@ -10,7 +10,9 @@ métrica primaria y el engagement como respaldo cuando no hay retención.
 """
 from __future__ import annotations
 
+import json
 import logging
+import os
 import sqlite3
 import statistics
 from collections import defaultdict
@@ -42,6 +44,24 @@ def _mean(xs):
     return statistics.mean(xs) if xs else None
 
 
+def parse_core_topics(raw: str | None) -> list[str]:
+    """Temas del short. Acepta la lista JSON del análisis histórico y el CSV
+    que ya guardan otras rutas. No inventa temas si el campo viene vacío."""
+    if not raw:
+        return []
+    text = str(raw).strip()
+    if not text:
+        return []
+    if text.startswith("["):
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            parsed = None
+        if isinstance(parsed, list):
+            return [str(item).strip() for item in parsed if str(item).strip()]
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
 def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local") -> dict:
     """Recalcula las señales CREATOR SELF (signal_type='creator_self') desde
     los shorts + clips confirmados. Idempotente: borra las previas del usuario
@@ -63,7 +83,7 @@ def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local
     for vid, hook, emotion, dur, avp, views, likes, comments, core_topics in rows:
         # core_topics: lista separada por comas, viene de la clasificación
         # automática del short (transcript → LLM). Atribuye tema al desempeño real.
-        topics = [t.strip() for t in (core_topics or "").split(",") if t.strip()]
+        topics = parse_core_topics(core_topics)
         recs.append({
             "hook_type": hook,
             "emotional_charge": emotion,
@@ -136,3 +156,68 @@ def compute_creator_self_signals(conn: sqlite3.Connection, user_id: str = "local
 
     conn.commit()
     return {"written": written, "median_retention": median_ret}
+
+
+def refresh_creator_self_snapshot(
+    conn: sqlite3.Connection,
+    user_id: str = "local",
+    snapshot_path: str | None = None,
+) -> dict:
+    """Reescribe las señales creator_self desde los shorts guardados y, si se
+    pide, deja un JSON al lado. Cada número sale de la base: no se rellena
+    retención ni views que YouTube no haya devuelto.
+    """
+    computed = compute_creator_self_signals(conn, user_id)
+    signal_rows = conn.execute(
+        """
+        SELECT hook_type, emotional_charge, duration_bucket, topic_tag,
+               performance_premium, confidence, sample_size, avg_retention_pct, period
+        FROM creator_signals
+        WHERE user_id=? AND signal_type='creator_self'
+        ORDER BY performance_premium DESC, sample_size DESC
+        """,
+        (user_id,),
+    ).fetchall()
+    coverage = conn.execute(
+        """
+        SELECT
+            COUNT(*),
+            SUM(CASE WHEN average_view_percentage IS NOT NULL THEN 1 ELSE 0 END),
+            SUM(CASE WHEN hook_type IS NOT NULL AND hook_type != '' THEN 1 ELSE 0 END)
+        FROM youtube_shorts
+        WHERE user_id=? AND (privacy_status IS NULL OR privacy_status='public')
+        """,
+        (user_id,),
+    ).fetchone()
+    snapshot = {
+        "signal_type": "creator_self",
+        "user_id": user_id,
+        "refreshed_at": datetime.now(timezone.utc).isoformat(),
+        "median_retention": computed["median_retention"],
+        "signals_written": computed["written"],
+        "shorts": int(coverage[0] or 0),
+        "shorts_with_retention": int(coverage[1] or 0),
+        "shorts_labeled": int(coverage[2] or 0),
+        "signals": [
+            {
+                "hook_type": row[0],
+                "emotional_charge": row[1],
+                "duration_bucket": row[2],
+                "topic_tag": row[3],
+                "performance_premium": row[4],
+                "confidence": row[5],
+                "sample_size": row[6],
+                "avg_retention_pct": row[7],
+                "period": row[8],
+            }
+            for row in signal_rows
+        ],
+    }
+    if snapshot_path:
+        os.makedirs(os.path.dirname(snapshot_path) or ".", exist_ok=True)
+        tmp = snapshot_path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(snapshot, fh, ensure_ascii=False, indent=2)
+        os.replace(tmp, snapshot_path)
+        snapshot["snapshot_path"] = snapshot_path
+    return snapshot
